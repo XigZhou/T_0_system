@@ -1,0 +1,4 @@
+interface:
+  display_name: "China Quant Backtest"
+  short_description: "中国 A 股、Tushare、回测交付与腾讯云操作规范"
+  default_prompt: "Use $china-quant-backtest for A-share backtests, Tushare data, Chinese docs, delivery handoff, or Tencent Cloud server tasks in this workspace."

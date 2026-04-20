@@ -1,0 +1,27 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment files
+.env
+.env.*
+
+# OS/editor noise
+Thumbs.db
+.DS_Store
+
+# Runtime logs and temporary smoke outputs
+runtime_logs/
+tmp_smoke_processed/
+*.log
+
+# Large local data and generated research outputs
+data_bundle/
+research_runs/
+
