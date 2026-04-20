@@ -251,6 +251,12 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_focus_grid_v1 --exit-offsets 4,5
 ```
 
+如果你要围绕首轮胜出条件做第二轮更细的搜索，可以运行：
+
+```bash
+python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_focus_grid_v2 --exit-offsets 5
+```
+
 当前脚本会输出两类核心结果：
 
 - `grid_summary.md`

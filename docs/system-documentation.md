@@ -310,12 +310,21 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 
 | 参数 | 说明 |
 | --- | --- |
-| `--grid-preset` | 网格预设，当前支持 `buy_condition_grid_v1` 与 `buy_condition_focus_grid_v1` |
+| `--grid-preset` | 网格预设，当前支持 `buy_condition_grid_v1`、`buy_condition_focus_grid_v1` 与 `buy_condition_focus_grid_v2` |
 | `--train-start/--train-end` | 训练期 |
 | `--valid-start/--valid-end` | 验证期 |
 | `--exit-offsets` | 要测试的卖出偏移集合 |
 | `--top-k` | 训练期筛选进入验证的组合数 |
 | `--export-top-trades-k` | 导出多少个推荐组合的逐笔交易记录 |
+
+推荐用法：
+
+- `buy_condition_grid_v1`
+  粗网格，适合首次扫大方向
+- `buy_condition_focus_grid_v1`
+  围绕主板老股强趋势条件做第一轮聚焦
+- `buy_condition_focus_grid_v2`
+  围绕首轮胜出条件做第二轮精细调参
 
 ### 输出结果
 
