@@ -125,7 +125,7 @@ python scripts/build_processed_data.py
 ## 启动方式
 
 ```bash
-python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8080
+python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 ```
 
 打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。
@@ -242,6 +242,32 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 
 - `research_summary.md` 用于记录本次探索的条件与结果
 - `selected_case_trade_records.csv` 用于记录验证期优先组合的逐笔买卖明细，包含日期、买卖动作、股票代码、股票名称、价格、数量、手续费、总金额、收益率与价差
+
+### 3. 买入条件网格测试
+
+如果你要系统化搜索更稳定的买入条件，可以运行：
+
+```bash
+python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_focus_grid_v1 --exit-offsets 4,5
+```
+
+当前脚本会输出两类核心结果：
+
+- `grid_summary.md`
+  这次网格测试的总结书，包含测试范围、稳定性筛选口径、推荐条件和排行榜
+- `selected_case_trade_records.csv`
+  推荐组合的逐笔交易记录，包含买入、卖出、股票代码、股票名称、价格、数量、手续费、总金额、收益率和价差
+
+完整输出通常包括：
+
+- `grid_cases.json`
+- `train_results.csv`
+- `selected_train_cases.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `grid_summary.json`
+- `grid_summary.md`
+- `selected_case_trade_records.csv`
 
 ## 复现结果
 

@@ -292,7 +292,49 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 - `exit_offset` 不在 `2~5` 范围时会抛出 `ValueError`
 - 预设名不存在时会抛出 `ValueError`
 
-## 9. 交付校验模块
+## 9. 买入条件网格测试模块
+
+### 功能
+
+- 用网格方式搜索适合当前系统的买入条件
+- 输出稳定性排行榜
+- 自动生成总结书和交易明细文件
+
+### 入口
+
+```bash
+python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_focus_grid_v1 --exit-offsets 4,5
+```
+
+### 主要输入参数
+
+| 参数 | 说明 |
+| --- | --- |
+| `--grid-preset` | 网格预设，当前支持 `buy_condition_grid_v1` 与 `buy_condition_focus_grid_v1` |
+| `--train-start/--train-end` | 训练期 |
+| `--valid-start/--valid-end` | 验证期 |
+| `--exit-offsets` | 要测试的卖出偏移集合 |
+| `--top-k` | 训练期筛选进入验证的组合数 |
+| `--export-top-trades-k` | 导出多少个推荐组合的逐笔交易记录 |
+
+### 输出结果
+
+- `grid_cases.json`
+- `train_results.csv`
+- `selected_train_cases.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `grid_summary.json`
+- `grid_summary.md`
+- `selected_case_trade_records.csv`
+
+### 异常处理
+
+- 网格预设不存在时抛出 `ValueError`
+- 输出目录不可写时会抛出文件系统异常
+- 数据目录错误时抛出 `FileNotFoundError`
+
+## 10. 交付校验模块
 
 ### 功能
 
@@ -319,7 +361,7 @@ python scripts/verify_delivery.py
 
 - 若缺文件或 README 缺少关键章节，脚本返回非 0 退出码
 
-## 10. 推荐交付流程
+## 11. 推荐交付流程
 
 1. 更新或同步数据
 2. 重新构建 `processed_qfq/`
