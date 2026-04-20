@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,7 @@ from .expressions import (
     max_required_offset,
     parse_condition_expr,
 )
-from .models import BacktestRequest, Position
+from .models import BacktestRequest, PendingOrder, Position
 from .utils import to_float
 
 
@@ -27,6 +28,9 @@ class LoadedSymbol:
     name: str
     df: pd.DataFrame
     idx_by_date: dict[str, int]
+
+
+_SCORE_OFFSET_RE = re.compile(r"\[(\d+)\]")
 
 
 def _normalize_folder(path_text: str) -> Path:
@@ -46,16 +50,24 @@ def _validate_processed_df(df: pd.DataFrame, file_path: Path) -> None:
         raise ValueError(f"{file_path.name} trade_date must be ascending")
 
 
+def _score_required_offset(score_expression: str) -> int:
+    matches = [int(token) for token in _SCORE_OFFSET_RE.findall(str(score_expression or ""))]
+    return max(matches, default=0)
+
+
 def load_processed_folder(folder_path: str, start_date: str = "", end_date: str = "") -> tuple[list[LoadedSymbol], dict]:
     folder = _normalize_folder(folder_path)
     if not folder.exists() or not folder.is_dir():
         raise FileNotFoundError(f"processed_dir not found: {folder}")
-    files = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".csv" and p.name != "processing_manifest.csv")
+    files = sorted(
+        p
+        for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() == ".csv" and p.name != "processing_manifest.csv"
+    )
     if not files:
         raise FileNotFoundError(f"no csv found under processed_dir: {folder}")
 
     loaded: list[LoadedSymbol] = []
-    missing_required_files: list[str] = []
     for file_path in files:
         df = pd.read_csv(file_path, dtype=str, encoding="utf-8-sig")
         _validate_processed_df(df, file_path)
@@ -66,6 +78,7 @@ def load_processed_folder(folder_path: str, start_date: str = "", end_date: str 
             df = df[df["trade_date"] <= str(end_date).strip()].copy()
         if df.empty:
             continue
+
         numeric_cols = {
             "open",
             "high",
@@ -128,24 +141,36 @@ def load_processed_folder(folder_path: str, start_date: str = "", end_date: str 
                 or col.startswith(("avg5m", "avg10m", "high_", "low_", "sh_", "hs300_", "cyb_"))
                 or (col.startswith("m") and col[1:].isdigit())
             ):
-                try:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                except Exception:
-                    pass
-        for col in ["can_buy_t", "can_sell_t", "can_sell_t1", "is_suspended_t", "is_suspended_t1"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        for col in [
+            "can_buy_t",
+            "can_buy_open_t",
+            "can_buy_open_t1",
+            "can_sell_t",
+            "can_sell_t1",
+            "is_suspended_t",
+            "is_suspended_t1",
+        ]:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.lower().isin(["true", "1", "yes"])
 
         symbol = str(df.iloc[0]["symbol"]).strip()
         name = str(df.iloc[0]["name"]).strip()
-        loaded.append(LoadedSymbol(symbol=symbol, name=name, df=df.reset_index(drop=True), idx_by_date={d: i for i, d in enumerate(df["trade_date"].tolist())}))
+        loaded.append(
+            LoadedSymbol(
+                symbol=symbol,
+                name=name,
+                df=df.reset_index(drop=True),
+                idx_by_date={d: i for i, d in enumerate(df["trade_date"].tolist())},
+            )
+        )
 
     if not loaded:
         raise ValueError("no data available in selected date range")
     diagnostics = {
         "processed_dir": str(folder),
         "file_count": len(loaded),
-        "missing_required_files": missing_required_files,
     }
     return loaded, diagnostics
 
@@ -185,17 +210,47 @@ def _annualized_return(start_equity: float, end_equity: float, n_days: int) -> f
     return (end_equity / start_equity) ** (252.0 / n_days) - 1.0
 
 
+def _future_row(item: LoadedSymbol, idx: int, offset: int) -> tuple[str, pd.Series] | None:
+    future_idx = idx + int(offset)
+    if future_idx < 0 or future_idx >= len(item.df):
+        return None
+    row = item.df.iloc[future_idx]
+    return str(row["trade_date"]).strip(), row
+
+
+def _within_range(trade_date: str, start_date: str, end_date: str) -> bool:
+    if start_date and trade_date < start_date:
+        return False
+    if end_date and trade_date > end_date:
+        return False
+    return True
+
+
+def _count_holding_days(date_index: dict[str, int], start_date: str, end_date: str) -> int:
+    if start_date not in date_index or end_date not in date_index:
+        return 0
+    return max(0, date_index[end_date] - date_index[start_date])
+
+
 def run_portfolio_backtest_loaded(
     loaded: list[LoadedSymbol],
     diagnostics: dict[str, Any],
     req: BacktestRequest,
 ) -> dict[str, Any]:
+    if req.exit_offset <= req.entry_offset:
+        raise ValueError("exit_offset must be greater than entry_offset")
+
     diagnostics = dict(diagnostics)
     buy_rules = parse_condition_expr(req.buy_condition)
     score_tree, _ = compile_score_expression(req.score_expression)
-    max_offset = max_required_offset(buy_rules)
+    max_offset = max(max_required_offset(buy_rules), _score_required_offset(req.score_expression))
 
     all_dates = sorted({date for item in loaded for date in item.df["trade_date"].astype(str).tolist()})
+    signal_dates = [d for d in all_dates if _within_range(d, req.start_date, req.end_date)]
+    if not signal_dates:
+        raise ValueError("no signal dates available in selected date range")
+
+    date_index = {date: idx for idx, date in enumerate(all_dates)}
     rows_by_date: dict[str, list[tuple[LoadedSymbol, int]]] = {}
     for item in loaded:
         for date, idx in item.idx_by_date.items():
@@ -203,6 +258,7 @@ def run_portfolio_backtest_loaded(
 
     cash = float(req.initial_cash)
     holdings: dict[str, Position] = {}
+    pending_orders: dict[str, list[PendingOrder]] = {}
     trades: list[dict] = []
     picks: list[dict] = []
     daily_rows: list[dict] = []
@@ -210,27 +266,47 @@ def run_portfolio_backtest_loaded(
     realized_pnl_by_symbol: dict[str, float] = {}
     last_close_by_symbol: dict[str, float] = {}
     equity_curve: list[float] = []
+    blocked_buy_count = 0
     blocked_sell_count = 0
+    skipped_buy_cash_count = 0
+
+    simulation_start = signal_dates[0]
 
     for trade_date in all_dates:
+        if trade_date < simulation_start:
+            continue
+        if req.end_date and trade_date > req.end_date and not holdings and not pending_orders:
+            break
+
         date_rows = rows_by_date.get(trade_date, [])
         rows_map = {item.symbol: item.df.iloc[idx] for item, idx in date_rows}
 
         sold_today = 0
+        bought_today = 0
+        signal_candidates = 0
+        signal_picks = 0
+
         for symbol in list(holdings.keys()):
             pos = holdings[symbol]
+            if trade_date < pos.planned_exit_date:
+                continue
             row = rows_map.get(symbol)
             if row is None:
                 continue
+
             open_px = to_float(row.get("raw_open"))
             can_sell = bool(row.get("can_sell_t", False))
             if open_px is None:
                 can_sell = False
+
             if req.realistic_execution and not can_sell:
                 blocked_sell_count += 1
                 trades.append(
                     {
                         "trade_date": trade_date,
+                        "signal_date": pos.signal_date,
+                        "planned_entry_date": pos.planned_entry_date,
+                        "planned_exit_date": pos.planned_exit_date,
                         "symbol": symbol,
                         "name": pos.name,
                         "action": "SELL_BLOCKED",
@@ -244,8 +320,29 @@ def run_portfolio_backtest_loaded(
                     }
                 )
                 continue
+
             if open_px is None:
+                blocked_sell_count += 1
+                trades.append(
+                    {
+                        "trade_date": trade_date,
+                        "signal_date": pos.signal_date,
+                        "planned_entry_date": pos.planned_entry_date,
+                        "planned_exit_date": pos.planned_exit_date,
+                        "symbol": symbol,
+                        "name": pos.name,
+                        "action": "SELL_BLOCKED",
+                        "price": None,
+                        "shares": pos.shares,
+                        "gross_amount": None,
+                        "fees": None,
+                        "net_amount": None,
+                        "cash_after": round(cash, 2),
+                        "reason": "raw_open missing on scheduled exit date",
+                    }
+                )
                 continue
+
             exec_price = float(open_px)
             if req.realistic_execution:
                 exec_price *= 1.0 - (req.slippage_bps / 10000.0)
@@ -258,71 +355,115 @@ def run_portfolio_backtest_loaded(
             fees = commission + stamp_tax
             net = gross - fees
             cash += net
+
             trade_return = net / pos.buy_net_amount - 1.0 if pos.buy_net_amount else 0.0
             realized_by_symbol.setdefault(symbol, []).append(trade_return)
             realized_pnl_by_symbol[symbol] = realized_pnl_by_symbol.get(symbol, 0.0) + (net - pos.buy_net_amount)
             trades.append(
                 {
                     "trade_date": trade_date,
+                    "signal_date": pos.signal_date,
+                    "planned_entry_date": pos.planned_entry_date,
+                    "planned_exit_date": pos.planned_exit_date,
                     "symbol": symbol,
                     "name": pos.name,
-                        "action": "SELL",
-                        "price": round(exec_price, 4),
-                        "shares": round(sell_shares, 4),
-                        "gross_amount": round(gross, 2),
-                        "fees": round(fees, 2),
-                        "net_amount": round(net, 2),
+                    "action": "SELL",
+                    "price": round(exec_price, 4),
+                    "shares": round(sell_shares, 4),
+                    "gross_amount": round(gross, 2),
+                    "fees": round(fees, 2),
+                    "net_amount": round(net, 2),
                     "cash_after": round(cash, 2),
-                    "holding_days": max(1, len([d for d in all_dates if pos.buy_date <= d <= trade_date]) - 1),
+                    "holding_days": _count_holding_days(date_index, pos.buy_date, trade_date),
                     "trade_return": round(trade_return, 6),
-                    "reason": "sell at next available open",
+                    "price_pnl": round(exec_price - pos.buy_price, 4),
+                    "reason": "sell at scheduled or next available open",
                 }
             )
             sold_today += 1
             del holdings[symbol]
 
-        candidates: list[dict[str, Any]] = []
-        for item, idx in date_rows:
-            if item.symbol in holdings:
+        due_orders = pending_orders.pop(trade_date, [])
+        for order in due_orders:
+            row = rows_map.get(order.symbol)
+            if row is None:
+                blocked_buy_count += 1
+                trades.append(
+                    {
+                        "trade_date": trade_date,
+                        "signal_date": order.signal_date,
+                        "planned_entry_date": order.planned_entry_date,
+                        "planned_exit_date": order.planned_exit_date,
+                        "symbol": order.symbol,
+                        "name": order.name,
+                        "action": "BUY_BLOCKED",
+                        "price": None,
+                        "shares": 0,
+                        "gross_amount": None,
+                        "fees": None,
+                        "net_amount": None,
+                        "cash_after": round(cash, 2),
+                        "rank": order.rank,
+                        "score": round(order.score, 6),
+                        "reason": "entry date row missing",
+                    }
+                )
                 continue
-            payload = _build_eval_row(item.df, idx, max_offset)
-            row = item.df.iloc[idx]
-            can_buy = bool(row.get("can_buy_t", False))
-            if req.realistic_execution and not can_buy:
-                continue
-            ok, reason = evaluate_conditions(payload, buy_rules)
-            if not ok:
-                continue
-            score = evaluate_score_expression(payload, score_tree)
-            if math.isnan(score):
-                continue
-            candidates.append(
-                {
-                    "trade_date": trade_date,
-                    "symbol": item.symbol,
-                    "name": item.name,
-                    "idx": idx,
-                    "score": float(score),
-                    "close": to_float(row.get("close")),
-                    "exec_close": to_float(row.get("raw_close")),
-                    "can_buy_t": can_buy,
-                    "can_sell_t1": bool(row.get("can_sell_t1", False)),
-                    "reason": reason,
-                    "row": row,
-                }
-            )
 
-        candidates.sort(key=lambda x: (-x["score"], x["symbol"]))
-        selected = candidates[: req.top_n]
+            open_px = to_float(row.get("raw_open"))
+            can_buy_open = bool(row.get("can_buy_open_t", False))
+            if open_px is None:
+                can_buy_open = False
 
-        available_cash = cash
-        allocation = available_cash / len(selected) if selected else 0.0
-        bought_today = 0
-        for rank, candidate in enumerate(selected, start=1):
-            close_px = candidate["exec_close"]
-            if close_px is None or close_px <= 0:
+            if req.realistic_execution and not can_buy_open:
+                blocked_buy_count += 1
+                trades.append(
+                    {
+                        "trade_date": trade_date,
+                        "signal_date": order.signal_date,
+                        "planned_entry_date": order.planned_entry_date,
+                        "planned_exit_date": order.planned_exit_date,
+                        "symbol": order.symbol,
+                        "name": order.name,
+                        "action": "BUY_BLOCKED",
+                        "price": None,
+                        "shares": 0,
+                        "gross_amount": None,
+                        "fees": None,
+                        "net_amount": None,
+                        "cash_after": round(cash, 2),
+                        "rank": order.rank,
+                        "score": round(order.score, 6),
+                        "reason": "strict execution blocked buy at open",
+                    }
+                )
                 continue
-            exec_price = float(close_px)
+
+            if open_px is None:
+                blocked_buy_count += 1
+                trades.append(
+                    {
+                        "trade_date": trade_date,
+                        "signal_date": order.signal_date,
+                        "planned_entry_date": order.planned_entry_date,
+                        "planned_exit_date": order.planned_exit_date,
+                        "symbol": order.symbol,
+                        "name": order.name,
+                        "action": "BUY_BLOCKED",
+                        "price": None,
+                        "shares": 0,
+                        "gross_amount": None,
+                        "fees": None,
+                        "net_amount": None,
+                        "cash_after": round(cash, 2),
+                        "rank": order.rank,
+                        "score": round(order.score, 6),
+                        "reason": "raw_open missing on planned entry date",
+                    }
+                )
+                continue
+
+            exec_price = float(open_px)
             if req.realistic_execution:
                 exec_price *= 1.0 + (req.slippage_bps / 10000.0)
             per_lot_cost = exec_price * req.lot_size
@@ -330,33 +471,84 @@ def run_portfolio_backtest_loaded(
             if req.realistic_execution and per_lot_cost > 0:
                 est_fee_one = max(est_fee_one, float(req.min_commission))
             total_one_lot = per_lot_cost + est_fee_one
-            lot_budget = min(allocation, cash)
-            lots = int(lot_budget // total_one_lot) if total_one_lot > 0 else 0
+            budget = min(float(req.per_trade_budget), cash)
+            lots = int(budget // total_one_lot) if total_one_lot > 0 else 0
             shares = lots * req.lot_size
             if shares <= 0:
+                skipped_buy_cash_count += 1
+                trades.append(
+                    {
+                        "trade_date": trade_date,
+                        "signal_date": order.signal_date,
+                        "planned_entry_date": order.planned_entry_date,
+                        "planned_exit_date": order.planned_exit_date,
+                        "symbol": order.symbol,
+                        "name": order.name,
+                        "action": "BUY_SKIPPED_CASH",
+                        "price": round(exec_price, 4),
+                        "shares": 0,
+                        "gross_amount": None,
+                        "fees": None,
+                        "net_amount": None,
+                        "cash_after": round(cash, 2),
+                        "rank": order.rank,
+                        "score": round(order.score, 6),
+                        "reason": "insufficient cash for one lot under per_trade_budget",
+                    }
+                )
                 continue
+
             gross = exec_price * shares
             fees = gross * req.buy_fee_rate
             if req.realistic_execution and gross > 0:
                 fees = max(fees, float(req.min_commission))
             net = gross + fees
             if net > cash:
+                skipped_buy_cash_count += 1
+                trades.append(
+                    {
+                        "trade_date": trade_date,
+                        "signal_date": order.signal_date,
+                        "planned_entry_date": order.planned_entry_date,
+                        "planned_exit_date": order.planned_exit_date,
+                        "symbol": order.symbol,
+                        "name": order.name,
+                        "action": "BUY_SKIPPED_CASH",
+                        "price": round(exec_price, 4),
+                        "shares": 0,
+                        "gross_amount": None,
+                        "fees": None,
+                        "net_amount": None,
+                        "cash_after": round(cash, 2),
+                        "rank": order.rank,
+                        "score": round(order.score, 6),
+                        "reason": "net cash requirement exceeds available cash",
+                    }
+                )
                 continue
+
             cash -= net
-            holdings[candidate["symbol"]] = Position(
-                symbol=candidate["symbol"],
-                name=candidate["name"],
+            holdings[order.symbol] = Position(
+                symbol=order.symbol,
+                name=order.name,
                 shares=int(shares),
+                signal_date=order.signal_date,
+                planned_entry_date=order.planned_entry_date,
                 buy_date=trade_date,
+                planned_exit_date=order.planned_exit_date,
                 buy_price=float(exec_price),
                 buy_net_amount=float(net),
-                buy_adj_factor=to_float(candidate["row"].get("adj_factor")),
+                buy_adj_factor=to_float(row.get("adj_factor")),
+                score=float(order.score),
             )
             trades.append(
                 {
                     "trade_date": trade_date,
-                    "symbol": candidate["symbol"],
-                    "name": candidate["name"],
+                    "signal_date": order.signal_date,
+                    "planned_entry_date": order.planned_entry_date,
+                    "planned_exit_date": order.planned_exit_date,
+                    "symbol": order.symbol,
+                    "name": order.name,
                     "action": "BUY",
                     "price": round(exec_price, 4),
                     "shares": int(shares),
@@ -364,25 +556,87 @@ def run_portfolio_backtest_loaded(
                     "fees": round(fees, 2),
                     "net_amount": round(net, 2),
                     "cash_after": round(cash, 2),
-                    "rank": rank,
-                    "score": round(candidate["score"], 6),
-                    "reason": "selected by buy_condition + score_expression",
-                }
-            )
-            picks.append(
-                {
-                    "trade_date": trade_date,
-                    "symbol": candidate["symbol"],
-                    "name": candidate["name"],
-                    "rank": rank,
-                    "score": round(candidate["score"], 6),
-                    "close": round(candidate["close"], 4),
-                    "exec_close": round(candidate["exec_close"], 4) if candidate["exec_close"] is not None else None,
-                    "can_buy_t": candidate["can_buy_t"],
-                    "can_sell_t1": candidate["can_sell_t1"],
+                    "rank": order.rank,
+                    "score": round(order.score, 6),
+                    "reason": "selected on signal day and executed at next open",
                 }
             )
             bought_today += 1
+
+        if trade_date in signal_dates:
+            pending_symbols = {order.symbol for orders in pending_orders.values() for order in orders}
+            candidates: list[dict[str, Any]] = []
+            for item, idx in date_rows:
+                if item.symbol in holdings or item.symbol in pending_symbols:
+                    continue
+
+                future_entry = _future_row(item, idx, req.entry_offset)
+                future_exit = _future_row(item, idx, req.exit_offset)
+                if future_entry is None or future_exit is None:
+                    continue
+
+                payload = _build_eval_row(item.df, idx, max_offset)
+                ok, reason = evaluate_conditions(payload, buy_rules)
+                if not ok:
+                    continue
+                score = evaluate_score_expression(payload, score_tree)
+                if math.isnan(score):
+                    continue
+
+                signal_row = item.df.iloc[idx]
+                entry_date, entry_row = future_entry
+                exit_date, exit_row = future_exit
+                candidates.append(
+                    {
+                        "signal_date": trade_date,
+                        "symbol": item.symbol,
+                        "name": item.name,
+                        "score": float(score),
+                        "reason": reason,
+                        "signal_close": to_float(signal_row.get("close")),
+                        "signal_raw_close": to_float(signal_row.get("raw_close")),
+                        "planned_entry_date": entry_date,
+                        "planned_exit_date": exit_date,
+                        "entry_raw_open": to_float(entry_row.get("raw_open")),
+                        "entry_can_buy_open": bool(entry_row.get("can_buy_open_t", False)),
+                        "exit_raw_open": to_float(exit_row.get("raw_open")),
+                        "exit_can_sell_open": bool(exit_row.get("can_sell_t", False)),
+                    }
+                )
+
+            candidates.sort(key=lambda x: (-x["score"], x["symbol"]))
+            selected = candidates[: req.top_n]
+            signal_candidates = len(candidates)
+            signal_picks = len(selected)
+
+            for rank, candidate in enumerate(selected, start=1):
+                order = PendingOrder(
+                    symbol=candidate["symbol"],
+                    name=candidate["name"],
+                    signal_date=candidate["signal_date"],
+                    planned_entry_date=candidate["planned_entry_date"],
+                    planned_exit_date=candidate["planned_exit_date"],
+                    score=float(candidate["score"]),
+                    rank=rank,
+                )
+                pending_orders.setdefault(order.planned_entry_date, []).append(order)
+                picks.append(
+                    {
+                        "signal_date": candidate["signal_date"],
+                        "symbol": candidate["symbol"],
+                        "name": candidate["name"],
+                        "rank": rank,
+                        "score": round(candidate["score"], 6),
+                        "signal_close": round(candidate["signal_close"], 4) if candidate["signal_close"] is not None else None,
+                        "signal_raw_close": round(candidate["signal_raw_close"], 4) if candidate["signal_raw_close"] is not None else None,
+                        "planned_entry_date": candidate["planned_entry_date"],
+                        "planned_exit_date": candidate["planned_exit_date"],
+                        "entry_raw_open": round(candidate["entry_raw_open"], 4) if candidate["entry_raw_open"] is not None else None,
+                        "entry_can_buy_open": candidate["entry_can_buy_open"],
+                        "exit_raw_open": round(candidate["exit_raw_open"], 4) if candidate["exit_raw_open"] is not None else None,
+                        "exit_can_sell_open": candidate["exit_can_sell_open"],
+                    }
+                )
 
         market_value = 0.0
         for symbol, pos in holdings.items():
@@ -394,6 +648,7 @@ def run_portfolio_backtest_loaded(
             if last_close is not None:
                 last_close_by_symbol[symbol] = last_close
             market_value += _mark_to_market_close(pos, row, last_close_by_symbol.get(symbol))
+
         equity = cash + market_value
         equity_curve.append(equity)
         running_max = max(equity_curve)
@@ -405,8 +660,9 @@ def run_portfolio_backtest_loaded(
                 "market_value": round(market_value, 2),
                 "equity": round(equity, 2),
                 "position_count": len(holdings),
-                "candidate_count": len(candidates),
-                "picked_count": len(selected),
+                "pending_order_count": sum(len(orders) for orders in pending_orders.values()),
+                "candidate_count": signal_candidates,
+                "picked_count": signal_picks,
                 "buy_count": bought_today,
                 "sell_count": sold_today,
                 "drawdown": round(drawdown, 6),
@@ -414,12 +670,13 @@ def run_portfolio_backtest_loaded(
         )
 
     ending_equity = daily_rows[-1]["equity"] if daily_rows else req.initial_cash
-    returns = []
-    for i in range(1, len(equity_curve)):
-        prev = equity_curve[i - 1]
-        curr = equity_curve[i]
+    returns: list[float] = []
+    for idx in range(1, len(equity_curve)):
+        prev = equity_curve[idx - 1]
+        curr = equity_curve[idx]
         if prev > 0:
             returns.append(curr / prev - 1.0)
+
     max_drawdown = 0.0
     peak = 0.0
     for value in equity_curve:
@@ -427,8 +684,18 @@ def run_portfolio_backtest_loaded(
             peak = value
         if peak > 0:
             max_drawdown = min(max_drawdown, value / peak - 1.0)
-    sell_trade_returns = [float(row["trade_return"]) for row in trades if row["action"] == "SELL" and row.get("trade_return") is not None]
-    win_rate = (sum(1 for x in sell_trade_returns if x > 0) / len(sell_trade_returns)) if sell_trade_returns else 0.0
+
+    sell_trade_returns = [
+        float(row["trade_return"])
+        for row in trades
+        if row["action"] == "SELL" and row.get("trade_return") is not None
+    ]
+    win_rate = (
+        sum(1 for item in sell_trade_returns if item > 0) / len(sell_trade_returns)
+        if sell_trade_returns
+        else 0.0
+    )
+
     contribution_rows = []
     for symbol, pnl in sorted(realized_pnl_by_symbol.items(), key=lambda item: item[1], reverse=True):
         returns_for_symbol = realized_by_symbol.get(symbol, [])
@@ -437,32 +704,44 @@ def run_portfolio_backtest_loaded(
                 "symbol": symbol,
                 "realized_pnl": round(pnl, 2),
                 "trade_count": len(returns_for_symbol),
-                "win_rate": round(sum(1 for x in returns_for_symbol if x > 0) / len(returns_for_symbol), 4) if returns_for_symbol else 0.0,
-                "avg_trade_return": round(sum(returns_for_symbol) / len(returns_for_symbol), 6) if returns_for_symbol else 0.0,
+                "win_rate": round(sum(1 for item in returns_for_symbol if item > 0) / len(returns_for_symbol), 4)
+                if returns_for_symbol
+                else 0.0,
+                "avg_trade_return": round(sum(returns_for_symbol) / len(returns_for_symbol), 6)
+                if returns_for_symbol
+                else 0.0,
             }
         )
+
     summary = {
-        "start_date": all_dates[0] if all_dates else req.start_date,
-        "end_date": all_dates[-1] if all_dates else req.end_date,
-        "trade_days": len(all_dates),
+        "start_date": signal_dates[0],
+        "end_date": signal_dates[-1],
+        "simulation_end_date": daily_rows[-1]["trade_date"] if daily_rows else signal_dates[-1],
+        "trade_days": len(daily_rows),
+        "entry_offset": req.entry_offset,
+        "exit_offset": req.exit_offset,
         "initial_cash": round(req.initial_cash, 2),
+        "per_trade_budget": round(req.per_trade_budget, 2),
         "ending_cash": round(cash, 2),
         "ending_equity": round(ending_equity, 2),
         "total_return": round(ending_equity / req.initial_cash - 1.0, 6),
-        "annualized_return": round(_annualized_return(req.initial_cash, ending_equity, len(all_dates)), 6),
+        "annualized_return": round(_annualized_return(req.initial_cash, ending_equity, len(daily_rows)), 6),
         "max_drawdown": round(abs(max_drawdown), 6),
         "buy_count": sum(1 for row in trades if row["action"] == "BUY"),
         "sell_count": sum(1 for row in trades if row["action"] == "SELL"),
+        "blocked_buy_count": blocked_buy_count,
+        "blocked_sell_count": blocked_sell_count,
+        "skipped_buy_cash_count": skipped_buy_cash_count,
         "win_rate": round(win_rate, 6),
         "avg_trade_return": round(sum(sell_trade_returns) / len(sell_trade_returns), 6) if sell_trade_returns else 0.0,
         "best_trade_return": round(max(sell_trade_returns), 6) if sell_trade_returns else 0.0,
         "worst_trade_return": round(min(sell_trade_returns), 6) if sell_trade_returns else 0.0,
-        "blocked_sell_count": blocked_sell_count,
     }
     diagnostics.update(
         {
+            "signal_days": len(signal_dates),
             "candidate_days": sum(1 for row in daily_rows if row["candidate_count"] > 0),
-            "picked_days": sum(1 for row in daily_rows if row["buy_count"] > 0),
+            "picked_days": sum(1 for row in daily_rows if row["picked_count"] > 0),
         }
     )
     return {
@@ -476,7 +755,7 @@ def run_portfolio_backtest_loaded(
 
 
 def run_portfolio_backtest(req: BacktestRequest) -> dict[str, Any]:
-    loaded, diagnostics = load_processed_folder(req.processed_dir, req.start_date, req.end_date)
+    loaded, diagnostics = load_processed_folder(req.processed_dir)
     return run_portfolio_backtest_loaded(loaded, diagnostics, req)
 
 

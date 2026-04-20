@@ -19,6 +19,7 @@ PROJECT_EXTRA_PATHS = (
     Path("AGENTS.md"),
     Path("docs/backtest-data-dictionary.md"),
     Path("docs/indicator-reference.md"),
+    Path("docs/system-documentation.md"),
     Path("static/index.html"),
     Path("static/app.js"),
     Path("static/style.css"),

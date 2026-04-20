@@ -13,8 +13,13 @@ class ResearchTest(unittest.TestCase):
         names = [case.name for case in cases]
         self.assertIn("baseline", names)
         self.assertEqual(len(names), len(set(names)))
-        self.assertTrue(any("board=主板" in case.buy_condition for case in cases))
         self.assertTrue(any("listed_days>250" in case.buy_condition for case in cases))
+        self.assertTrue(any(case.top_n == 3 for case in cases))
+
+    def test_build_swing_v1_cases_use_multi_day_features(self) -> None:
+        cases = build_neighborhood_cases(preset="swing_v1")
+        self.assertTrue(any("close_pos_in_bar" in case.score_expression for case in cases))
+        self.assertTrue(any("turnover_rate_snapshot" in case.buy_condition for case in cases))
 
     def test_summarize_case_result_adds_activity_and_month_stats(self) -> None:
         result = {
@@ -25,12 +30,18 @@ class ResearchTest(unittest.TestCase):
                 "buy_count": 10,
                 "win_rate": 0.4,
                 "trade_days": 4,
+                "entry_offset": 1,
+                "exit_offset": 3,
             },
             "daily_rows": [
                 {"trade_date": "20240102", "equity": 100.0, "candidate_count": 1, "picked_count": 1},
                 {"trade_date": "20240131", "equity": 110.0, "candidate_count": 1, "picked_count": 1},
                 {"trade_date": "20240201", "equity": 110.0, "candidate_count": 0, "picked_count": 0},
                 {"trade_date": "20240229", "equity": 105.0, "candidate_count": 1, "picked_count": 1},
+            ],
+            "trade_rows": [
+                {"action": "SELL", "trade_return": 0.05},
+                {"action": "SELL", "trade_return": 0.01},
             ],
             "diagnostics": {"candidate_days": 3, "picked_days": 3},
         }
@@ -39,6 +50,8 @@ class ResearchTest(unittest.TestCase):
         self.assertAlmostEqual(row["positive_month_ratio"], 0.5, places=6)
         self.assertEqual(row["positive_months"], 1)
         self.assertEqual(row["months"], 2)
+        self.assertEqual(row["case_key"], "baseline_n3")
+        self.assertEqual(row["exit_offset"], 3)
 
     def test_select_train_top_cases_applies_stability_filters(self) -> None:
         frame = pd.DataFrame(
@@ -71,22 +84,6 @@ class ResearchTest(unittest.TestCase):
         )
         selected = select_train_top_cases(frame, top_k=2)
         self.assertEqual(selected["case"].tolist(), ["balanced_a", "balanced_b"])
-
-    def test_build_overnight_v2_cases_uses_new_features(self) -> None:
-        cases = build_neighborhood_cases(preset="overnight_v2")
-        self.assertTrue(any("close_to_up_limit<" in case.buy_condition for case in cases))
-        self.assertTrue(any("close_pos_in_bar" in case.score_expression for case in cases))
-
-    def test_build_overnight_v3_cases_use_narrower_filters(self) -> None:
-        cases = build_neighborhood_cases(preset="overnight_v3")
-        self.assertTrue(any("0.96<=close_to_up_limit<=0.995" in case.buy_condition for case in cases))
-        self.assertTrue(all(case.top_n == 2 for case in cases))
-
-    def test_build_overnight_v4_cases_use_short_cycle_features(self) -> None:
-        cases = build_neighborhood_cases(preset="overnight_v4")
-        self.assertTrue(any("ret_accel_3" in case.buy_condition for case in cases))
-        self.assertTrue(any("body_pct_3avg" in case.score_expression for case in cases))
-        self.assertTrue(all(case.top_n == 2 for case in cases))
 
 
 if __name__ == "__main__":

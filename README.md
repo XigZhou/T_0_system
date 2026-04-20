@@ -1,23 +1,43 @@
-# 新 T+1 隔夜回测系统 V1
+# T 日信号摆动回测系统 V2
 
-本项目用于研究 A 股 `T` 日收盘买入、`T+1` 日开盘卖出的批量组合回测，支持：
+本项目用于研究 A 股日线信号策略：
 
-- 固定快照股票池
+- `T` 日只使用当日及历史数据生成买入信号
+- `T+1` 日按原始开盘价 `raw_open` 买入
+- `T+N` 日按原始开盘价 `raw_open` 卖出，当前支持 `2 <= N <= 5`
+- 信号与指标按前复权价格 `qfq_*` 计算
+- 买卖成交按原始除权价格 `raw_*` 计算
+
+项目当前包含：
+
+- 固定快照股票池构建
 - Tushare 原始数据同步
-- 原始价格与前复权价格双口径保留
-- 每股一个 `processed_qfq/*.csv`
-- 前端批量回测与结果导出
+- 处理后回测主输入生成
+- 前端批量回测页面
+- API 导出交易流水
+- 特征分层扫描
+- 训练期/验证期参数探索
+
+说明：
+
+- 脚本文件名仍沿用早期的 `run_overnight_*` 命名，但内部逻辑已经切到新的摆动持有模型。
 
 ## 默认假设
 
-- 默认按 `2000` 积分的 Tushare 账号规划数据接口。
-- 默认使用的接口：`stock_basic`、`daily_basic`、`daily`、`adj_factor`、`trade_cal`、`stk_limit`、`suspend_d`、`index_daily`。
-- `TUSHARE_TOKEN` 默认优先从本机环境变量读取；如果环境变量缺失，再回退到本地 `.env` 文件。
-- 固定快照默认按 `2026-04-17` 当天或此前最近开市日筛选 `总市值 >= 500亿` 且非 `ST` 股票。
-- 信号与指标默认按前复权 `qfq_*` 计算，但买入/卖出成交价默认使用原始除权价 `raw_close/raw_open`。
-- 为了近似处理隔夜除权除息，若持仓跨过复权因子变动日，回测会按 `adj_factor` 比例修正持仓价值。
+- 默认按 `2000` 积分 Tushare 权限规划实现。
+- 默认接口：`stock_basic`、`daily_basic`、`daily`、`adj_factor`、`trade_cal`、`stk_limit`、`suspend_d`、`index_daily`。
+- `TUSHARE_TOKEN` 优先从本机环境变量读取；若缺失，再回退到本地 `.env`。
+- 固定快照默认按指定日期或此前最近开市日筛选 `总市值 >= 500亿` 且非 `ST` 股票。
+- 信号与指标基于前复权价格；实际成交和资金结算基于原始除权价格。
+- 默认探索参数：
+  - 初始资金 `100000`
+  - 每笔目标资金 `10000`
+  - 每手 `100` 股
+  - 买卖手续费各 `0.003%`
+  - 默认无印花税、无最低佣金
+  - 严格成交模式默认开启
 
-这些假设会影响结果正确性，正式跑全量回测前建议先确认你的 Tushare 账号与本机环境一致。
+这些假设会影响结果正确性。正式跑全量研究前，建议先确认本机数据、交易成本和 Tushare 账号权限与目标环境一致。
 
 ## 准备工作
 
@@ -27,9 +47,9 @@
 python -m pip install -r requirements.txt
 ```
 
-### 配置 Token
+### 配置环境变量
 
-推荐方式：
+推荐直接在本机环境里设置：
 
 ```powershell
 $env:TUSHARE_TOKEN="你的本机 token"
@@ -43,19 +63,19 @@ $env:TUSHARE_TOKEN="你的本机 token"
 ### 项目结构
 
 - [overnight_bt](/D:/量化/Momentum/T_0_system/overnight_bt)
-  后端逻辑、数据加工、表达式解析与组合回测引擎
+  回测引擎、处理逻辑、表达式解析、研究与交付检查模块
 - [scripts](/D:/量化/Momentum/T_0_system/scripts)
-  数据准备与交付校验脚本
+  数据准备、研究、特征扫描与交付校验脚本
 - [static](/D:/量化/Momentum/T_0_system/static)
   前端页面
 - [docs](/D:/量化/Momentum/T_0_system/docs)
-  中文数据说明与指标说明
+  中文数据说明、指标说明、表达式说明与系统使用文档
 - [tests](/D:/量化/Momentum/T_0_system/tests)
-  单元测试与集成测试
+  单元测试与接口集成测试
 
 ## 数据准备
 
-### 先生成固定快照股票池
+### 1. 生成固定快照股票池
 
 ```bash
 python scripts/build_universe_snapshot.py --as-of 20260417
@@ -65,13 +85,13 @@ python scripts/build_universe_snapshot.py --as-of 20260417
 
 - `data_bundle/universe_snapshot.csv`
 
-### 再同步原始数据包
+### 2. 同步原始数据包
 
 ```bash
 python scripts/sync_tushare_bundle.py --start-date 20160101 --end-date 20260417
 ```
 
-输出目录建议结构：
+建议输出目录结构：
 
 ```text
 data_bundle/
@@ -84,7 +104,7 @@ data_bundle/
   adj_factor/
 ```
 
-### 最后生成处理后回测输入
+### 3. 生成处理后回测输入
 
 ```bash
 python scripts/build_processed_data.py
@@ -95,7 +115,12 @@ python scripts/build_processed_data.py
 - `data_bundle/processed_qfq/*.csv`
 - `data_bundle/processed_qfq/processing_manifest.csv`
 
-如果你刚刚修改过处理逻辑或新增了隔夜研究字段，需要重新执行这一步，重建整套 `processed_qfq/`。
+如果你改过以下任一内容，需要重新构建 `processed_qfq/`：
+
+- 涨跌停或停牌约束逻辑
+- 前复权处理逻辑
+- 新增信号特征字段
+- `can_buy_open_t` 等开盘成交约束字段
 
 ## 启动方式
 
@@ -105,120 +130,118 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8080
 
 打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。
 
-接口入口：
+## 核心功能入口
+
+### 前端页面
+
+- 入口：`/`
+- 主要输入项：
+  - 处理后数据目录
+  - 起止日期
+  - `buy_condition`
+  - `score_expression`
+  - `top_n`
+  - `per_trade_budget`
+  - `entry_offset`
+  - `exit_offset`
+  - `initial_cash`
+  - `lot_size`
+  - 买卖费率、印花税、滑点、最低佣金
+  - 是否启用严格成交
+
+### API
 
 - `GET /health`
 - `POST /api/run-backtest`
 - `POST /api/run-backtest-export`
 
-## 前端输入与回测逻辑
+`/api/run-backtest` 返回：
 
-前端输入项：
+- `summary`
+- `daily_rows`
+- `pick_rows`
+- `trade_rows`
+- `contribution_rows`
+- `diagnostics`
 
-- 处理后数据目录
-- 开始/结束日期
-- 买入条件 `buy_condition`
-- 评分表达式 `score_expression`
-- `top_n`
-- 初始资金
-- 每手股数
-- 买卖费率
-- 印花税
-- 滑点
-- 最低佣金
-- 是否启用严格成交
+`/api/run-backtest-export` 返回 ZIP，包含：
 
-回测逻辑：
+- `summary.csv`
+- `daily_equity.csv`
+- `daily_picks.csv`
+- `trades.csv`
+- `contributions.csv`
 
-1. `T` 日开盘先处理前一交易日持仓卖出
-2. `T` 日收盘前扫描全部股票
-3. 用 `buy_condition` 过滤候选
-4. 用 `score_expression` 排序
-5. 取 `TopN`
-6. 用当日原始收盘价 `raw_close` 等权买入，`T+1` 用原始开盘价 `raw_open` 卖出
+## 回测逻辑
 
-## 表达式说明
+当前系统使用以下回测口径：
 
-买入条件示例：
+1. `T` 日收盘后扫描全部股票。
+2. 用 `buy_condition` 过滤候选。
+3. 用 `score_expression` 排序。
+4. 取 `TopN` 作为信号列表。
+5. 对入选信号在 `T+1` 日开盘尝试买入。
+6. 每笔按 `per_trade_budget` 计算可买手数，股数必须为 `lot_size` 的整数倍。
+7. 默认在 `T+N` 日开盘卖出。
+8. 若严格成交模式下卖出日开盘跌停或停牌，则顺延到下一个可卖开盘。
+9. 若严格成交模式下买入日开盘涨停或停牌，则该信号取消，不追买。
 
-```text
-m20>0,m5>m5[1],vr<1.2,hs300_pct_chg>-0.8
-```
+默认成交口径：
 
-也支持快照与分类过滤，例如：
-
-```text
-board=主板,listed_days>250,total_mv_snapshot>8000000,turnover_rate_snapshot<2,pct_chg>2.0
-```
-
-评分表达式示例：
-
-```text
-m20 + m5 - abs(pct_chg) * 0.1
-```
-
-评分表达式支持：
-
-- `+ - * /`
-- 圆括号
-- `abs(x)`、`min(a,b)`、`max(a,b)`
-- 字段偏移，如 `m5[1]`
+- 信号字段：`qfq_*`
+- 买卖成交：`raw_open`
+- 资金估值：持仓期间按 `raw_close` 逐日估值
 
 ## 研究脚本
 
-如果你要做“训练期选参数、验证期只复核”的研究，可以运行：
+### 1. 特征分层扫描
+
+按 `T+1 open -> T+N open` 的标签看哪些日线特征更值得研究：
 
 ```bash
-python scripts/run_overnight_research.py --processed-dir data_bundle/processed_qfq --preset baseline_v1
+python scripts/run_overnight_feature_scan.py --processed-dir data_bundle/processed_qfq --start-date 20190101 --end-date 20251231 --exit-offset 2
 ```
 
-默认配置：
+主要参数：
 
-- 训练期：`20190101` 到 `20221231`
-- 验证期：`20230101` 到 `20251231`
-- 输出目录：`research_runs/20260419_train_valid_v1`
+- `--entry-offset`：默认 `1`
+- `--exit-offset`：默认 `2`，支持 `2~5`
+- `--per-trade-notional`：默认 `10000`
 
-输出文件包括：
+输出：
+
+- `scan_overview.json`
+- `feature_bucket_report.csv`
+- `feature_scan_summary.md`
+
+### 2. 训练期/验证期参数探索
+
+```bash
+python scripts/run_overnight_research.py --processed-dir data_bundle/processed_qfq --preset swing_v1 --exit-offsets 2,3,4,5
+```
+
+主要参数：
+
+- `--preset`：默认 `swing_v1`
+- `--entry-offset`：默认 `1`
+- `--exit-offsets`：默认 `2,3,4,5`
+- `--top-k`：训练期保留多少组进入验证
+- `--per-trade-budget`：默认 `10000`
+
+输出文件：
 
 - `train_results.csv`
 - `selected_train_cases.csv`
 - `validation_results.csv`
 - `leaderboard.csv`
 - `research_summary.json`
+- `research_summary.md`
+- `selected_case_trade_records.csv`
 
-如果你要先看“哪些隔夜形态/分层值得研究”，建议先跑特征扫描：
+其中：
 
-```bash
-python scripts/run_overnight_feature_scan.py --processed-dir data_bundle/processed_qfq --start-date 20190101 --end-date 20251231
-```
-
-默认输出目录：
-
-- `research_runs/20260419_feature_scan_v1`
-
-输出文件包括：
-
-- `scan_overview.json`
-- `feature_bucket_report.csv`
-- `feature_scan_summary.md`
-
-如果你要基于新增的隔夜研究字段跑第二版正式候选条件，可以运行：
-
-```bash
-python scripts/run_overnight_research.py --processed-dir data_bundle/processed_qfq --preset overnight_v2
-```
-
-如果你要基于“更窄的涨停距离区间 + 强实体 + 小上影 + 低放量”跑第三版窄条件研究，可以运行：
-
-```bash
-python scripts/run_overnight_research.py --processed-dir data_bundle/processed_qfq --preset overnight_v3
-```
-
-如果你要基于“2 到 3 日短周期特征 + v3 窄区间底板”跑第四版研究，可以运行：
-
-```bash
-python scripts/run_overnight_research.py --processed-dir data_bundle/processed_qfq --preset overnight_v4
-```
+- `research_summary.md` 用于记录本次探索的条件与结果
+- `selected_case_trade_records.csv` 用于记录验证期优先组合的逐笔买卖明细，包含日期、买卖动作、股票代码、股票名称、价格、数量、手续费、总金额、收益率与价差
 
 ## 复现结果
 
@@ -231,12 +254,15 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
    - `buy_condition`
    - `score_expression`
    - `top_n`
+   - `per_trade_budget`
+   - `entry_offset=1`
+   - `exit_offset=2/3/4/5`
    - 资金与交易成本参数
 5. 点击“运行回测”
 6. 查看：
    - 组合 summary
    - 资金曲线
-   - 每日选股
+   - 每日信号明细
    - 交易流水
    - 个股贡献
 7. 如需归档，点击“下载 CSV ZIP”
@@ -246,6 +272,7 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 - 数据文档：[backtest-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/backtest-data-dictionary.md)
 - 指标文档：[indicator-reference.md](/D:/量化/Momentum/T_0_system/docs/indicator-reference.md)
 - 表达式文档：[expression-reference.md](/D:/量化/Momentum/T_0_system/docs/expression-reference.md)
+- 系统文档：[system-documentation.md](/D:/量化/Momentum/T_0_system/docs/system-documentation.md)
 
 ## 交付前校验
 
@@ -254,4 +281,9 @@ python scripts/verify_delivery.py
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-如果当前目录不是 Git 仓库，不能声称已经完成 GitHub 上传；当前这个工作区就属于这种情况。
+如果本次改动涉及 API 或前端，交付前还应做一次本地启动冒烟验证。当前项目推荐最少执行：
+
+```bash
+python -m unittest tests.test_backtest tests.test_api_integration tests.test_feature_scan tests.test_research tests.test_processing -v
+python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8080
+```

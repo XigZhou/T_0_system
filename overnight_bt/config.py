@@ -27,10 +27,10 @@ REQUIRED_PROCESSED_COLUMNS = {
     "qfq_low",
     "qfq_close",
     "can_buy_t",
+    "can_buy_open_t",
     "can_sell_t",
 }
 
 
 def root_dir() -> Path:
     return Path(__file__).resolve().parent.parent
-

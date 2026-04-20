@@ -13,7 +13,7 @@ from .models import BacktestRequest, BacktestResponse
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="Overnight T+1 Portfolio Backtest")
+app = FastAPI(title="Signal-Based Swing Portfolio Backtest")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -51,5 +51,5 @@ def export_backtest_api(req: BacktestRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    headers = {"Content-Disposition": 'attachment; filename="overnight_backtest_export.zip"'}
+    headers = {"Content-Disposition": 'attachment; filename="swing_backtest_export.zip"'}
     return Response(content=payload, media_type="application/zip", headers=headers)

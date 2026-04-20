@@ -1,2 +1,1 @@
-"""Overnight T+1 portfolio backtest system."""
-
+"""Signal-based swing portfolio backtest system."""
