@@ -122,6 +122,27 @@ python scripts/build_processed_data.py
 - 新增信号特征字段
 - `can_buy_open_t` 等开盘成交约束字段
 
+### 4. 生成主题聚焦股票池
+
+如果你要把股票池缩到 AI、机器人、新能源、有色金属、电网等方向，可以运行：
+
+```bash
+python scripts/build_theme_focus_universe.py
+python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bundle/universe_snapshot_theme_focus_top100.csv --out-processed-dir data_bundle/processed_qfq_theme_focus_top100
+```
+
+输出：
+
+- `data_bundle/universe_snapshot_theme_focus.csv`
+- `data_bundle/processed_qfq_theme_focus/`
+- `data_bundle/universe_snapshot_theme_focus_top100.csv`
+- `data_bundle/processed_qfq_theme_focus_top100/`
+
+说明：
+
+- `theme_focus` 是按主题规则筛出来的全量主题池
+- `theme_focus_top100` 是在主题池基础上按总市值取前 100
+
 ## 启动方式
 
 ```bash
@@ -344,6 +365,7 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - 指标文档：[indicator-reference.md](/D:/量化/Momentum/T_0_system/docs/indicator-reference.md)
 - 表达式文档：[expression-reference.md](/D:/量化/Momentum/T_0_system/docs/expression-reference.md)
 - 系统文档：[system-documentation.md](/D:/量化/Momentum/T_0_system/docs/system-documentation.md)
+- 主题股票池文档：[theme-focus-universe-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/theme-focus-universe-data-dictionary.md)
 
 ## 交付前校验
 
