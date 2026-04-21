@@ -178,7 +178,36 @@ python scripts/run_universe_hold_compare.py
 - 股票池目录不存在时抛出 `FileNotFoundError`
 - 输出目录不可写时抛出文件系统异常
 
-## 6. 回测引擎模块
+## 6. 主题前100池 TopN 与固定持有期对比模块
+
+### 功能
+
+- 固定 `theme_focus_top100`
+- 比较 `Top1 / Top3 / Top5`
+- 比较 `T+4 / T+5 / T+6 / T+7`
+- 输出验证期稳定性排序和逐笔交易记录
+
+### 入口
+
+```bash
+python scripts/run_topn_hold_compare.py
+```
+
+### 输出结果
+
+- `train_results.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `topn_hold_summary.json`
+- `topn_hold_summary.md`
+- `selected_case_trade_records.csv`
+
+### 异常处理
+
+- 处理后目录不存在时抛出 `FileNotFoundError`
+- 输出目录不可写时抛出文件系统异常
+
+## 7. 回测引擎模块
 
 ### 功能
 

@@ -338,6 +338,23 @@ python scripts/run_universe_hold_compare.py
 - `universe_hold_summary.md`
 - `selected_case_trade_records.csv`
 
+### 6. 主题前100池 TopN 与固定持有期对比
+
+如果你要固定 `theme_focus_top100` 股票池，再比较 `Top1 / Top3 / Top5` 与 `T+4 / T+5 / T+6 / T+7` 的差异，可以运行：
+
+```bash
+python scripts/run_topn_hold_compare.py
+```
+
+输出文件包括：
+
+- `train_results.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `topn_hold_summary.json`
+- `topn_hold_summary.md`
+- `selected_case_trade_records.csv`
+
 当前脚本会输出两类核心结果：
 
 - `sell_grid_summary.md`
