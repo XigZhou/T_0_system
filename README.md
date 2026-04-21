@@ -263,6 +263,13 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_topm_grid_v1 --exit-offsets 5
 ```
 
+如果你要继续细化 `Top1` 或 `Top2` 下最合适的买入条件，可以运行：
+
+```bash
+python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_top1_focus_grid_v1 --exit-offsets 5
+python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_top2_focus_grid_v1 --exit-offsets 5
+```
+
 当前脚本会输出两类核心结果：
 
 - `grid_summary.md`

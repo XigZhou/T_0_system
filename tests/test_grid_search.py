@@ -33,6 +33,18 @@ class GridSearchTest(unittest.TestCase):
         self.assertEqual(len(cases), 4)
         self.assertEqual([case.case.top_n for case in cases], [1, 2, 3, 5])
 
+    def test_build_top1_focus_grid_cases_returns_expected_case_count(self) -> None:
+        cases, preset = build_grid_cases("buy_condition_top1_focus_grid_v1")
+        self.assertEqual(preset.name, "buy_condition_top1_focus_grid_v1")
+        self.assertEqual(len(cases), 16)
+        self.assertTrue(all(case.case.top_n == 1 for case in cases))
+
+    def test_build_top2_focus_grid_cases_returns_expected_case_count(self) -> None:
+        cases, preset = build_grid_cases("buy_condition_top2_focus_grid_v1")
+        self.assertEqual(preset.name, "buy_condition_top2_focus_grid_v1")
+        self.assertEqual(len(cases), 16)
+        self.assertTrue(all(case.case.top_n == 2 for case in cases))
+
     def test_add_stability_columns_marks_stable_case(self) -> None:
         frame = pd.DataFrame(
             [
