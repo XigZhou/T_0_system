@@ -54,6 +54,27 @@ def build_sell_grid_cases_v1() -> list[SellGridCase]:
     ]
 
 
+def build_sell_grid_cases_v2_advanced() -> list[SellGridCase]:
+    return [
+        SellGridCase("fixed_exit_t5", "", 0, 0, 5, "固定 T+5 卖出基线"),
+        SellGridCase("stoploss_5pct_h1_mh15", "holding_return<-0.05", 1, 15, 5, "5% 止损"),
+        SellGridCase("stoploss_3pct_h1_mh15", "holding_return<-0.03", 1, 15, 5, "3% 止损"),
+        SellGridCase("trail_8_4_h2_mh15", "best_return_since_entry>0.08,drawdown_from_peak>0.04", 2, 15, 5, "浮盈超 8% 后回撤 4%"),
+        SellGridCase("trail_10_5_h2_mh15", "best_return_since_entry>0.10,drawdown_from_peak>0.05", 2, 15, 5, "浮盈超 10% 后回撤 5%"),
+        SellGridCase("trail_6_3_h2_mh15", "best_return_since_entry>0.06,drawdown_from_peak>0.03", 2, 15, 5, "浮盈超 6% 后回撤 3%"),
+        SellGridCase("stoploss_5pct_h1_mh10", "holding_return<-0.05", 1, 10, 5, "5% 止损 + 更短最大持有"),
+        SellGridCase("trail_8_4_h2_mh10", "best_return_since_entry>0.08,drawdown_from_peak>0.04", 2, 10, 5, "浮盈回撤 + 更短最大持有"),
+    ]
+
+
+def build_sell_grid_cases(preset: str) -> list[SellGridCase]:
+    if preset == "sell_grid_basic_v1":
+        return build_sell_grid_cases_v1()
+    if preset == "sell_grid_advanced_v1":
+        return build_sell_grid_cases_v2_advanced()
+    raise ValueError(f"unsupported sell grid preset: {preset}")
+
+
 def _common_request_kwargs(args: argparse.Namespace) -> dict:
     return {
         "processed_dir": args.processed_dir,
@@ -292,6 +313,7 @@ def _render_summary(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run sell-condition grid tests on a fixed buy condition.")
     parser.add_argument("--processed-dir", default="data_bundle/processed_qfq")
+    parser.add_argument("--sell-grid-preset", default="sell_grid_basic_v1")
     parser.add_argument("--buy-condition", default=DEFAULT_BUY_CONDITION)
     parser.add_argument("--score-expression", default=DEFAULT_SCORE_EXPRESSION)
     parser.add_argument("--train-start", default="20190101")
@@ -319,7 +341,7 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cases = build_sell_grid_cases_v1()
+    cases = build_sell_grid_cases(args.sell_grid_preset)
     case_lookup = {case.name: case for case in cases}
     (out_dir / "sell_grid_cases.json").write_text(
         json.dumps(

@@ -45,6 +45,10 @@ _NUMERIC_FIELDS = {
     "amount_ratio_3",
     "body_pct_3avg",
     "close_to_up_limit_3max",
+    "days_held",
+    "holding_return",
+    "best_return_since_entry",
+    "drawdown_from_peak",
 }
 _NUMERIC_FIELDS.update({f"m{n}" for n in [5, 10, 20, 30, 60, 120]})
 _CATEGORICAL_FIELDS = {

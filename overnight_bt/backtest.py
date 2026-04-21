@@ -242,6 +242,48 @@ def _next_trade_row(item: LoadedSymbol, idx: int) -> tuple[str, pd.Series] | Non
     return _future_row(item, idx, 1)
 
 
+def _compute_position_runtime_metrics(
+    item: LoadedSymbol,
+    pos: Position,
+    current_idx: int,
+    current_row: pd.Series,
+    date_index: dict[str, int],
+) -> dict[str, float]:
+    buy_idx = item.idx_by_date.get(pos.buy_date)
+    if buy_idx is None:
+        return {
+            "days_held": 0.0,
+            "holding_return": 0.0,
+            "best_return_since_entry": 0.0,
+            "drawdown_from_peak": 0.0,
+        }
+
+    current_value = _mark_to_market_close(pos, current_row, pos.buy_price)
+    initial_value = max(float(pos.buy_price) * float(pos.shares), 1e-12)
+    holding_return = current_value / initial_value - 1.0
+
+    peak_value = current_value
+    for hist_idx in range(buy_idx, current_idx + 1):
+        hist_row = item.df.iloc[hist_idx]
+        hist_value = _mark_to_market_close(pos, hist_row, pos.buy_price)
+        if hist_value > peak_value:
+            peak_value = hist_value
+    best_return_since_entry = peak_value / initial_value - 1.0
+
+    if peak_value <= 0:
+        drawdown_from_peak = 0.0
+    else:
+        drawdown_from_peak = max(0.0, 1.0 - current_value / peak_value)
+
+    days_held = float(_count_holding_days(date_index, pos.buy_date, str(current_row["trade_date"]).strip()))
+    return {
+        "days_held": days_held,
+        "holding_return": float(holding_return),
+        "best_return_since_entry": float(best_return_since_entry),
+        "drawdown_from_peak": float(drawdown_from_peak),
+    }
+
+
 def run_portfolio_backtest_loaded(
     loaded: list[LoadedSymbol],
     diagnostics: dict[str, Any],
@@ -697,7 +739,17 @@ def run_portfolio_backtest_loaded(
                 if next_trade is None:
                     continue
                 next_trade_date, _ = next_trade
+                current_row = item.df.iloc[idx]
                 payload = _build_eval_row(item.df, idx, max_offset)
+                payload.update(
+                    _compute_position_runtime_metrics(
+                        item=item,
+                        pos=pos,
+                        current_idx=idx,
+                        current_row=current_row,
+                        date_index=date_index,
+                    )
+                )
                 ok, _ = evaluate_conditions(payload, sell_rules)
                 if not ok:
                     continue

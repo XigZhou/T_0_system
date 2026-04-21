@@ -73,6 +73,18 @@ class ConditionParserTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(reason, "satisfied")
 
+    def test_runtime_sell_state_fields_supported(self) -> None:
+        rules = parse_condition_expr("holding_return<-0.05,best_return_since_entry>0.08,drawdown_from_peak>0.04,days_held>=2")
+        payload = {
+            "holding_return": -0.06,
+            "best_return_since_entry": 0.10,
+            "drawdown_from_peak": 0.05,
+            "days_held": 3,
+        }
+        ok, reason = evaluate_conditions(payload, rules)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "satisfied")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -303,6 +303,27 @@ m5 - m5[1]
 - `sh_m20`
 - `cyb_amp5`
 
+### 4.11 持仓态卖出字段
+
+这些字段主要用于 `sell_condition`，在持仓期间由回测引擎动态提供：
+
+- `days_held`
+  当前已持有的交易日数量
+- `holding_return`
+  按当前收盘估值相对买入成本的持仓收益率
+- `best_return_since_entry`
+  自买入以来到当前为止的最大浮盈收益率
+- `drawdown_from_peak`
+  当前收益相对持仓历史最大浮盈的回撤幅度
+
+示例：
+
+```text
+holding_return<-0.05
+best_return_since_entry>0.08,drawdown_from_peak>0.04
+days_held>=2,close<ma10
+```
+
 ## 5. 当前不开放给表达式系统的字段
 
 这些字段虽然存在于 `processed_qfq/*.csv` 中，但当前不能直接写进 `buy_condition` 或 `score_expression`：

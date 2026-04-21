@@ -304,6 +304,12 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_qfq
 ```
 
+如果你要测试更高级的退出逻辑，例如止损和浮盈回撤保护，可以运行：
+
+```bash
+python scripts/run_sell_condition_grid.py --sell-grid-preset sell_grid_advanced_v1 --processed-dir data_bundle/processed_qfq_theme_focus_top100 --top-n 5
+```
+
 输出文件包括：
 
 - `sell_grid_cases.json`
@@ -314,6 +320,13 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - `sell_grid_summary.json`
 - `sell_grid_summary.md`
 - `selected_case_trade_records.csv`
+
+高级退出支持的动态字段包括：
+
+- `holding_return`
+- `best_return_since_entry`
+- `drawdown_from_peak`
+- `days_held`
 
 ### 5. 股票池与固定持有期对比
 
