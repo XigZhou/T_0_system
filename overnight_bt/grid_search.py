@@ -215,6 +215,59 @@ def build_buy_condition_focus_grid_v2() -> tuple[list[GridCase], GridPreset]:
     return cases, preset
 
 
+def build_buy_condition_topm_grid_v1() -> tuple[list[GridCase], GridPreset]:
+    preset = GridPreset(
+        name="buy_condition_topm_grid_v1",
+        family="mainboard_trend_topm",
+        score_expression="m20 * 150 + close_pos_in_bar * 6 + body_pct * 90 - upper_shadow_pct * 120 - abs(vr - 1.0) * 3",
+        top_n=3,
+        dimensions=(
+            GridDimension("top_n", (1, 2, 3, 5)),
+        ),
+        fixed_params={
+            "board": "主板",
+            "listed_days_min": 500,
+            "m20_min": 0.035,
+            "pct_chg_min": -1.0,
+            "pct_chg_max": 3.5,
+            "close_pos_in_bar_min": 0.65,
+            "upper_shadow_pct_max": 0.02,
+            "body_pct_min": 0.0,
+            "vr_max": 1.6,
+            "hs300_pct_chg_min": -1.0,
+        },
+    )
+
+    cases: list[GridCase] = []
+    for top_n in preset.dimensions[0].values:
+        merged_params = dict(preset.fixed_params)
+        merged_params["top_n"] = int(top_n)
+        name = (
+            "topm_main"
+            f"_m{int(top_n)}"
+            f"_m20{_format_decimal(merged_params['m20_min'])}"
+            f"_pch{_format_decimal(merged_params['pct_chg_max'])}"
+            f"_cp{_format_decimal(merged_params['close_pos_in_bar_min'])}"
+            f"_vr{_format_decimal(merged_params['vr_max'])}"
+        )
+        buy_condition = _build_buy_condition(merged_params, merged_params)
+        case = ResearchCase(
+            name=name,
+            buy_condition=buy_condition,
+            score_expression=preset.score_expression,
+            top_n=int(top_n),
+        )
+        cases.append(
+            GridCase(
+                name=name,
+                family=preset.family,
+                params=merged_params,
+                case=case,
+            )
+        )
+    return cases, preset
+
+
 def build_grid_cases(preset: str = "buy_condition_grid_v1") -> tuple[list[GridCase], GridPreset]:
     if preset == "buy_condition_grid_v1":
         return build_buy_condition_grid_v1()
@@ -222,6 +275,8 @@ def build_grid_cases(preset: str = "buy_condition_grid_v1") -> tuple[list[GridCa
         return build_buy_condition_focus_grid_v1()
     if preset == "buy_condition_focus_grid_v2":
         return build_buy_condition_focus_grid_v2()
+    if preset == "buy_condition_topm_grid_v1":
+        return build_buy_condition_topm_grid_v1()
     raise ValueError(f"unsupported grid preset: {preset}")
 
 

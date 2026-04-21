@@ -310,7 +310,7 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 
 | 参数 | 说明 |
 | --- | --- |
-| `--grid-preset` | 网格预设，当前支持 `buy_condition_grid_v1`、`buy_condition_focus_grid_v1` 与 `buy_condition_focus_grid_v2` |
+| `--grid-preset` | 网格预设，当前支持 `buy_condition_grid_v1`、`buy_condition_focus_grid_v1`、`buy_condition_focus_grid_v2` 与 `buy_condition_topm_grid_v1` |
 | `--train-start/--train-end` | 训练期 |
 | `--valid-start/--valid-end` | 验证期 |
 | `--exit-offsets` | 要测试的卖出偏移集合 |
@@ -325,6 +325,8 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
   围绕主板老股强趋势条件做第一轮聚焦
 - `buy_condition_focus_grid_v2`
   围绕首轮胜出条件做第二轮精细调参
+- `buy_condition_topm_grid_v1`
+  固定当前最优买入条件，只比较 `TopM` 对交易笔数、胜率和稳定性的影响
 
 ### 输出结果
 
