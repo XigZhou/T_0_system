@@ -124,13 +124,16 @@ python scripts/build_processed_data.py
 | `processed_dir` | 处理后数据目录 |
 | `start_date/end_date` | 信号日期范围 |
 | `buy_condition` | 信号筛选表达式 |
+| `sell_condition` | 可选卖出表达式，收盘后判断、次日开盘执行 |
 | `score_expression` | 排名打分表达式 |
 | `top_n` | 每个信号日最多保留的候选数 |
 | `initial_cash` | 初始资金 |
 | `per_trade_budget` | 每笔目标资金 |
 | `lot_size` | 股数步长，默认 100 |
 | `entry_offset` | 买入偏移，当前默认 1 |
-| `exit_offset` | 卖出偏移，支持 2~5 |
+| `exit_offset` | 固定退出偏移，未启用卖出条件时按该值退出 |
+| `min_hold_days` | 卖出条件开始生效前的最短持有天数 |
+| `max_hold_days` | 最大持有天数；大于 0 时作为强制退出上限 |
 | `buy_fee_rate/sell_fee_rate` | 买卖手续费率 |
 | `stamp_tax_sell` | 卖出税费 |
 | `slippage_bps` | 滑点 |
@@ -172,11 +175,13 @@ http://127.0.0.1:8080/
 - 处理后数据目录
 - 开始日期、结束日期
 - 买入条件
+- 卖出条件
 - 评分表达式
 - `TopN`
 - 初始资金
 - 每笔目标资金
 - 买入偏移、卖出偏移
+- 最短持有天数、最大持有天数
 - 每手股数
 - 买卖费率、印花税、滑点、最低佣金
 - 是否严格成交
@@ -349,7 +354,48 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 - 输出目录不可写时会抛出文件系统异常
 - 数据目录错误时抛出 `FileNotFoundError`
 
-## 10. 交付校验模块
+## 10. 卖出指标网格测试模块
+
+### 功能
+
+- 固定当前最优买入条件
+- 批量测试不同卖出条件、最短持有天数和最大持有天数
+- 输出稳定性排序、总结书和逐笔交易明细
+
+### 入口
+
+```bash
+python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_qfq
+```
+
+### 主要输入参数
+
+| 参数 | 说明 |
+| --- | --- |
+| `--buy-condition` | 固定买入条件 |
+| `--score-expression` | 固定打分表达式 |
+| `--top-n` | 固定持仓名额 |
+| `--train-start/--train-end` | 训练期 |
+| `--valid-start/--valid-end` | 验证期 |
+| `--top-k` | 训练期筛选进入验证的卖出方案数 |
+
+### 输出结果
+
+- `sell_grid_cases.json`
+- `train_results.csv`
+- `selected_train_cases.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `sell_grid_summary.json`
+- `sell_grid_summary.md`
+- `selected_case_trade_records.csv`
+
+### 异常处理
+
+- 卖出表达式非法时抛出解析错误
+- 数据目录不存在时抛出 `FileNotFoundError`
+
+## 11. 交付校验模块
 
 ### 功能
 
@@ -376,7 +422,7 @@ python scripts/verify_delivery.py
 
 - 若缺文件或 README 缺少关键章节，脚本返回非 0 退出码
 
-## 11. 推荐交付流程
+## 12. 推荐交付流程
 
 1. 更新或同步数据
 2. 重新构建 `processed_qfq/`

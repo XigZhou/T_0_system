@@ -173,6 +173,94 @@ class BacktestEngineTest(unittest.TestCase):
             )
             self.assertEqual([row["symbol"] for row in result["pick_rows"]], ["000001"])
 
+    def test_sell_condition_triggers_next_open_after_min_hold(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.1, "raw_low": 9.9, "raw_close": 10.0, "m20": 0.8, "m5": 0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 10.2, "raw_high": 10.3, "raw_low": 10.0, "raw_close": 10.1, "m20": 0.7, "m5": -0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 10.1, "raw_high": 10.2, "raw_low": 9.9, "raw_close": 9.95, "m20": 0.6, "m5": -0.2, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240105", "raw_open": 9.9, "raw_high": 10.0, "raw_low": 9.8, "raw_close": 9.95, "m20": 0.5, "m5": -0.1, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240108", "raw_open": 9.8, "raw_high": 9.9, "raw_low": 9.7, "raw_close": 9.8, "m20": 0.4, "m5": -0.1, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock])
+            result = run_portfolio_backtest(
+                BacktestRequest(
+                    processed_dir=str(processed_dir),
+                    start_date="20240102",
+                    end_date="20240102",
+                    buy_condition="m20>0",
+                    sell_condition="m5<0",
+                    score_expression="m20",
+                    top_n=1,
+                    initial_cash=10000.0,
+                    per_trade_budget=10000.0,
+                    lot_size=100,
+                    buy_fee_rate=0.0,
+                    sell_fee_rate=0.0,
+                    stamp_tax_sell=0.0,
+                    entry_offset=1,
+                    exit_offset=5,
+                    min_hold_days=1,
+                    max_hold_days=3,
+                    realistic_execution=True,
+                    slippage_bps=0.0,
+                    min_commission=0.0,
+                )
+            )
+            sell_trade = next(row for row in result["trade_rows"] if row["action"] == "SELL")
+            self.assertEqual(sell_trade["trade_date"], "20240105")
+            self.assertEqual(sell_trade["exit_signal_date"], "20240104")
+            self.assertTrue(str(sell_trade["exit_reason"]).startswith("sell_condition:"))
+            self.assertEqual(result["summary"]["sell_condition_exit_count"], 1)
+
+    def test_max_hold_exit_applies_when_sell_condition_never_triggers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.1, "raw_low": 9.9, "raw_close": 10.0, "m20": 0.8, "m5": 0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 10.1, "raw_high": 10.2, "raw_low": 10.0, "raw_close": 10.1, "m20": 0.7, "m5": 0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 10.2, "raw_high": 10.3, "raw_low": 10.1, "raw_close": 10.2, "m20": 0.6, "m5": 0.2, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240105", "raw_open": 10.3, "raw_high": 10.4, "raw_low": 10.2, "raw_close": 10.3, "m20": 0.5, "m5": 0.1, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock])
+            result = run_portfolio_backtest(
+                BacktestRequest(
+                    processed_dir=str(processed_dir),
+                    start_date="20240102",
+                    end_date="20240102",
+                    buy_condition="m20>0",
+                    sell_condition="m20>100",
+                    score_expression="m20",
+                    top_n=1,
+                    initial_cash=10000.0,
+                    per_trade_budget=10000.0,
+                    lot_size=100,
+                    buy_fee_rate=0.0,
+                    sell_fee_rate=0.0,
+                    stamp_tax_sell=0.0,
+                    entry_offset=1,
+                    exit_offset=5,
+                    min_hold_days=1,
+                    max_hold_days=2,
+                    realistic_execution=True,
+                    slippage_bps=0.0,
+                    min_commission=0.0,
+                )
+            )
+            sell_trade = next(row for row in result["trade_rows"] if row["action"] == "SELL")
+            self.assertEqual(sell_trade["trade_date"], "20240105")
+            self.assertEqual(sell_trade["exit_reason"], "fixed_or_max_exit")
+            self.assertEqual(result["summary"]["max_hold_exit_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # T 日信号摆动回测系统表达式说明
 
-本文档说明当前系统中 `buy_condition` 与 `score_expression` 的用途、支持语法、可用字段与限制。
+本文档说明当前系统中 `buy_condition`、`sell_condition` 与 `score_expression` 的用途、支持语法、可用字段与限制。
 
 ## 1. 两类表达式的区别
 
@@ -36,6 +36,25 @@ m20 + m5 - abs(pct_chg) * 0.1
 - 表达式中的 `open/high/low/close` 是前复权别名字段
 - 实际成交默认不用这些字段成交，而是用 `raw_open`
 - `buy_condition` 与 `score_expression` 都只看 `T` 日及历史数据，不读取未来数据
+
+### 1.3 `sell_condition`
+
+- 用途：在持仓期间的每个收盘后判断是否应当退出
+- 输入位置：前端“卖出条件”或脚本参数 `sell_condition`
+- 类型：布尔条件集合
+- 执行方式：若条件在 `T` 日收盘后满足，且已经达到 `min_hold_days`，则安排在 `T+1` 日开盘卖出
+
+示例：
+
+```text
+close<ma5
+```
+
+说明：
+
+- `sell_condition` 的语法与 `buy_condition` 相同
+- 它不在当日收盘直接成交，而是在下一交易日开盘成交
+- 若未填写 `sell_condition`，系统按固定 `T+N` 或 `max_hold_days` 退出
 
 ## 2. `buy_condition` 支持语法
 

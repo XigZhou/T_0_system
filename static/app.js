@@ -15,12 +15,15 @@ function buildPayload() {
     start_date: document.getElementById("startDate").value.trim(),
     end_date: document.getElementById("endDate").value.trim(),
     buy_condition: document.getElementById("buyCondition").value.trim(),
+    sell_condition: document.getElementById("sellCondition").value.trim(),
     score_expression: document.getElementById("scoreExpression").value.trim(),
     top_n: Number(document.getElementById("topN").value),
     initial_cash: Number(document.getElementById("initialCash").value),
     per_trade_budget: Number(document.getElementById("perTradeBudget").value),
     entry_offset: Number(document.getElementById("entryOffset").value),
     exit_offset: Number(document.getElementById("exitOffset").value),
+    min_hold_days: Number(document.getElementById("minHoldDays").value),
+    max_hold_days: Number(document.getElementById("maxHoldDays").value),
     lot_size: Number(document.getElementById("lotSize").value),
     buy_fee_rate: Number(document.getElementById("buyFeeRate").value),
     sell_fee_rate: Number(document.getElementById("sellFeeRate").value),
@@ -61,6 +64,7 @@ function renderSummary(summary = {}) {
     ["max_drawdown", "最大回撤"],
     ["buy_count", "买入次数"],
     ["sell_count", "卖出次数"],
+    ["sell_condition_exit_count", "条件卖出次数"],
     ["win_rate", "胜率"],
     ["avg_trade_return", "平均单笔收益"],
   ];
@@ -177,8 +181,8 @@ function renderChart(rows) {
 function applyResult(result) {
   renderSummary(result.summary);
   renderChart(result.daily_rows);
-  renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "planned_entry_date", "planned_exit_date", "entry_raw_open", "exit_raw_open"]);
-  renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "action", "price", "shares", "gross_amount", "fees", "net_amount", "cash_after", "trade_return", "price_pnl"]);
+  renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled"]);
+  renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "action", "price", "shares", "gross_amount", "fees", "net_amount", "cash_after", "trade_return", "price_pnl", "exit_reason", "exit_signal_date"]);
   renderTable(contributionTable, result.contribution_rows, ["symbol", "realized_pnl", "trade_count", "win_rate", "avg_trade_return"]);
   diagText.textContent = `载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
 }

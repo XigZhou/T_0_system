@@ -107,8 +107,18 @@ def make_processed_stock(
             frame[col] = pd.NA
     if "can_buy_open_t" not in frame.columns:
         frame["can_buy_open_t"] = frame.get("can_buy_t", True)
+    if "can_sell_t1" not in frame.columns:
+        frame["can_sell_t1"] = True
     if "can_buy_open_t1" not in frame.columns:
         frame["can_buy_open_t1"] = frame.get("can_sell_t1", True)
+    if "can_sell_t" not in frame.columns:
+        frame["can_sell_t"] = True
+    if "can_buy_t" not in frame.columns:
+        frame["can_buy_t"] = True
+    if "is_suspended_t" not in frame.columns:
+        frame["is_suspended_t"] = False
+    if "is_suspended_t1" not in frame.columns:
+        frame["is_suspended_t1"] = False
     for col in ["is_suspended_t", "is_suspended_t1", "can_buy_t", "can_buy_open_t", "can_buy_open_t1", "can_sell_t", "can_sell_t1"]:
         frame[col] = frame[col].astype(bool)
     return frame

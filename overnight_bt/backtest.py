@@ -232,6 +232,16 @@ def _count_holding_days(date_index: dict[str, int], start_date: str, end_date: s
     return max(0, date_index[end_date] - date_index[start_date])
 
 
+def _effective_max_exit_offset(req: BacktestRequest) -> int:
+    if req.max_hold_days > 0:
+        return req.entry_offset + req.max_hold_days
+    return req.exit_offset
+
+
+def _next_trade_row(item: LoadedSymbol, idx: int) -> tuple[str, pd.Series] | None:
+    return _future_row(item, idx, 1)
+
+
 def run_portfolio_backtest_loaded(
     loaded: list[LoadedSymbol],
     diagnostics: dict[str, Any],
@@ -242,8 +252,13 @@ def run_portfolio_backtest_loaded(
 
     diagnostics = dict(diagnostics)
     buy_rules = parse_condition_expr(req.buy_condition)
+    sell_rules = parse_condition_expr(req.sell_condition) if str(req.sell_condition or "").strip() else []
     score_tree, _ = compile_score_expression(req.score_expression)
-    max_offset = max(max_required_offset(buy_rules), _score_required_offset(req.score_expression))
+    max_offset = max(
+        max_required_offset(buy_rules),
+        max_required_offset(sell_rules),
+        _score_required_offset(req.score_expression),
+    )
 
     all_dates = sorted({date for item in loaded for date in item.df["trade_date"].astype(str).tolist()})
     signal_dates = [d for d in all_dates if _within_range(d, req.start_date, req.end_date)]
@@ -269,6 +284,8 @@ def run_portfolio_backtest_loaded(
     blocked_buy_count = 0
     blocked_sell_count = 0
     skipped_buy_cash_count = 0
+    sell_condition_exit_count = 0
+    max_hold_exit_count = 0
 
     simulation_start = signal_dates[0]
 
@@ -279,7 +296,8 @@ def run_portfolio_backtest_loaded(
             break
 
         date_rows = rows_by_date.get(trade_date, [])
-        rows_map = {item.symbol: item.df.iloc[idx] for item, idx in date_rows}
+        item_idx_map = {item.symbol: (item, idx) for item, idx in date_rows}
+        rows_map = {symbol: item.df.iloc[idx] for symbol, (item, idx) in item_idx_map.items()}
 
         sold_today = 0
         bought_today = 0
@@ -299,6 +317,8 @@ def run_portfolio_backtest_loaded(
             if open_px is None:
                 can_sell = False
 
+            exit_reason = pos.exit_reason or "fixed_or_max_exit"
+
             if req.realistic_execution and not can_sell:
                 blocked_sell_count += 1
                 trades.append(
@@ -307,6 +327,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": pos.signal_date,
                         "planned_entry_date": pos.planned_entry_date,
                         "planned_exit_date": pos.planned_exit_date,
+                        "max_exit_date": pos.max_exit_date,
                         "symbol": symbol,
                         "name": pos.name,
                         "action": "SELL_BLOCKED",
@@ -316,6 +337,7 @@ def run_portfolio_backtest_loaded(
                         "fees": None,
                         "net_amount": None,
                         "cash_after": round(cash, 2),
+                        "exit_reason": exit_reason,
                         "reason": "strict execution blocked sell at open",
                     }
                 )
@@ -329,6 +351,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": pos.signal_date,
                         "planned_entry_date": pos.planned_entry_date,
                         "planned_exit_date": pos.planned_exit_date,
+                        "max_exit_date": pos.max_exit_date,
                         "symbol": symbol,
                         "name": pos.name,
                         "action": "SELL_BLOCKED",
@@ -338,6 +361,7 @@ def run_portfolio_backtest_loaded(
                         "fees": None,
                         "net_amount": None,
                         "cash_after": round(cash, 2),
+                        "exit_reason": exit_reason,
                         "reason": "raw_open missing on scheduled exit date",
                     }
                 )
@@ -365,6 +389,7 @@ def run_portfolio_backtest_loaded(
                     "signal_date": pos.signal_date,
                     "planned_entry_date": pos.planned_entry_date,
                     "planned_exit_date": pos.planned_exit_date,
+                    "max_exit_date": pos.max_exit_date,
                     "symbol": symbol,
                     "name": pos.name,
                     "action": "SELL",
@@ -377,9 +402,15 @@ def run_portfolio_backtest_loaded(
                     "holding_days": _count_holding_days(date_index, pos.buy_date, trade_date),
                     "trade_return": round(trade_return, 6),
                     "price_pnl": round(exec_price - pos.buy_price, 4),
+                    "exit_reason": exit_reason,
+                    "exit_signal_date": pos.exit_signal_date,
                     "reason": "sell at scheduled or next available open",
                 }
             )
+            if exit_reason.startswith("sell_condition"):
+                sell_condition_exit_count += 1
+            else:
+                max_hold_exit_count += 1
             sold_today += 1
             del holdings[symbol]
 
@@ -394,6 +425,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": order.signal_date,
                         "planned_entry_date": order.planned_entry_date,
                         "planned_exit_date": order.planned_exit_date,
+                        "max_exit_date": order.max_exit_date,
                         "symbol": order.symbol,
                         "name": order.name,
                         "action": "BUY_BLOCKED",
@@ -423,6 +455,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": order.signal_date,
                         "planned_entry_date": order.planned_entry_date,
                         "planned_exit_date": order.planned_exit_date,
+                        "max_exit_date": order.max_exit_date,
                         "symbol": order.symbol,
                         "name": order.name,
                         "action": "BUY_BLOCKED",
@@ -447,6 +480,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": order.signal_date,
                         "planned_entry_date": order.planned_entry_date,
                         "planned_exit_date": order.planned_exit_date,
+                        "max_exit_date": order.max_exit_date,
                         "symbol": order.symbol,
                         "name": order.name,
                         "action": "BUY_BLOCKED",
@@ -482,6 +516,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": order.signal_date,
                         "planned_entry_date": order.planned_entry_date,
                         "planned_exit_date": order.planned_exit_date,
+                        "max_exit_date": order.max_exit_date,
                         "symbol": order.symbol,
                         "name": order.name,
                         "action": "BUY_SKIPPED_CASH",
@@ -511,6 +546,7 @@ def run_portfolio_backtest_loaded(
                         "signal_date": order.signal_date,
                         "planned_entry_date": order.planned_entry_date,
                         "planned_exit_date": order.planned_exit_date,
+                        "max_exit_date": order.max_exit_date,
                         "symbol": order.symbol,
                         "name": order.name,
                         "action": "BUY_SKIPPED_CASH",
@@ -536,10 +572,13 @@ def run_portfolio_backtest_loaded(
                 planned_entry_date=order.planned_entry_date,
                 buy_date=trade_date,
                 planned_exit_date=order.planned_exit_date,
+                max_exit_date=order.max_exit_date,
                 buy_price=float(exec_price),
                 buy_net_amount=float(net),
                 buy_adj_factor=to_float(row.get("adj_factor")),
                 score=float(order.score),
+                exit_reason=None,
+                exit_signal_date=None,
             )
             trades.append(
                 {
@@ -547,6 +586,7 @@ def run_portfolio_backtest_loaded(
                     "signal_date": order.signal_date,
                     "planned_entry_date": order.planned_entry_date,
                     "planned_exit_date": order.planned_exit_date,
+                    "max_exit_date": order.max_exit_date,
                     "symbol": order.symbol,
                     "name": order.name,
                     "action": "BUY",
@@ -571,7 +611,7 @@ def run_portfolio_backtest_loaded(
                     continue
 
                 future_entry = _future_row(item, idx, req.entry_offset)
-                future_exit = _future_row(item, idx, req.exit_offset)
+                future_exit = _future_row(item, idx, _effective_max_exit_offset(req))
                 if future_entry is None or future_exit is None:
                     continue
 
@@ -597,6 +637,7 @@ def run_portfolio_backtest_loaded(
                         "signal_raw_close": to_float(signal_row.get("raw_close")),
                         "planned_entry_date": entry_date,
                         "planned_exit_date": exit_date,
+                        "max_exit_date": exit_date,
                         "entry_raw_open": to_float(entry_row.get("raw_open")),
                         "entry_can_buy_open": bool(entry_row.get("can_buy_open_t", False)),
                         "exit_raw_open": to_float(exit_row.get("raw_open")),
@@ -616,6 +657,7 @@ def run_portfolio_backtest_loaded(
                     signal_date=candidate["signal_date"],
                     planned_entry_date=candidate["planned_entry_date"],
                     planned_exit_date=candidate["planned_exit_date"],
+                    max_exit_date=candidate["max_exit_date"],
                     score=float(candidate["score"]),
                     rank=rank,
                 )
@@ -631,12 +673,39 @@ def run_portfolio_backtest_loaded(
                         "signal_raw_close": round(candidate["signal_raw_close"], 4) if candidate["signal_raw_close"] is not None else None,
                         "planned_entry_date": candidate["planned_entry_date"],
                         "planned_exit_date": candidate["planned_exit_date"],
+                        "max_exit_date": candidate["max_exit_date"],
                         "entry_raw_open": round(candidate["entry_raw_open"], 4) if candidate["entry_raw_open"] is not None else None,
                         "entry_can_buy_open": candidate["entry_can_buy_open"],
                         "exit_raw_open": round(candidate["exit_raw_open"], 4) if candidate["exit_raw_open"] is not None else None,
                         "exit_can_sell_open": candidate["exit_can_sell_open"],
+                        "sell_condition_enabled": bool(sell_rules),
                     }
                 )
+
+        if sell_rules:
+            for symbol, pos in holdings.items():
+                if trade_date < pos.buy_date or trade_date >= pos.planned_exit_date:
+                    continue
+                item_idx = item_idx_map.get(symbol)
+                if item_idx is None:
+                    continue
+                item, idx = item_idx
+                holding_days = _count_holding_days(date_index, pos.buy_date, trade_date)
+                if holding_days < req.min_hold_days:
+                    continue
+                next_trade = _next_trade_row(item, idx)
+                if next_trade is None:
+                    continue
+                next_trade_date, _ = next_trade
+                payload = _build_eval_row(item.df, idx, max_offset)
+                ok, _ = evaluate_conditions(payload, sell_rules)
+                if not ok:
+                    continue
+                if next_trade_date > pos.planned_exit_date:
+                    continue
+                pos.planned_exit_date = next_trade_date
+                pos.exit_reason = f"sell_condition:{req.sell_condition}"
+                pos.exit_signal_date = trade_date
 
         market_value = 0.0
         for symbol, pos in holdings.items():
@@ -720,6 +789,9 @@ def run_portfolio_backtest_loaded(
         "trade_days": len(daily_rows),
         "entry_offset": req.entry_offset,
         "exit_offset": req.exit_offset,
+        "min_hold_days": req.min_hold_days,
+        "max_hold_days": req.max_hold_days,
+        "sell_condition": req.sell_condition,
         "initial_cash": round(req.initial_cash, 2),
         "per_trade_budget": round(req.per_trade_budget, 2),
         "ending_cash": round(cash, 2),
@@ -732,6 +804,8 @@ def run_portfolio_backtest_loaded(
         "blocked_buy_count": blocked_buy_count,
         "blocked_sell_count": blocked_sell_count,
         "skipped_buy_cash_count": skipped_buy_cash_count,
+        "sell_condition_exit_count": sell_condition_exit_count,
+        "max_hold_exit_count": max_hold_exit_count,
         "win_rate": round(win_rate, 6),
         "avg_trade_return": round(sum(sell_trade_returns) / len(sell_trade_returns), 6) if sell_trade_returns else 0.0,
         "best_trade_return": round(max(sell_trade_returns), 6) if sell_trade_returns else 0.0,

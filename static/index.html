@@ -44,6 +44,11 @@
             <textarea id="scoreExpression" rows="3">m20 + m5 - abs(pct_chg) * 0.1</textarea>
           </label>
 
+          <label>
+            <span>卖出条件</span>
+            <textarea id="sellCondition" rows="3" placeholder="例如: close&lt;ma5"></textarea>
+          </label>
+
           <div class="three-col">
             <label>
               <span>TopN</span>
@@ -65,12 +70,27 @@
               <input id="entryOffset" type="number" value="1" min="1" max="5" />
             </label>
             <label>
-              <span>卖出偏移N</span>
-              <input id="exitOffset" type="number" value="2" min="2" max="5" />
+              <span>固定卖出偏移N</span>
+              <input id="exitOffset" type="number" value="5" min="2" max="20" />
             </label>
             <label>
               <span>每手股数</span>
               <input id="lotSize" type="number" value="100" min="1" />
+            </label>
+          </div>
+
+          <div class="three-col">
+            <label>
+              <span>最短持有天数</span>
+              <input id="minHoldDays" type="number" value="0" min="0" max="20" />
+            </label>
+            <label>
+              <span>最大持有天数</span>
+              <input id="maxHoldDays" type="number" value="0" min="0" max="20" />
+            </label>
+            <label>
+              <span>退出逻辑说明</span>
+              <input type="text" value="卖出条件触发则次日开盘卖，否则按固定或最大持有退出" readonly />
             </label>
           </div>
 

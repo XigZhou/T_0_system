@@ -10,6 +10,7 @@ class BacktestRequest(BaseModel):
     start_date: str = Field("", description="Backtest start date YYYYMMDD")
     end_date: str = Field("", description="Backtest end date YYYYMMDD")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
+    sell_condition: str = Field("", description="Optional exit filters evaluated after minimum hold days")
     score_expression: str = Field(..., description="Arithmetic score expression for TopN ranking")
     top_n: int = Field(10, ge=1, le=500)
     initial_cash: float = Field(100_000.0, gt=0)
@@ -19,7 +20,9 @@ class BacktestRequest(BaseModel):
     sell_fee_rate: float = Field(0.00003, ge=0)
     stamp_tax_sell: float = Field(0.0, ge=0)
     entry_offset: int = Field(1, ge=1, le=5, description="Enter at T+entry_offset open")
-    exit_offset: int = Field(2, ge=2, le=5, description="Exit at T+exit_offset open")
+    exit_offset: int = Field(2, ge=2, le=20, description="Fallback fixed exit at T+exit_offset open")
+    min_hold_days: int = Field(0, ge=0, le=20, description="Minimum holding days before sell_condition can trigger")
+    max_hold_days: int = Field(0, ge=0, le=20, description="Maximum holding days after entry; 0 means use exit_offset as fallback")
     realistic_execution: bool = Field(True)
     slippage_bps: float = Field(0.0, ge=0)
     min_commission: float = Field(0.0, ge=0)
@@ -43,10 +46,13 @@ class Position:
     planned_entry_date: str
     buy_date: str
     planned_exit_date: str
+    max_exit_date: str
     buy_price: float
     buy_net_amount: float
     buy_adj_factor: float | None = None
     score: float | None = None
+    exit_reason: str | None = None
+    exit_signal_date: str | None = None
 
 
 @dataclass
@@ -56,5 +62,6 @@ class PendingOrder:
     signal_date: str
     planned_entry_date: str
     planned_exit_date: str
+    max_exit_date: str
     score: float
     rank: int

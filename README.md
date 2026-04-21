@@ -4,7 +4,7 @@
 
 - `T` 日只使用当日及历史数据生成买入信号
 - `T+1` 日按原始开盘价 `raw_open` 买入
-- `T+N` 日按原始开盘价 `raw_open` 卖出，当前支持 `2 <= N <= 5`
+- 默认可按 `T+N` 日原始开盘价 `raw_open` 卖出，也支持“收盘触发卖出条件，下一交易日开盘执行”的混合退出模型
 - 信号与指标按前复权价格 `qfq_*` 计算
 - 买卖成交按原始除权价格 `raw_*` 计算
 
@@ -139,11 +139,14 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
   - 处理后数据目录
   - 起止日期
   - `buy_condition`
+  - `sell_condition`
   - `score_expression`
   - `top_n`
   - `per_trade_budget`
   - `entry_offset`
   - `exit_offset`
+  - `min_hold_days`
+  - `max_hold_days`
   - `initial_cash`
   - `lot_size`
   - 买卖费率、印花税、滑点、最低佣金
@@ -182,9 +185,11 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 4. 取 `TopN` 作为信号列表。
 5. 对入选信号在 `T+1` 日开盘尝试买入。
 6. 每笔按 `per_trade_budget` 计算可买手数，股数必须为 `lot_size` 的整数倍。
-7. 默认在 `T+N` 日开盘卖出。
-8. 若严格成交模式下卖出日开盘跌停或停牌，则顺延到下一个可卖开盘。
-9. 若严格成交模式下买入日开盘涨停或停牌，则该信号取消，不追买。
+7. 如果未配置 `sell_condition`，默认在 `T+N` 日开盘卖出。
+8. 如果配置了 `sell_condition`，系统会在每个收盘后判断是否触发；满足 `min_hold_days` 后若触发，则安排下一交易日开盘卖出。
+9. 若设置了 `max_hold_days`，则达到最大持有天数后，不论卖出条件是否触发，都会在下一到期开盘强制退出。
+10. 若严格成交模式下卖出日开盘跌停或停牌，则顺延到下一个可卖开盘。
+11. 若严格成交模式下买入日开盘涨停或停牌，则该信号取消，不追买。
 
 默认成交口径：
 
@@ -270,22 +275,41 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_top2_focus_grid_v1 --exit-offsets 5
 ```
 
+### 4. 卖出指标网格测试
+
+如果你要固定当前最优买入条件，转而探索不同卖出逻辑，可以运行：
+
+```bash
+python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_qfq
+```
+
+输出文件包括：
+
+- `sell_grid_cases.json`
+- `train_results.csv`
+- `selected_train_cases.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `sell_grid_summary.json`
+- `sell_grid_summary.md`
+- `selected_case_trade_records.csv`
+
 当前脚本会输出两类核心结果：
 
-- `grid_summary.md`
+- `sell_grid_summary.md`
   这次网格测试的总结书，包含测试范围、稳定性筛选口径、推荐条件和排行榜
 - `selected_case_trade_records.csv`
   推荐组合的逐笔交易记录，包含买入、卖出、股票代码、股票名称、价格、数量、手续费、总金额、收益率和价差
 
 完整输出通常包括：
 
-- `grid_cases.json`
+- `sell_grid_cases.json`
 - `train_results.csv`
 - `selected_train_cases.csv`
 - `validation_results.csv`
 - `leaderboard.csv`
-- `grid_summary.json`
-- `grid_summary.md`
+- `sell_grid_summary.json`
+- `sell_grid_summary.md`
 - `selected_case_trade_records.csv`
 
 ## 复现结果
@@ -297,11 +321,13 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
    - 处理后数据目录
    - 起止日期
    - `buy_condition`
+   - 如有需要，填写 `sell_condition`
    - `score_expression`
    - `top_n`
    - `per_trade_budget`
    - `entry_offset=1`
-   - `exit_offset=2/3/4/5`
+   - `exit_offset`
+   - 可选 `min_hold_days` / `max_hold_days`
    - 资金与交易成本参数
 5. 点击“运行回测”
 6. 查看：

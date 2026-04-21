@@ -74,6 +74,7 @@ class DeliveryChecksTest(unittest.TestCase):
             "scripts/run_overnight_research.py",
             "scripts/run_overnight_feature_scan.py",
             "scripts/run_buy_condition_grid.py",
+            "scripts/run_sell_condition_grid.py",
         ]:
             result = subprocess.run(
                 [sys.executable, script_name, "--help"],
