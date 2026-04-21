@@ -137,7 +137,48 @@ python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bun
 
 - 输入快照不存在时抛出文件读取异常
 - 个别股票若缺少处理后文件，则不会复制进目标目录
-## 5. 回测引擎模块
+
+## 5. 股票池与固定持有期对比模块
+
+### 功能
+
+- 固定当前最优 `Top1` 买入条件
+- 在多个股票池上比较不同固定持有天数
+- 输出验证期稳定性排序和逐笔交易记录
+
+### 入口
+
+```bash
+python scripts/run_universe_hold_compare.py
+```
+
+### 默认比较范围
+
+- 股票池：
+  - 全量原始池
+  - `theme_focus`
+  - `theme_focus_top100`
+- 固定卖出：
+  - `T+4`
+  - `T+5`
+  - `T+6`
+  - `T+7`
+
+### 输出结果
+
+- `train_results.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `universe_hold_summary.json`
+- `universe_hold_summary.md`
+- `selected_case_trade_records.csv`
+
+### 异常处理
+
+- 股票池目录不存在时抛出 `FileNotFoundError`
+- 输出目录不可写时抛出文件系统异常
+
+## 6. 回测引擎模块
 
 ### 功能
 
@@ -191,7 +232,7 @@ python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bun
 - `exit_offset <= entry_offset` 时抛出 `ValueError`
 - 表达式非法时抛出 `ValueError` 或表达式解析错误
 
-## 6. 前端页面模块
+## 7. 前端页面模块
 
 ### 功能
 
@@ -233,7 +274,7 @@ http://127.0.0.1:8080/
 - 请求失败时页面状态栏会显示错误信息
 - 参数缺失或数据目录错误时，API 会返回 4xx/5xx
 
-## 7. 回测导出模块
+## 8. 回测导出模块
 
 ### 功能
 
@@ -256,7 +297,7 @@ http://127.0.0.1:8080/
 
 - 与回测接口相同；若回测失败则不会生成 ZIP
 
-## 8. 特征分层扫描模块
+## 9. 特征分层扫描模块
 
 ### 功能
 
@@ -290,7 +331,7 @@ python scripts/run_overnight_feature_scan.py --processed-dir data_bundle/process
 - 数据目录不存在时抛出 `FileNotFoundError`
 - 样本过滤后为空时抛出 `ValueError`
 
-## 9. 参数探索模块
+## 10. 参数探索模块
 
 ### 功能
 
@@ -331,7 +372,7 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 - `exit_offset` 不在 `2~5` 范围时会抛出 `ValueError`
 - 预设名不存在时会抛出 `ValueError`
 
-## 10. 买入条件网格测试模块
+## 11. 买入条件网格测试模块
 
 ### 功能
 
@@ -388,7 +429,7 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 - 输出目录不可写时会抛出文件系统异常
 - 数据目录错误时抛出 `FileNotFoundError`
 
-## 11. 卖出指标网格测试模块
+## 12. 卖出指标网格测试模块
 
 ### 功能
 
@@ -429,7 +470,7 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - 卖出表达式非法时抛出解析错误
 - 数据目录不存在时抛出 `FileNotFoundError`
 
-## 12. 交付校验模块
+## 13. 交付校验模块
 
 ### 功能
 
@@ -456,7 +497,7 @@ python scripts/verify_delivery.py
 
 - 若缺文件或 README 缺少关键章节，脚本返回非 0 退出码
 
-## 13. 推荐交付流程
+## 14. 推荐交付流程
 
 1. 更新或同步数据
 2. 重新构建 `processed_qfq/`

@@ -315,6 +315,29 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - `sell_grid_summary.md`
 - `selected_case_trade_records.csv`
 
+### 5. 股票池与固定持有期对比
+
+如果你要在固定 `Top1` 和固定买入条件下，比较不同股票池与 `T+4/T+5/T+6/T+7` 固定卖出的差异，可以运行：
+
+```bash
+python scripts/run_universe_hold_compare.py
+```
+
+默认会比较：
+
+- 原始全量股票池
+- 主题聚焦股票池
+- 主题聚焦前100市值股票池
+
+输出文件包括：
+
+- `train_results.csv`
+- `validation_results.csv`
+- `leaderboard.csv`
+- `universe_hold_summary.json`
+- `universe_hold_summary.md`
+- `selected_case_trade_records.csv`
+
 当前脚本会输出两类核心结果：
 
 - `sell_grid_summary.md`

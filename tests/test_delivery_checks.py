@@ -76,6 +76,7 @@ class DeliveryChecksTest(unittest.TestCase):
             "scripts/run_buy_condition_grid.py",
             "scripts/run_sell_condition_grid.py",
             "scripts/build_theme_focus_universe.py",
+            "scripts/run_universe_hold_compare.py",
         ]:
             result = subprocess.run(
                 [sys.executable, script_name, "--help"],
