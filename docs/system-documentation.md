@@ -215,6 +215,7 @@ python scripts/run_topn_hold_compare.py
 - 在 `T+1` 日开盘尝试买入
 - 在 `T+N` 日开盘尝试卖出
 - 支持严格成交模式、滑点、手续费、无最低佣金
+- 严格成交模式下，买入会同时规避开盘接近涨停和接近跌停的股票
 
 ### 主要入口
 
@@ -302,6 +303,55 @@ http://127.0.0.1:8080/
 
 - 请求失败时页面状态栏会显示错误信息
 - 参数缺失或数据目录错误时，API 会返回 4xx/5xx
+
+## 8. 单股 Excel 回测模块
+
+### 功能
+
+- 读取单个股票 Excel 文件并运行回测
+- 展示回测摘要、指标解释、K 线买卖点、交易日志和每日信号表
+
+### 入口
+
+- 页面：`/single`
+- API：`POST /api/run-single-stock`
+
+### 主要输入参数
+
+| 参数 | 说明 |
+| --- | --- |
+| `excel_path` | 单个股票 Excel 路径 |
+| `start_date/end_date` | 回测区间 |
+| `buy_condition` | 买入条件 |
+| `buy_confirm_days` | 买入连续确认天数 |
+| `buy_cooldown_days` | 买入冷却天数 |
+| `sell_condition` | 卖出条件 |
+| `sell_confirm_days` | 卖出连续确认天数 |
+| `execution_timing` | `same_day_close` 或 `next_day_open` |
+| `initial_cash` | 初始资金 |
+| `per_trade_budget` | 每次目标买入金额 |
+| `lot_size` | 每手股数 |
+| `buy_fee_rate/sell_fee_rate` | 买卖费率 |
+| `stamp_tax_sell` | 卖出印花税 |
+
+### 输出结果
+
+- `summary`
+- `metric_definitions`
+- `trade_rows`
+- `signal_rows`
+
+### 页面内容
+
+- **A** 回测摘要：显示主要指标，并给出每个指标的公式和中文解释
+- **B** K 线图：买点卖点直接标在图上，鼠标悬浮显示开、高、低、收、量与信号
+- **C** 股票交易日志：展示买卖日期、股数、价格、手续费、剩余现金、交易后持仓和持仓市值、单笔盈亏
+- **D** 股票信号表：记录回测区间内每一天的买入信号、卖出信号、执行情况和日末资金状态
+
+### 异常处理
+
+- Excel 路径不存在时抛出 `FileNotFoundError`
+- 缺少 `trade_date` 或执行所需价格列时抛出 `ValueError`
 
 ### 当前推荐结果的前端复现示例
 

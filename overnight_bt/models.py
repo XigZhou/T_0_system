@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class BacktestRequest(BaseModel):
@@ -35,6 +36,33 @@ class BacktestResponse(BaseModel):
     trade_rows: list[dict]
     contribution_rows: list[dict]
     diagnostics: dict
+
+
+class SingleStockBacktestRequest(BaseModel):
+    excel_path: str = Field(..., description="Absolute or relative path to one stock excel file")
+    start_date: str = Field("", description="Backtest start date YYYYMMDD")
+    end_date: str = Field("", description="Backtest end date YYYYMMDD")
+    buy_condition: str = Field(..., description="Comma-separated boolean filters for entry")
+    buy_confirm_days: int = Field(1, ge=1)
+    buy_cooldown_days: int = Field(0, ge=0)
+    sell_condition: str = Field(..., description="Comma-separated boolean filters for exit")
+    sell_confirm_days: int = Field(1, ge=1)
+    initial_cash: float = Field(100_000.0, gt=0)
+    per_trade_budget: float = Field(10_000.0, gt=0)
+    lot_size: int = Field(100, ge=1)
+    execution_timing: Literal["same_day_close", "next_day_open"] = "next_day_open"
+    buy_fee_rate: float = Field(0.00003, ge=0)
+    sell_fee_rate: float = Field(0.00003, ge=0)
+    stamp_tax_sell: float = Field(0.0, ge=0)
+
+
+class SingleStockBacktestResponse(BaseModel):
+    stock_code: str
+    stock_name: str
+    summary: dict
+    metric_definitions: list[dict]
+    trade_rows: list[dict]
+    signal_rows: list[dict]
 
 
 @dataclass

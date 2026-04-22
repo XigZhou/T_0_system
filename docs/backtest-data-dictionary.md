@@ -173,7 +173,10 @@ qfq_open/qfq_high/qfq_low 同理
 
 ```text
 can_buy_open_t:
-  非停牌 且 raw_open 非空 且 (up_limit 缺失 或 raw_open < up_limit * 0.9995)
+  非停牌
+  且 raw_open 非空
+  且 (up_limit 缺失 或 raw_open < up_limit * 0.9995)
+  且 (down_limit 缺失 或 raw_open > down_limit * 1.0005)
 
 can_sell_t:
   非停牌 且 raw_open 非空 且 (down_limit 缺失 或 raw_open > down_limit * 1.0005)

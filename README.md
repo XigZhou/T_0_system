@@ -173,11 +173,30 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
   - 买卖费率、印花税、滑点、最低佣金
   - 是否启用严格成交
 
+### 单股页面
+
+- 入口：`/single`
+- 主要输入项：
+  - 单个股票 Excel 路径
+  - 起止日期
+  - 买入条件、卖出条件
+  - 买入确认天数、买入冷却天数、卖出确认天数
+  - 执行时点
+  - 初始资金、每笔目标资金、每手股数
+  - 买卖费率、印花税
+- 页面输出：
+  - 单股回测摘要
+  - 指标解释表
+  - K 线图与买卖点
+  - 股票交易日志
+  - 股票信号表
+
 ### API
 
 - `GET /health`
 - `POST /api/run-backtest`
 - `POST /api/run-backtest-export`
+- `POST /api/run-single-stock`
 
 `/api/run-backtest` 返回：
 
@@ -196,6 +215,15 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 - `trades.csv`
 - `contributions.csv`
 
+`/api/run-single-stock` 返回：
+
+- `stock_code`
+- `stock_name`
+- `summary`
+- `metric_definitions`
+- `trade_rows`
+- `signal_rows`
+
 ## 回测逻辑
 
 当前系统使用以下回测口径：
@@ -210,7 +238,7 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 8. 如果配置了 `sell_condition`，系统会在每个收盘后判断是否触发；满足 `min_hold_days` 后若触发，则安排下一交易日开盘卖出。
 9. 若设置了 `max_hold_days`，则达到最大持有天数后，不论卖出条件是否触发，都会在下一到期开盘强制退出。
 10. 若严格成交模式下卖出日开盘跌停或停牌，则顺延到下一个可卖开盘。
-11. 若严格成交模式下买入日开盘涨停或停牌，则该信号取消，不追买。
+11. 若严格成交模式下买入日开盘接近涨停、接近跌停或停牌，则该信号取消，不追买。
 
 默认成交口径：
 
@@ -373,6 +401,26 @@ python scripts/run_topn_hold_compare.py
 - `topn_hold_summary.json`
 - `topn_hold_summary.md`
 - `selected_case_trade_records.csv`
+
+## 单股 Excel 回测使用说明
+
+当前单股页面可以直接复现参考系统里“单个 Excel 文件回测”的核心能力：
+
+1. 打开 `http://127.0.0.1:8080/single`
+2. 填入单个 Excel 文件路径
+3. 填入买入条件、卖出条件和确认参数
+4. 点击“运行单股回测”
+5. 查看：
+   - 回测摘要
+   - 指标解释
+   - K 线图上的买卖点
+   - 交易日志
+   - 每日信号表
+
+说明：
+
+- 鼠标移动到 K 线图任意一天，会显示这一天的开盘、收盘、最高、最低、成交量和买卖信号
+- 交易日志会展示买卖后剩余现金、持仓股数、持仓市值、总资产和已实现盈亏
 
 ### 7. 当前推荐结果的前端复现
 

@@ -87,6 +87,57 @@ class ProcessingTest(unittest.TestCase):
         self.assertFalse(bool(frame.loc[frame["trade_date"] == "20240102", "can_sell_t1"].iloc[0]))
         self.assertEqual(int(frame.loc[frame["trade_date"] == "20240102", "listed_days"].iloc[0]), 8767)
 
+    def test_build_processed_frame_blocks_buy_on_down_limit_open(self) -> None:
+        raw_df = pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "trade_date": "20240102",
+                    "open": 9.0,
+                    "high": 9.1,
+                    "low": 8.9,
+                    "close": 9.0,
+                    "pre_close": 10.0,
+                    "change": -1.0,
+                    "pct_chg": -10.0,
+                    "vol": 1000,
+                    "amount": 10000,
+                },
+            ]
+        )
+        adj_df = pd.DataFrame([{"ts_code": "000001.SZ", "trade_date": "20240102", "adj_factor": 1.0}])
+        snapshot_row = pd.Series(
+            {
+                "ts_code": "000001.SZ",
+                "symbol": "000001",
+                "name": "平安银行",
+                "industry": "银行",
+                "market": "主板",
+                "list_date": "20000101",
+                "total_mv": "8000000",
+                "turnover_rate_f": "1.5",
+            }
+        )
+        trade_calendar = pd.DataFrame({"trade_date": ["20240102"]})
+        limit_df = pd.DataFrame([{"ts_code": "000001.SZ", "trade_date": "20240102", "up_limit": 11.0, "down_limit": 9.0}])
+        suspend_df = pd.DataFrame(columns=["ts_code", "trade_date"])
+        market_context = pd.DataFrame({"trade_date": ["20240102"], "hs300_pct_chg": [0.1]})
+
+        frame = build_processed_frame(
+            raw_df=raw_df,
+            adj_df=adj_df,
+            snapshot_row=snapshot_row,
+            trade_calendar=trade_calendar,
+            limit_df=limit_df,
+            suspend_df=suspend_df,
+            market_context=market_context,
+            start_date="20240102",
+            end_date="20240102",
+        )
+        row = frame.iloc[0]
+        self.assertFalse(bool(row["can_buy_open_t"]))
+        self.assertFalse(bool(row["can_buy_t"]))
+
     def test_build_processed_frame_generates_overnight_research_features(self) -> None:
         raw_df = pd.DataFrame(
             [

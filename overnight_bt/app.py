@@ -7,7 +7,8 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .backtest import export_backtest_zip, run_portfolio_backtest
-from .models import BacktestRequest, BacktestResponse
+from .models import BacktestRequest, BacktestResponse, SingleStockBacktestRequest, SingleStockBacktestResponse
+from .single_stock import run_single_stock_backtest
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,6 +21,11 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/single", response_class=HTMLResponse)
+def single_stock_page() -> str:
+    return (STATIC_DIR / "single.html").read_text(encoding="utf-8")
 
 
 @app.get("/health")
@@ -38,6 +44,18 @@ def run_backtest_api(req: BacktestRequest):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return result
+
+
+@app.post("/api/run-single-stock", response_model=SingleStockBacktestResponse)
+def run_single_stock_api(req: SingleStockBacktestRequest):
+    try:
+        return run_single_stock_backtest(req)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/run-backtest-export")

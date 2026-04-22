@@ -136,9 +136,10 @@ def build_processed_frame(
     raw_low = pd.to_numeric(work["raw_low"], errors="coerce")
     raw_close = pd.to_numeric(work["raw_close"], errors="coerce")
     up_limit = pd.to_numeric(work["up_limit"], errors="coerce")
+    down_limit = pd.to_numeric(work["down_limit"], errors="coerce")
     next_raw_open = raw_open.shift(-1)
     next_up_limit = pd.to_numeric(work["up_limit"], errors="coerce").shift(-1)
-    next_down_limit = pd.to_numeric(work["down_limit"], errors="coerce").shift(-1)
+    next_down_limit = down_limit.shift(-1)
     next_raw_close = raw_close.shift(-1)
 
     work["can_buy_t"] = (
@@ -148,6 +149,10 @@ def build_processed_frame(
             work["up_limit"].isna()
             | (raw_close < up_limit * 0.9995)
         )
+        & (
+            work["down_limit"].isna()
+            | (raw_close > down_limit * 1.0005)
+        )
     )
     work["can_buy_open_t"] = (
         (~work["is_suspended_t"])
@@ -155,6 +160,10 @@ def build_processed_frame(
         & (
             work["up_limit"].isna()
             | (raw_open < up_limit * 0.9995)
+        )
+        & (
+            work["down_limit"].isna()
+            | (raw_open > down_limit * 1.0005)
         )
     )
     work["can_sell_t"] = (
@@ -174,6 +183,7 @@ def build_processed_frame(
         (~work["is_suspended_t1"])
         & next_raw_open.notna()
         & (next_up_limit.isna() | (next_raw_open < next_up_limit * 0.9995))
+        & (next_down_limit.isna() | (next_raw_open > next_down_limit * 1.0005))
     )
 
     features_base = work[["trade_date", "qfq_open", "qfq_high", "qfq_low", "qfq_close", "vol", "amount"]].rename(

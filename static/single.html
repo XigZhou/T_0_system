@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>单股 Excel 回测</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="controls">
+        <div class="brand-block">
+          <p class="eyebrow">Single Stock Lab</p>
+          <h1>单股 Excel 回测</h1>
+          <p class="subtle">
+            输入单个股票的 Excel 地址，运行单股回测，查看 K 线图、买卖点、交易日志和每日信号。
+          </p>
+          <p class="subtle"><a href="/">返回组合回测</a></p>
+        </div>
+
+        <form id="singleForm" class="form-grid">
+          <label>
+            <span>Excel 文件路径</span>
+            <input id="excelPath" type="text" placeholder="D:/.../000001_xxx.xlsx" />
+          </label>
+
+          <div class="two-col">
+            <label>
+              <span>开始日期</span>
+              <input id="startDate" type="text" placeholder="20200101" />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="endDate" type="text" placeholder="20251231" />
+            </label>
+          </div>
+
+          <label>
+            <span>买入条件</span>
+            <textarea id="buyCondition" rows="3">m20&gt;0,m5&gt;m5[1],vr&lt;1.5</textarea>
+          </label>
+
+          <div class="three-col">
+            <label>
+              <span>买入确认天数</span>
+              <input id="buyConfirmDays" type="number" value="1" min="1" />
+            </label>
+            <label>
+              <span>买入冷却天数</span>
+              <input id="buyCooldownDays" type="number" value="0" min="0" />
+            </label>
+            <label>
+              <span>执行时点</span>
+              <select id="executionTiming">
+                <option value="next_day_open" selected>次日开盘</option>
+                <option value="same_day_close">当日收盘</option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            <span>卖出条件</span>
+            <textarea id="sellCondition" rows="3">m20&lt;0</textarea>
+          </label>
+
+          <div class="three-col">
+            <label>
+              <span>卖出确认天数</span>
+              <input id="sellConfirmDays" type="number" value="1" min="1" />
+            </label>
+            <label>
+              <span>初始资金</span>
+              <input id="initialCash" type="number" value="100000" min="1" step="0.01" />
+            </label>
+            <label>
+              <span>每笔目标资金</span>
+              <input id="perTradeBudget" type="number" value="10000" min="1" step="0.01" />
+            </label>
+          </div>
+
+          <div class="three-col">
+            <label>
+              <span>每手股数</span>
+              <input id="lotSize" type="number" value="100" min="1" />
+            </label>
+            <label>
+              <span>买入费率</span>
+              <input id="buyFeeRate" type="number" value="0.00003" min="0" step="0.00001" />
+            </label>
+            <label>
+              <span>卖出费率</span>
+              <input id="sellFeeRate" type="number" value="0.00003" min="0" step="0.00001" />
+            </label>
+          </div>
+
+          <div class="three-col">
+            <label>
+              <span>印花税</span>
+              <input id="stampTaxSell" type="number" value="0" min="0" step="0.0001" />
+            </label>
+            <label>
+              <span>说明</span>
+              <input type="text" value="单股回测默认每次买约1万元，股数为100的整数倍" readonly />
+            </label>
+            <label>
+              <span>运行</span>
+              <button id="runSingleBtn" type="submit">运行单股回测</button>
+            </label>
+          </div>
+        </form>
+
+        <p id="singleStatus" class="status">等待输入。</p>
+      </aside>
+
+      <main class="workspace">
+        <section class="summary-strip">
+          <div class="summary-intro">
+            <p class="eyebrow">Summary</p>
+            <h2>单股回测摘要</h2>
+            <p id="singleStockTitle" class="panel-note"></p>
+          </div>
+          <div id="singleSummaryGrid" class="summary-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Metric Guide</p>
+              <h3>指标解释</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="metricExplainTable"></table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Kline</p>
+              <h3>K 线图与买卖点</h3>
+            </div>
+          </div>
+          <div id="singleKlineChart" class="chart-box"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Trades</p>
+              <h3>股票交易日志</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="singleTradeTable"></table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Signals</p>
+              <h3>股票信号表</h3>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="singleSignalTable"></table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/vendor/echarts.min.js"></script>
+    <script src="/static/single.js"></script>
+  </body>
+</html>

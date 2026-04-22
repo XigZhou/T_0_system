@@ -21,9 +21,12 @@ PROJECT_EXTRA_PATHS = (
     Path("docs/indicator-reference.md"),
     Path("docs/system-documentation.md"),
     Path("static/index.html"),
+    Path("static/single.html"),
     Path("static/app.js"),
+    Path("static/single.js"),
     Path("static/style.css"),
     Path("overnight_bt/app.py"),
+    Path("overnight_bt/single_stock.py"),
 )
 PROJECT_README_PHRASES = (
     "TUSHARE_TOKEN",

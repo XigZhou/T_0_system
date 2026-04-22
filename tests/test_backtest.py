@@ -99,6 +99,40 @@ class BacktestEngineTest(unittest.TestCase):
             self.assertEqual(result["summary"]["buy_count"], 0)
             self.assertTrue(any(row["action"] == "BUY_BLOCKED" for row in result["trade_rows"]))
 
+    def test_strict_mode_blocks_buy_on_entry_open_down_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m20": 0.8, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": False, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 9.0, "raw_high": 9.1, "raw_low": 9.0, "raw_close": 9.0, "down_limit": 9.0, "m20": 0.7, "can_buy_t": False, "can_buy_open_t": False, "can_sell_t": False, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 9.2, "raw_high": 9.3, "raw_low": 9.1, "raw_close": 9.2, "m20": 0.6, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock])
+            result = run_portfolio_backtest(
+                BacktestRequest(
+                    processed_dir=str(processed_dir),
+                    start_date="20240102",
+                    end_date="20240102",
+                    buy_condition="m20>0",
+                    score_expression="m20",
+                    top_n=1,
+                    buy_fee_rate=0.0,
+                    sell_fee_rate=0.0,
+                    stamp_tax_sell=0.0,
+                    realistic_execution=True,
+                    slippage_bps=0.0,
+                    min_commission=0.0,
+                )
+            )
+            self.assertEqual(result["summary"]["blocked_buy_count"], 1)
+            self.assertEqual(result["summary"]["buy_count"], 0)
+            blocked = next(row for row in result["trade_rows"] if row["action"] == "BUY_BLOCKED")
+            self.assertEqual(blocked["trade_date"], "20240103")
+
     def test_strict_mode_blocked_sell_rolls_to_next_available_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
