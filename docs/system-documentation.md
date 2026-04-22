@@ -303,6 +303,33 @@ http://127.0.0.1:8080/
 - 请求失败时页面状态栏会显示错误信息
 - 参数缺失或数据目录错误时，API 会返回 4xx/5xx
 
+### 当前推荐结果的前端复现示例
+
+如果你要复现当前“主题前100池 + Top5 + 高级退出”的最佳结果，可以在前端填写：
+
+- 处理后数据目录：`D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100`
+- 开始日期：`20230101`
+- 结束日期：`20251231`
+- 买入条件：`board=主板,listed_days>500,m20>0.03,m5>0,pct_chg>-1.0,pct_chg<3.0,close_pos_in_bar>0.65,upper_shadow_pct<0.02,body_pct>0.0,vr<1.6,hs300_pct_chg>-1.0`
+- 卖出条件：`best_return_since_entry>0.11,drawdown_from_peak>0.05`
+- 评分表达式：`m20 * 155 + close_pos_in_bar * 6 + body_pct * 90 - upper_shadow_pct * 120 - abs(vr - 1.0) * 3`
+- `TopN=5`
+- `entry_offset=1`
+- `exit_offset=5`
+- `min_hold_days=3`
+- `max_hold_days=15`
+
+其余交易参数保持：
+
+- 初始资金 `100000`
+- 每笔目标资金 `10000`
+- 每手股数 `100`
+- 买卖费率 `0.00003`
+- 印花税 `0`
+- 滑点 `3`
+- 最低佣金 `0`
+- 严格成交 `是`
+
 ## 8. 回测导出模块
 
 ### 功能

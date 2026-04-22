@@ -374,6 +374,35 @@ python scripts/run_topn_hold_compare.py
 - `topn_hold_summary.md`
 - `selected_case_trade_records.csv`
 
+### 7. 当前推荐结果的前端复现
+
+当前这条“主题前100池 + Top5 + 高级退出”的最佳结果，可以在前端按下面参数复现：
+
+- 处理后数据目录：`D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100`
+- 开始日期：`20230101`
+- 结束日期：`20251231`
+- 买入条件：`board=主板,listed_days>500,m20>0.03,m5>0,pct_chg>-1.0,pct_chg<3.0,close_pos_in_bar>0.65,upper_shadow_pct<0.02,body_pct>0.0,vr<1.6,hs300_pct_chg>-1.0`
+- 卖出条件：`best_return_since_entry>0.11,drawdown_from_peak>0.05`
+- 评分表达式：`m20 * 155 + close_pos_in_bar * 6 + body_pct * 90 - upper_shadow_pct * 120 - abs(vr - 1.0) * 3`
+- `TopN`：`5`
+- 买入偏移：`1`
+- 固定卖出偏移：`5`
+- 最短持有天数：`3`
+- 最大持有天数：`15`
+- 初始资金：`100000`
+- 每笔目标资金：`10000`
+- 每手股数：`100`
+- 买卖费率：`0.00003`
+- 印花税：`0`
+- 滑点(bps)：`3`
+- 最低佣金：`0`
+- 严格成交：`是`
+
+说明：
+
+- 这组参数对应的结果见 `research_runs/20260422_sell_condition_grid_top5_theme_focus_top100_micro/`
+- 如果你要复现当前全局更稳的版本，则仍然优先看 `full_universe + Top1 + T+5`
+
 当前脚本会输出两类核心结果：
 
 - `sell_grid_summary.md`
