@@ -310,6 +310,12 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 python scripts/run_sell_condition_grid.py --sell-grid-preset sell_grid_advanced_v1 --processed-dir data_bundle/processed_qfq_theme_focus_top100 --top-n 5
 ```
 
+如果你要围绕当前最佳的高级退出继续微调参数，可以运行：
+
+```bash
+python scripts/run_sell_condition_grid.py --sell-grid-preset sell_grid_advanced_v2_micro --processed-dir data_bundle/processed_qfq_theme_focus_top100 --top-n 5 --top-k 28
+```
+
 输出文件包括：
 
 - `sell_grid_cases.json`

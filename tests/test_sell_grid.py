@@ -17,6 +17,11 @@ class SellGridTest(unittest.TestCase):
         self.assertTrue(any("holding_return<" in case.sell_condition for case in cases))
         self.assertTrue(any("drawdown_from_peak" in case.sell_condition for case in cases))
 
+    def test_build_advanced_micro_sell_grid_cases(self) -> None:
+        cases = build_sell_grid_cases("sell_grid_advanced_v2_micro")
+        self.assertEqual(len(cases), 28)
+        self.assertTrue(any("best_return_since_entry" in case.sell_condition for case in cases))
+
 
 if __name__ == "__main__":
     unittest.main()

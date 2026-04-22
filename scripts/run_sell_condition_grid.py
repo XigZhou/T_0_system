@@ -67,11 +67,47 @@ def build_sell_grid_cases_v2_advanced() -> list[SellGridCase]:
     ]
 
 
+def build_sell_grid_cases_v3_advanced_micro() -> list[SellGridCase]:
+    profit_thresholds = (0.09, 0.10, 0.11)
+    drawdown_thresholds = (0.04, 0.05, 0.06)
+    min_hold_days_values = (1, 2, 3)
+    cases = [SellGridCase("fixed_exit_t5", "", 0, 0, 5, "固定 T+5 卖出基线")]
+    for profit_threshold in profit_thresholds:
+        for drawdown_threshold in drawdown_thresholds:
+            for min_hold_days in min_hold_days_values:
+                name = (
+                    f"trail_{str(profit_threshold).replace('.', 'p')}_"
+                    f"{str(drawdown_threshold).replace('.', 'p')}_"
+                    f"h{min_hold_days}_mh15"
+                )
+                sell_condition = (
+                    f"best_return_since_entry>{profit_threshold:.2f},"
+                    f"drawdown_from_peak>{drawdown_threshold:.2f}"
+                )
+                note = (
+                    f"浮盈超 {profit_threshold:.0%} 后回撤 {drawdown_threshold:.0%}，"
+                    f"最短持有 {min_hold_days} 天，最大持有 15 天"
+                )
+                cases.append(
+                    SellGridCase(
+                        name=name,
+                        sell_condition=sell_condition,
+                        min_hold_days=min_hold_days,
+                        max_hold_days=15,
+                        exit_offset=5,
+                        note=note,
+                    )
+                )
+    return cases
+
+
 def build_sell_grid_cases(preset: str) -> list[SellGridCase]:
     if preset == "sell_grid_basic_v1":
         return build_sell_grid_cases_v1()
     if preset == "sell_grid_advanced_v1":
         return build_sell_grid_cases_v2_advanced()
+    if preset == "sell_grid_advanced_v2_micro":
+        return build_sell_grid_cases_v3_advanced_micro()
     raise ValueError(f"unsupported sell grid preset: {preset}")
 
 

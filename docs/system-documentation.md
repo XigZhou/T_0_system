@@ -476,7 +476,7 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 
 | 参数 | 说明 |
 | --- | --- |
-| `--sell-grid-preset` | 卖出预设；当前支持基础版与高级版 |
+| `--sell-grid-preset` | 卖出预设；当前支持基础版、高级版和高级微调版 |
 | `--buy-condition` | 固定买入条件 |
 | `--score-expression` | 固定打分表达式 |
 | `--top-n` | 固定持仓名额 |
@@ -501,6 +501,7 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - 数据目录不存在时抛出 `FileNotFoundError`
 - `sell_grid_advanced_v1` 会测试止损和浮盈回撤保护两类高级退出
 - `holding_return`、`best_return_since_entry`、`drawdown_from_peak` 等字段由回测引擎在持仓期动态计算
+- `sell_grid_advanced_v2_micro` 用于围绕当前最佳浮盈回撤退出做更细的参数微调
 
 ## 13. 交付校验模块
 
