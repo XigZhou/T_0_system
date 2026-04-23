@@ -156,6 +156,7 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 ### 前端页面
 
 - 入口：`/`
+- 页面布局：顶部输入，结果模块按单列自上而下展示
 - 主要输入项：
   - 处理后数据目录
   - 起止日期
@@ -176,6 +177,7 @@ python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 ### 单股页面
 
 - 入口：`/single`
+- 页面布局：顶部输入，摘要、指标解释、K 线图、交易日志、信号表按单列自上而下展示
 - 主要输入项：
   - 单个股票 Excel 路径
   - 起止日期
