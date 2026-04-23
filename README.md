@@ -149,7 +149,7 @@ python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bun
 python -m uvicorn overnight_bt.app:app --reload --host 127.0.0.1 --port 8083
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)。
+打开 [http://127.0.0.1:8083](http://127.0.0.1:8083 )。
 
 ## 核心功能入口
 
@@ -406,7 +406,7 @@ python scripts/run_topn_hold_compare.py
 
 当前单股页面可以直接复现参考系统里“单个 Excel 文件回测”的核心能力：
 
-1. 打开 `http://127.0.0.1:8080/single`
+1. 打开 `http://127.0.0.1:8083/single`
 2. 填入单个 Excel 文件路径
 3. 填入买入条件、卖出条件和确认参数
 4. 点击“运行单股回测”
@@ -514,5 +514,5 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ```bash
 python -m unittest tests.test_backtest tests.test_api_integration tests.test_feature_scan tests.test_research tests.test_processing -v
-python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8080
+python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
 ```

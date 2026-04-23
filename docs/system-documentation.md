@@ -262,7 +262,7 @@ python scripts/run_topn_hold_compare.py
 - `exit_offset <= entry_offset` 时抛出 `ValueError`
 - 表达式非法时抛出 `ValueError` 或表达式解析错误
 
-## 7. 前端页面模块
+## 8. 前端页面模块
 
 ### 功能
 
@@ -304,7 +304,7 @@ http://127.0.0.1:8080/
 - 请求失败时页面状态栏会显示错误信息
 - 参数缺失或数据目录错误时，API 会返回 4xx/5xx
 
-## 8. 单股 Excel 回测模块
+## 9. 单股 Excel 回测模块
 
 ### 功能
 
@@ -380,7 +380,7 @@ http://127.0.0.1:8080/
 - 最低佣金 `0`
 - 严格成交 `是`
 
-## 8. 回测导出模块
+## 10. 回测导出模块
 
 ### 功能
 
@@ -403,7 +403,7 @@ http://127.0.0.1:8080/
 
 - 与回测接口相同；若回测失败则不会生成 ZIP
 
-## 9. 特征分层扫描模块
+## 11. 特征分层扫描模块
 
 ### 功能
 
@@ -437,7 +437,7 @@ python scripts/run_overnight_feature_scan.py --processed-dir data_bundle/process
 - 数据目录不存在时抛出 `FileNotFoundError`
 - 样本过滤后为空时抛出 `ValueError`
 
-## 10. 参数探索模块
+## 12. 参数探索模块
 
 ### 功能
 
@@ -478,7 +478,7 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 - `exit_offset` 不在 `2~5` 范围时会抛出 `ValueError`
 - 预设名不存在时会抛出 `ValueError`
 
-## 11. 买入条件网格测试模块
+## 13. 买入条件网格测试模块
 
 ### 功能
 
@@ -535,7 +535,7 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 - 输出目录不可写时会抛出文件系统异常
 - 数据目录错误时抛出 `FileNotFoundError`
 
-## 12. 卖出指标网格测试模块
+## 14. 卖出指标网格测试模块
 
 ### 功能
 
@@ -580,7 +580,7 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - `holding_return`、`best_return_since_entry`、`drawdown_from_peak` 等字段由回测引擎在持仓期动态计算
 - `sell_grid_advanced_v2_micro` 用于围绕当前最佳浮盈回撤退出做更细的参数微调
 
-## 13. 交付校验模块
+## 15. 交付校验模块
 
 ### 功能
 
@@ -607,7 +607,7 @@ python scripts/verify_delivery.py
 
 - 若缺文件或 README 缺少关键章节，脚本返回非 0 退出码
 
-## 14. 推荐交付流程
+## 16. 推荐交付流程
 
 1. 更新或同步数据
 2. 重新构建 `processed_qfq/`
