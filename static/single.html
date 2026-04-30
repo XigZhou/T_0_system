@@ -3,28 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>单股 Excel 回测</title>
+    <title>单股表格回测</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <div class="shell">
-      <aside class="controls">
+      <aside class="controls compact-controls">
         <div class="brand-block">
-          <p class="eyebrow">Single Stock Lab</p>
-          <h1>单股 Excel 回测</h1>
-          <p class="subtle">
-            输入单个股票的 Excel 地址，运行单股回测，查看 K 线图、买卖点、交易日志和每日信号。
-          </p>
-          <p class="subtle"><a href="/">返回组合回测</a></p>
+          <div>
+            <p class="eyebrow">单股回测实验室</p>
+            <h1>单股表格回测</h1>
+          </div>
+          <div class="brand-actions">
+            <p class="subtle">
+              从组合回测同一份处理后数据中选择单只股票，查看蜡烛图、买卖点、交易日志和每日信号。
+            </p>
+            <p class="subtle"><a href="/">返回组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a></p>
+          </div>
         </div>
 
-        <form id="singleForm" class="form-grid">
-          <label>
-            <span>Excel 文件路径</span>
-            <input id="excelPath" type="text" placeholder="D:/.../000001_xxx.xlsx" />
+        <form id="singleForm" class="form-grid compact-form">
+          <label class="field-wide">
+            <span>处理后数据目录</span>
+            <input id="processedDir" type="text" value="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100" />
           </label>
 
-          <div class="two-col">
+          <label class="field-symbol">
+            <span>股票代码或名称</span>
+            <input id="stockQuery" type="text" placeholder="例如：000063 或 中兴通讯" />
+          </label>
+
+          <div class="two-col field-dates">
             <label>
               <span>开始日期</span>
               <input id="startDate" type="text" placeholder="20200101" />
@@ -35,9 +44,14 @@
             </label>
           </div>
 
-          <label>
+          <label class="field-expression">
             <span>买入条件</span>
-            <textarea id="buyCondition" rows="3">m20&gt;0,m5&gt;m5[1],vr&lt;1.5</textarea>
+            <textarea id="buyCondition" rows="2">m120&gt;0.02,m60&gt;0.01,m20&gt;0.08,m10&lt;0.16,m5&lt;0.1,hs300_m20&gt;0.02</textarea>
+          </label>
+
+          <label class="field-expression">
+            <span>卖出条件</span>
+            <textarea id="sellCondition" rows="2">m20&lt;0.08,hs300_m20&lt;0.02</textarea>
           </label>
 
           <div class="three-col">
@@ -57,11 +71,6 @@
               </select>
             </label>
           </div>
-
-          <label>
-            <span>卖出条件</span>
-            <textarea id="sellCondition" rows="3">m20&lt;0</textarea>
-          </label>
 
           <div class="three-col">
             <label>
@@ -100,71 +109,89 @@
             </label>
             <label>
               <span>说明</span>
-              <input type="text" value="单股回测默认每次买约1万元，股数为100的整数倍" readonly />
-            </label>
-            <label>
-              <span>运行</span>
-              <button id="runSingleBtn" type="submit">运行单股回测</button>
+              <input type="text" value="默认读取组合回测同一份处理后数据" readonly />
             </label>
           </div>
-        </form>
 
-        <p id="singleStatus" class="status">等待输入。</p>
+          <div class="actions">
+            <button id="runSingleBtn" type="submit">运行单股回测</button>
+            <a class="button-link secondary" href="/">返回组合回测</a>
+          </div>
+
+          <p id="singleStatus" class="status">等待输入。</p>
+        </form>
       </aside>
 
       <main class="workspace">
         <section class="summary-strip">
           <div class="summary-intro">
-            <p class="eyebrow">Summary</p>
+            <p class="eyebrow">结果摘要</p>
             <h2>单股回测摘要</h2>
             <p id="singleStockTitle" class="panel-note"></p>
           </div>
           <div id="singleSummaryGrid" class="summary-grid"></div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Metric Guide</p>
-              <h3>指标解释</h3>
-            </div>
+        <section class="tab-shell">
+          <div class="tab-list" role="tablist" aria-label="单股回测结果明细">
+            <button type="button" class="tab-button active" data-tab="metrics" role="tab" aria-selected="true">指标解释</button>
+            <button type="button" class="tab-button" data-tab="kline" role="tab" aria-selected="false">K线图</button>
+            <button type="button" class="tab-button" data-tab="trades" role="tab" aria-selected="false">交易日志</button>
+            <button type="button" class="tab-button" data-tab="signals" role="tab" aria-selected="false">信号表</button>
           </div>
-          <div class="table-wrap">
-            <table id="metricExplainTable"></table>
-          </div>
-        </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Kline</p>
-              <h3>K 线图与买卖点</h3>
-            </div>
+          <div class="tab-panel active" data-tab-panel="metrics" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">指标说明</p>
+                  <h3>指标解释</h3>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="metricExplainTable"></table>
+              </div>
+            </section>
           </div>
-          <div id="singleKlineChart" class="chart-box"></div>
-        </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Trades</p>
-              <h3>股票交易日志</h3>
-            </div>
+          <div class="tab-panel" data-tab-panel="kline" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">蜡烛图</p>
+                  <h3>蜡烛图与买卖点</h3>
+                </div>
+              </div>
+              <div id="singleKlineChart" class="chart-box"></div>
+            </section>
           </div>
-          <div class="table-wrap">
-            <table id="singleTradeTable"></table>
-          </div>
-        </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Signals</p>
-              <h3>股票信号表</h3>
-            </div>
+          <div class="tab-panel" data-tab-panel="trades" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">交易记录</p>
+                  <h3>股票交易日志</h3>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="singleTradeTable"></table>
+              </div>
+            </section>
           </div>
-          <div class="table-wrap">
-            <table id="singleSignalTable"></table>
+
+          <div class="tab-panel" data-tab-panel="signals" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">信号记录</p>
+                  <h3>股票信号表</h3>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="singleSignalTable"></table>
+              </div>
+            </section>
           </div>
         </section>
       </main>

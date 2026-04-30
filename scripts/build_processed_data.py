@@ -13,8 +13,8 @@ from overnight_bt.processing import build_processed_dataset
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build processed per-stock qfq CSVs for the overnight backtest system")
-    parser.add_argument("--bundle-dir", default="D:/量化/Momentum/T_0_system/data_bundle")
-    parser.add_argument("--output-dir", default="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq")
+    parser.add_argument("--bundle-dir", default="/home/ubuntu/T_0_system/data_bundle")
+    parser.add_argument("--output-dir", default="/home/ubuntu/T_0_system/data_bundle/processed_qfq")
     parser.add_argument("--snapshot-csv", default="")
     args = parser.parse_args()
 

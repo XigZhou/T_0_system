@@ -3,63 +3,84 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>T 日信号摆动组合回测</title>
+    <title>信号摆动组合回测</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <div class="shell">
-      <aside class="controls">
+      <aside class="controls compact-controls">
         <div class="brand-block">
-          <p class="eyebrow">Signal Swing Portfolio Lab</p>
-          <h1>T 日信号摆动组合回测</h1>
-          <p class="subtle">
-            用 `T` 日和历史数据生成信号，在 `T+1` 日开盘买入、`T+N` 日开盘卖出，运行 TopN 组合回测。
-          </p>
-          <p class="subtle"><a href="/single">切换到单股 Excel 回测</a></p>
+          <div>
+            <p class="eyebrow">组合条件回测实验室</p>
+            <h1>信号摆动组合回测</h1>
+          </div>
+          <div class="brand-actions">
+            <p class="subtle">
+              T 日生成信号，T+1 开盘买入；截止日按收盘价估值，并保留下一交易日候选。
+            </p>
+            <p class="subtle"><a href="/sector">板块研究</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a></p>
+          </div>
         </div>
 
-        <form id="btForm" class="form-grid">
-          <label>
-            <span>处理后数据目录</span>
-            <input id="processedDir" type="text" value="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq" />
-          </label>
-
-          <div class="two-col">
-            <label>
-              <span>开始日期</span>
-              <input id="startDate" type="text" placeholder="20160101" />
+        <form id="btForm" class="form-grid compact-form">
+          <div class="mode-switch field-mode" role="radiogroup" aria-label="回测模式">
+            <label class="mode-option active">
+              <input type="radio" name="backtestMode" value="signal_quality" checked />
+              <span>
+                <strong>信号质量回测</strong>
+                <small>不受初始资金、每笔资金和已有持仓影响，用来判断条件本身。</small>
+              </span>
             </label>
-            <label>
-              <span>结束日期</span>
-              <input id="endDate" type="text" placeholder="20260417" />
+            <label class="mode-option">
+              <input type="radio" name="backtestMode" value="account" />
+              <span>
+                <strong>实盘账户回测</strong>
+                <small>模拟现金、仓位、100股整数倍和资金不足跳过。</small>
+              </span>
             </label>
           </div>
 
-          <label>
+          <label class="field-wide">
+            <span>处理后数据目录</span>
+            <input id="processedDir" type="text" value="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100" />
+          </label>
+
+          <div class="two-col field-dates">
+            <label>
+              <span>开始日期</span>
+              <input id="startDate" type="text" value="20230101" placeholder="20160101" />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="endDate" type="text" value="20251231" placeholder="20251231" />
+            </label>
+          </div>
+
+          <label class="field-expression">
             <span>买入条件</span>
-            <textarea id="buyCondition" rows="4">m20&gt;0,m5&gt;m5[1],vr&lt;1.5,hs300_pct_chg&gt;-1.0</textarea>
+            <textarea id="buyCondition" rows="2">m120&gt;0.02,m60&gt;0.01,m20&gt;0.08,m10&lt;0.16,m5&lt;0.1,hs300_m20&gt;0.02</textarea>
           </label>
 
-          <label>
+          <label class="field-expression">
             <span>评分表达式</span>
-            <textarea id="scoreExpression" rows="3">m20 + m5 - abs(pct_chg) * 0.1</textarea>
+            <textarea id="scoreExpression" rows="2">m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30</textarea>
           </label>
 
-          <label>
+          <label class="field-expression">
             <span>卖出条件</span>
-            <textarea id="sellCondition" rows="3" placeholder="例如: close&lt;ma5"></textarea>
+            <textarea id="sellCondition" rows="2" placeholder="例如: close&lt;ma5">m20&lt;0.08,hs300_m20&lt;0.02</textarea>
           </label>
 
           <div class="three-col">
             <label>
-              <span>TopN</span>
-              <input id="topN" type="number" value="5" min="1" max="500" />
+              <span>选股数量</span>
+              <input id="topN" type="number" value="2" min="1" max="500" />
             </label>
-            <label>
+            <label class="account-field">
               <span>初始资金</span>
               <input id="initialCash" type="number" value="100000" min="1" step="0.01" />
             </label>
-            <label>
+            <label class="account-field">
               <span>每笔目标资金</span>
               <input id="perTradeBudget" type="number" value="10000" min="1" step="0.01" />
             </label>
@@ -71,10 +92,10 @@
               <input id="entryOffset" type="number" value="1" min="1" max="5" />
             </label>
             <label>
-              <span>固定卖出偏移N</span>
+              <span>固定卖出偏移天数</span>
               <input id="exitOffset" type="number" value="5" min="2" max="20" />
             </label>
-            <label>
+            <label class="account-field">
               <span>每手股数</span>
               <input id="lotSize" type="number" value="100" min="1" />
             </label>
@@ -83,11 +104,11 @@
           <div class="three-col">
             <label>
               <span>最短持有天数</span>
-              <input id="minHoldDays" type="number" value="0" min="0" max="20" />
+              <input id="minHoldDays" type="number" value="3" min="0" max="20" />
             </label>
             <label>
               <span>最大持有天数</span>
-              <input id="maxHoldDays" type="number" value="0" min="0" max="20" />
+              <input id="maxHoldDays" type="number" value="15" min="0" max="20" />
             </label>
             <label>
               <span>退出逻辑说明</span>
@@ -112,10 +133,10 @@
 
           <div class="three-col">
             <label>
-              <span>滑点(bps)</span>
-              <input id="slippageBps" type="number" value="5" step="0.1" min="0" />
+              <span>滑点（基点）</span>
+              <input id="slippageBps" type="number" value="3" step="0.1" min="0" />
             </label>
-            <label>
+            <label class="account-field">
               <span>最低佣金</span>
               <input id="minCommission" type="number" value="0" step="0.01" min="0" />
             </label>
@@ -128,70 +149,207 @@
             </label>
           </div>
 
+          <label class="field-settlement">
+            <span>结束日处理方式</span>
+            <select id="settlementMode">
+              <option value="cutoff" selected>截止日估值：不使用结束日之后的数据</option>
+              <option value="complete">完整结算：继续模拟到已有持仓和订单完成</option>
+            </select>
+          </label>
+
           <div class="actions">
             <button id="runBtn" type="submit">运行回测</button>
-            <button id="exportBtn" type="button" class="secondary">下载 CSV ZIP</button>
+            <button id="exportBtn" type="button" class="secondary">下载表格压缩包</button>
           </div>
+          <p id="status" class="status">默认运行信号质量回测，先判断条件本身是否有效。</p>
         </form>
-
-        <p id="status" class="status">等待输入。</p>
       </aside>
 
       <main class="workspace">
         <section class="summary-strip">
           <div class="summary-intro">
-            <p class="eyebrow">Summary</p>
+            <p class="eyebrow">结果摘要</p>
             <h2>组合结果</h2>
           </div>
           <div id="summaryGrid" class="summary-grid"></div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Equity</p>
-              <h3>资金曲线</h3>
-            </div>
-            <p id="diagText" class="panel-note"></p>
+        <section class="tab-shell">
+          <div class="tab-list" role="tablist" aria-label="组合结果明细">
+            <button type="button" class="tab-button active" data-tab="condition" role="tab" aria-selected="true">条件诊断</button>
+            <button type="button" class="tab-button" data-tab="rank" role="tab" aria-selected="false">排名质量</button>
+            <button type="button" class="tab-button" data-tab="equity" role="tab" aria-selected="false">曲线与回撤</button>
+            <button type="button" class="tab-button" data-tab="year" role="tab" aria-selected="false">年度稳定性</button>
+            <button type="button" class="tab-button" data-tab="exit" role="tab" aria-selected="false">退出原因</button>
+            <button type="button" class="tab-button" data-tab="month" role="tab" aria-selected="false">月度表现</button>
+            <button type="button" class="tab-button account-only-tab" data-tab="cutoff" role="tab" aria-selected="false">期末持仓</button>
+            <button type="button" class="tab-button" data-tab="signals" role="tab" aria-selected="false">选股与交易</button>
+            <button type="button" class="tab-button" data-tab="contribution" role="tab" aria-selected="false">个股贡献</button>
           </div>
-          <div id="equityChart" class="chart-box"></div>
-        </section>
 
-        <section class="split">
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Picks</p>
-                <h3>每日选股明细</h3>
+          <div class="tab-panel active" data-tab-panel="condition" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">条件检查</p>
+                  <h3>条件诊断</h3>
+                </div>
+                <p id="diagText" class="panel-note"></p>
               </div>
-            </div>
-            <div class="table-wrap">
-              <table id="pickTable"></table>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Trades</p>
-                <h3>交易流水</h3>
+              <div class="table-wrap">
+                <table id="conditionTable"></table>
               </div>
-            </div>
-            <div class="table-wrap">
-              <table id="tradeTable"></table>
-            </div>
-          </section>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Contribution</p>
-              <h3>个股贡献汇总</h3>
-            </div>
+            </section>
           </div>
-          <div class="table-wrap">
-            <table id="contributionTable"></table>
+
+          <div class="tab-panel" data-tab-panel="rank" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">评分排序</p>
+                  <h3>排名质量</h3>
+                </div>
+                <p class="panel-note">先看累计TopK扫描决定买前几只，再看单名次质量判断评分表达式是否有排序能力。想比较Top10，请把选股数量填到10或更高。</p>
+              </div>
+              <h4 class="subsection-title">累计TopK扫描</h4>
+              <div class="table-wrap">
+                <table id="topKTable"></table>
+              </div>
+              <h4 class="subsection-title">单名次质量</h4>
+              <div class="table-wrap">
+                <table id="rankTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="equity" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">曲线与回撤</p>
+                  <h3>曲线与回撤</h3>
+                </div>
+                <p class="panel-note">信号质量模式看信号净值，实盘账户模式看账户权益。</p>
+              </div>
+              <div id="equityChart" class="chart-box compact-chart"></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="year" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">年度表现</p>
+                  <h3>年度稳定性</h3>
+                </div>
+                <p class="panel-note">优先看每年是否稳定，而不是只看总收益。</p>
+              </div>
+              <div class="table-wrap">
+                <table id="yearTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="exit" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">退出统计</p>
+                  <h3>退出原因</h3>
+                </div>
+                <p class="panel-note">对比条件卖出和固定退出的收益质量。</p>
+              </div>
+              <div class="table-wrap">
+                <table id="exitReasonTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="month" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">月度表现</p>
+                  <h3>月度表现</h3>
+                </div>
+                <p class="panel-note">连续亏损月份越集中，说明条件对某类行情更敏感。</p>
+              </div>
+              <div class="table-wrap">
+                <table id="monthTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel account-only-tab" data-tab-panel="cutoff" role="tabpanel">
+            <section class="split">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">截止日估值</p>
+                    <h3>期末持仓</h3>
+                  </div>
+                  <p class="panel-note">截止日模式下，未卖出的股票按结束日收盘价计入权益。</p>
+                </div>
+                <div class="table-wrap">
+                  <table id="openPositionTable"></table>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">卖出提醒</p>
+                    <h3>截止日卖出信号</h3>
+                  </div>
+                  <p class="panel-note">若结束日收盘触发卖出条件，只记录提醒，不使用未来开盘价成交。</p>
+                </div>
+                <div class="table-wrap">
+                  <table id="pendingSellTable"></table>
+                </div>
+              </section>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="signals" role="tabpanel">
+            <section class="split">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">选股记录</p>
+                    <h3>每日选股明细</h3>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <table id="pickTable"></table>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">交易记录</p>
+                    <h3>交易流水</h3>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <table id="tradeTable"></table>
+                </div>
+              </section>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="contribution" role="tabpanel">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">个股贡献</p>
+                  <h3>个股贡献汇总</h3>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="contributionTable"></table>
+              </div>
+            </section>
           </div>
         </section>
       </main>

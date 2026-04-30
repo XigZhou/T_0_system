@@ -36,6 +36,8 @@
 - 停牌处理：原始日线只保留有行情的日期，停牌缺口在 `processed_qfq` 加工阶段用交易日历补齐
 - 复权处理：保留原始除权价格，不直接复权
 
+更新提醒：`raw_daily/`、`adj_factor/`、`trade_calendar.csv`、`stk_limit.csv`、`suspend_d.csv`、`market_context.csv` 只有执行 `scripts/sync_tushare_bundle.py` 才会连接 Tushare 更新。`build_processed_data.py`、`build_theme_focus_universe.py`、`build_industry_strength.py` 只是基于现有文件重建处理后数据，不会拉取新交易日。
+
 常用字段：
 
 | 字段名 | 解释 |
@@ -129,7 +131,7 @@ qfq_open/qfq_high/qfq_low 同理
 - 输出文件路径：`data_bundle/processed_qfq/<symbol>.csv`
 - 数据粒度：每股每交易日一行
 - 主键字段：`symbol + trade_date`
-- 更新时间：执行 `python scripts/build_processed_data.py` 时生成
+- 更新时间：执行 `python scripts/build_processed_data.py` 时生成；如需行业强度字段，再执行 `python scripts/build_industry_strength.py --processed-dir data_bundle/processed_qfq`
 - 缺失值处理：
   - 价格与成交量字段允许在停牌日为空
   - 技术指标样本不足时为空
@@ -211,7 +213,33 @@ can_sell_t:
 | board/market | 板块与市场分类字段 |
 | sh_* / hs300_* / cyb_* | 指数上下文字段 |
 
-### 8.4 当前主回测口径
+### 8.4 行业强度字段
+
+这些字段由 `scripts/build_industry_strength.py` 在处理后目录上二次生成，来源是同目录内所有股票的 `industry`、`m20`、`m60`、`pct_chg`、`amount` 字段，不依赖高积分行业指数行情接口。
+
+| 字段名 | 解释 |
+| --- | --- |
+| industry_m20 | 所属行业当日股票 `m20` 均值 |
+| industry_m60 | 所属行业当日股票 `m60` 均值 |
+| industry_rank_m20 | 行业 `industry_m20` 当日降序排名百分位，越小越强，0 表示最强 |
+| industry_rank_m60 | 行业 `industry_m60` 当日降序排名百分位，越小越强 |
+| industry_up_ratio | 行业内当日 `pct_chg>0` 的股票占比 |
+| industry_strong_ratio | 行业内当日 `m20>0` 的股票占比 |
+| industry_amount | 行业当日成交额合计 |
+| industry_amount20 | 行业成交额 20 日均值，默认最少 5 个样本 |
+| industry_amount_ratio | `industry_amount / industry_amount20` |
+| industry_stock_count | 行业内当日股票数量 |
+| industry_valid_m20_count | 行业内当日有效 `m20` 样本数量 |
+| stock_vs_industry_m20 | 个股 `m20 - industry_m20` |
+| stock_vs_industry_m60 | 个股 `m60 - industry_m60` |
+
+缺失值处理：
+
+- 行业为空的股票不参与聚合，写回时对应行业字段为空
+- 个股 `m20/m60/pct_chg/amount` 为空时，不参与对应均值或比例分母
+- 行业成交额均值不足最少样本时，`industry_amount20` 与 `industry_amount_ratio` 为空
+
+### 8.5 当前主回测口径
 
 当前系统实际回测不是直接使用 `next_raw_open` 做卖出，而是：
 

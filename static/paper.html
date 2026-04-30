@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>多账户模拟交易</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="paper-page">
+    <div class="shell">
+      <aside class="controls compact-controls">
+        <div class="brand-block">
+          <div>
+            <p class="eyebrow">模拟交易实验台</p>
+            <h1>多账户模拟交易</h1>
+          </div>
+          <div class="brand-actions">
+            <p class="subtle">每个中文 YAML 模板对应一个独立模拟账户，账户之间独立记录订单、成交、持仓和资产。</p>
+            <p class="subtle"><a href="/">组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/single">单股表格回测</a></p>
+          </div>
+        </div>
+
+        <form id="paperForm" class="form-grid compact-form">
+          <label class="field-wide">
+            <span>模板目录</span>
+            <input id="configDir" type="text" value="configs/paper_accounts" />
+          </label>
+
+          <label class="field-dates">
+            <span>选择模拟账户模板</span>
+            <select id="templateSelect"></select>
+          </label>
+
+          <label class="field-wide">
+            <span>模板路径</span>
+            <input id="configPath" type="text" placeholder="可手动填写单个 YAML 模板路径" />
+          </label>
+
+          <div class="three-col">
+            <label>
+              <span>执行动作</span>
+              <select id="paperAction">
+                <option value="generate">收盘生成待执行订单</option>
+                <option value="execute">开盘执行待成交订单</option>
+                <option value="mark">收盘更新持仓估值</option>
+              </select>
+            </label>
+            <label>
+              <span>动作日期</span>
+              <input id="tradeDate" type="text" placeholder="例如 20260424；留空自动识别" />
+            </label>
+            <label>
+              <span>行情说明</span>
+              <input type="text" value="本地测试默认用处理后日线开盘价" readonly />
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="runPaperBtn" type="submit">运行模拟账户</button>
+            <button id="refreshQuotesBtn" type="button" class="secondary">获取当前持仓最新价格</button>
+            <button id="loadLedgerBtn" type="button" class="secondary">读取账本</button>
+            <button id="reloadTemplatesBtn" type="button" class="secondary">刷新模板</button>
+          </div>
+
+          <p id="paperStatus" class="status">正在读取模板。</p>
+        </form>
+      </aside>
+
+      <main class="workspace">
+        <section class="summary-strip">
+          <div class="summary-intro">
+            <p class="eyebrow">账户摘要</p>
+            <h2>模拟运行结果</h2>
+            <p class="panel-note">先在收盘后生成待执行订单，再在下一交易日开盘执行订单；每一步都会写入 Excel 账本。</p>
+          </div>
+          <div id="paperSummaryGrid" class="summary-grid"></div>
+        </section>
+
+        <section class="tab-shell">
+          <div class="tab-list" role="tablist" aria-label="模拟交易明细">
+            <button type="button" class="tab-button active" data-tab="paper-orders" role="tab" aria-selected="true">待执行订单</button>
+            <button type="button" class="tab-button" data-tab="paper-trades" role="tab" aria-selected="false">成交流水</button>
+            <button type="button" class="tab-button" data-tab="paper-holdings" role="tab" aria-selected="false">当前持仓</button>
+            <button type="button" class="tab-button" data-tab="paper-assets" role="tab" aria-selected="false">每日资产</button>
+            <button type="button" class="tab-button" data-tab="paper-logs" role="tab" aria-selected="false">运行日志</button>
+          </div>
+
+          <div class="tab-panel active" data-tab-panel="paper-orders" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">订单</p>
+                  <h3>待执行订单</h3>
+                </div>
+                <p class="panel-note">状态为“待执行”的订单会在执行动作日期按配置行情源成交。</p>
+              </div>
+              <div class="table-wrap"><table id="pendingTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="paper-trades" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">成交</p>
+                  <h3>成交流水</h3>
+                </div>
+                <p class="panel-note">买入记录资金流出，卖出记录资金流入和实现盈亏。</p>
+              </div>
+              <div class="table-wrap"><table id="tradeTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="paper-holdings" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">持仓</p>
+                  <h3>当前持仓</h3>
+                </div>
+                <p class="panel-note">已持仓股票再次入选时不会重复买入。</p>
+              </div>
+              <div class="table-wrap"><table id="holdingTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="paper-assets" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">资产</p>
+                  <h3>每日资产</h3>
+                </div>
+                <p class="panel-note">现金、持仓市值和总资产会在执行订单或收盘估值时更新。</p>
+              </div>
+              <div class="table-wrap"><table id="assetTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="paper-logs" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">日志</p>
+                  <h3>运行日志</h3>
+                </div>
+                <p class="panel-note">异常、跳过和成交统计都会写入日志，方便复盘每天发生了什么。</p>
+              </div>
+              <div class="table-wrap"><table id="logTable"></table></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/paper.js"></script>
+  </body>
+</html>

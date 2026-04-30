@@ -19,9 +19,12 @@ Thumbs.db
 # Runtime logs and temporary smoke outputs
 runtime_logs/
 tmp_smoke_processed/
+paper_trading/
+logs/
 *.log
 
 # Large local data and generated research outputs
 data_bundle/
 research_runs/
-
+sector_research/data/
+sector_research/reports/

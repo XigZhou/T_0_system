@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>每日收盘选股</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="controls compact-controls">
+        <div class="brand-block">
+          <div>
+            <p class="eyebrow">每日执行计划</p>
+            <h1>每日收盘选股</h1>
+          </div>
+          <div class="brand-actions">
+            <p class="subtle">
+              收盘后用当天数据筛选明日候选买入股票，并根据当前持仓提示明日需要卖出的股票。
+            </p>
+            <p class="subtle"><a href="/">返回组合回测</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a></p>
+          </div>
+        </div>
+
+        <form id="dailyForm" class="form-grid compact-form">
+          <label class="field-wide">
+            <span>处理后数据目录</span>
+            <input id="processedDir" type="text" value="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100" />
+          </label>
+
+          <div class="two-col field-dates">
+            <label>
+              <span>信号日期</span>
+              <input id="signalDate" type="text" placeholder="留空则使用最新交易日" />
+            </label>
+            <label>
+              <span>选股数量</span>
+              <input id="topN" type="number" value="2" min="1" max="500" />
+            </label>
+          </div>
+
+          <label class="field-expression">
+            <span>买入条件</span>
+            <textarea id="buyCondition" rows="2">m120&gt;0.02,m60&gt;0.01,m20&gt;0.08,m10&lt;0.16,m5&lt;0.1,hs300_m20&gt;0.02</textarea>
+          </label>
+
+          <label class="field-expression">
+            <span>评分表达式</span>
+            <textarea id="scoreExpression" rows="2">m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30</textarea>
+          </label>
+
+          <label class="field-expression">
+            <span>卖出条件</span>
+            <textarea id="sellCondition" rows="2">m20&lt;0.08,hs300_m20&lt;0.02</textarea>
+          </label>
+
+          <div class="three-col">
+            <label>
+              <span>买入偏移</span>
+              <input id="entryOffset" type="number" value="1" min="1" max="5" />
+            </label>
+            <label>
+              <span>最短持有天数</span>
+              <input id="minHoldDays" type="number" value="3" min="0" max="20" />
+            </label>
+            <label>
+              <span>最大持有天数</span>
+              <input id="maxHoldDays" type="number" value="15" min="0" max="20" />
+            </label>
+          </div>
+
+          <div class="three-col">
+            <label>
+              <span>每笔目标资金</span>
+              <input id="perTradeBudget" type="number" value="10000" min="1" step="0.01" />
+            </label>
+            <label>
+              <span>每手股数</span>
+              <input id="lotSize" type="number" value="100" min="1" />
+            </label>
+            <label>
+              <span>执行说明</span>
+              <input type="text" value="买卖都按明日开盘复核执行" readonly />
+            </label>
+          </div>
+
+          <label class="field-wide">
+            <span>当前持仓</span>
+            <textarea id="holdingsText" rows="3" placeholder="每行一个持仓：股票代码,买入日期,买入价,股数,股票名称&#10;例如：000001,20240103,10.25,900,平安银行"></textarea>
+          </label>
+
+          <div class="actions">
+            <button id="runDailyBtn" type="submit">生成明日计划</button>
+            <button id="clearHoldingsBtn" type="button" class="secondary">清空持仓</button>
+          </div>
+
+          <p id="dailyStatus" class="status">等待输入。</p>
+        </form>
+      </aside>
+
+      <main class="workspace">
+        <section class="summary-strip">
+          <div class="summary-intro">
+            <p class="eyebrow">计划摘要</p>
+            <h2>明日交易准备</h2>
+            <p class="panel-note">买入和卖出都需要明日开盘复核涨跌停、停牌和实际成交情况。</p>
+          </div>
+          <div id="dailySummaryGrid" class="summary-grid"></div>
+        </section>
+
+        <section class="tab-shell">
+          <div class="tab-list" role="tablist" aria-label="每日收盘计划明细">
+            <button type="button" class="tab-button active" data-tab="daily-buy" role="tab" aria-selected="true">明日买入</button>
+            <button type="button" class="tab-button" data-tab="daily-sell" role="tab" aria-selected="false">卖出提醒</button>
+            <button type="button" class="tab-button" data-tab="daily-holding" role="tab" aria-selected="false">持仓诊断</button>
+          </div>
+
+          <div class="tab-panel active" data-tab-panel="daily-buy" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">明日买入</p>
+                  <h3>候选买入股票</h3>
+                </div>
+                <p class="panel-note">按评分排序；已在当前持仓里的股票不会重复列入买入候选。</p>
+              </div>
+              <div class="table-wrap">
+                <table id="dailyBuyTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="daily-sell" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">明日卖出</p>
+                  <h3>卖出提醒</h3>
+                </div>
+                <p class="panel-note">卖出条件按今天收盘后的持仓状态判断，实际成交放到明日开盘复核。</p>
+              </div>
+              <div class="table-wrap">
+                <table id="dailySellTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="daily-holding" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">持仓状态</p>
+                  <h3>当前持仓诊断</h3>
+                </div>
+                <p class="panel-note">用于查看每只持仓的浮盈、最大浮盈和从高点回撤。</p>
+              </div>
+              <div class="table-wrap">
+                <table id="dailyHoldingTable"></table>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/daily.js"></script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,9 +14,9 @@ from overnight_bt.tushare_data import SnapshotBuildConfig, build_universe_snapsh
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build fixed universe snapshot for the overnight backtest system")
-    parser.add_argument("--env", default="D:/量化/Momentum/code/tushare/.env")
-    parser.add_argument("--out", default="D:/量化/Momentum/T_0_system/data_bundle/universe_snapshot.csv")
-    parser.add_argument("--as-of", default="20260417")
+    parser.add_argument("--env", default=".env")
+    parser.add_argument("--out", default="data_bundle/universe_snapshot.csv")
+    parser.add_argument("--as-of", default=datetime.now().strftime("%Y%m%d"))
     parser.add_argument("--min-mv-yi", type=float, default=500.0)
     args = parser.parse_args()
 

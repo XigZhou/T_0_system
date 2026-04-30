@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
+import os
+import re
 from pathlib import Path
 
 import pandas as pd
 
+from .backtest import load_processed_folder
 from .expressions import evaluate_conditions, max_required_offset, parse_condition_expr
 from .models import SingleStockBacktestRequest
 
@@ -13,6 +16,10 @@ REQUIRED_BY_TIMING = {
     "same_day_close": {"close"},
     "next_day_open": {"open", "close"},
 }
+
+_WINDOWS_DRIVE_RE = re.compile(r"^(?P<drive>[A-Za-z]):[\\/](?P<rest>.*)$")
+_WSL_MOUNT_RE = re.compile(r"^/mnt/(?P<drive>[A-Za-z])/(?P<rest>.+)$")
+_MSYS_MOUNT_RE = re.compile(r"^/(?P<drive>[A-Za-z])/(?P<rest>.+)$")
 
 
 def _normalize_columns(df: pd.DataFrame) -> dict[str, str]:
@@ -28,10 +35,103 @@ def _pick_excel_engine(path: Path) -> str:
     raise ValueError(f"unsupported excel suffix: {suffix}")
 
 
+def _clean_path_text(path_text: str) -> str:
+    text = str(path_text or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        text = text[1:-1].strip()
+    return text
+
+
+def _path_candidates(path_text: str) -> list[Path]:
+    text = _clean_path_text(path_text)
+    if not text:
+        return [Path("")]
+
+    candidates: list[Path] = []
+    normalized = text.replace("\\", "/")
+
+    if os.name == "nt":
+        for pattern in (_WSL_MOUNT_RE, _MSYS_MOUNT_RE):
+            match = pattern.match(normalized)
+            if match:
+                candidates.append(Path(f"{match.group('drive').upper()}:/{match.group('rest')}"))
+                break
+    else:
+        match = _WINDOWS_DRIVE_RE.match(normalized)
+        if match:
+            candidates.append(Path(f"/mnt/{match.group('drive').lower()}/{match.group('rest')}"))
+
+    candidates.append(Path(text))
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            unique.append(candidate)
+            seen.add(key)
+    return unique
+
+
+def _resolve_excel_path(excel_path: str) -> Path:
+    candidates = _path_candidates(excel_path)
+    resolved_candidates: list[Path] = []
+    for candidate in candidates:
+        path = candidate.expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path = path.resolve()
+        resolved_candidates.append(path)
+        if path.exists() and path.is_file():
+            return path
+
+    attempted = ", ".join(str(path) for path in resolved_candidates)
+    raise FileNotFoundError(f"excel not found: {_clean_path_text(excel_path)}; tried: {attempted}")
+
+
+def _symbol_key(symbol: str) -> str:
+    text = str(symbol or "").strip().upper()
+    if "." in text:
+        text = text.split(".", 1)[0]
+    return text
+
+
+def _load_single_stock_processed(processed_dir: str, symbol_query: str) -> tuple[pd.DataFrame, str, str]:
+    query = str(symbol_query or "").strip()
+    if not query:
+        raise ValueError("股票代码或名称不能为空")
+
+    loaded, _ = load_processed_folder(processed_dir)
+    query_key = _symbol_key(query)
+    exact_matches = [
+        item
+        for item in loaded
+        if _symbol_key(item.symbol) == query_key or str(item.name).strip() == query
+    ]
+    fuzzy_matches = [
+        item
+        for item in loaded
+        if query and query in str(item.name).strip()
+    ]
+    matches = exact_matches or fuzzy_matches
+    if not matches:
+        raise ValueError(f"处理后数据目录中找不到股票：{query}")
+    if len(matches) > 1:
+        names = ", ".join(f"{item.symbol} {item.name}" for item in matches[:8])
+        raise ValueError(f"股票匹配到多个结果，请输入更精确的代码或名称：{names}")
+
+    item = matches[0]
+    work = item.df.copy()
+    work["trade_date_text"] = work["trade_date"].astype(str).str.strip()
+    work["trade_date"] = pd.to_datetime(work["trade_date_text"], format="%Y%m%d", errors="coerce")
+    work = work.dropna(subset=["trade_date"]).sort_values("trade_date").reset_index(drop=True)
+    if work.empty:
+        raise ValueError(f"{item.symbol} {item.name} 没有可用交易日期")
+    return work, item.symbol, item.name
+
+
 def load_single_stock_excel(excel_path: str, execution_timing: str) -> tuple[pd.DataFrame, str, str]:
-    path = Path(excel_path).expanduser().resolve()
-    if not path.exists() or not path.is_file():
-        raise FileNotFoundError(f"excel not found: {path}")
+    path = _resolve_excel_path(excel_path)
 
     engine = _pick_excel_engine(path)
     try:
@@ -113,6 +213,14 @@ def load_single_stock_excel(excel_path: str, execution_timing: str) -> tuple[pd.
     return work, stock_code, stock_name
 
 
+def load_single_stock_data(req: SingleStockBacktestRequest) -> tuple[pd.DataFrame, str, str]:
+    if str(req.processed_dir or "").strip() and str(req.symbol or "").strip():
+        return _load_single_stock_processed(req.processed_dir, req.symbol)
+    if str(req.excel_path or "").strip():
+        return load_single_stock_excel(req.excel_path, req.execution_timing)
+    raise ValueError("请填写处理后数据目录和股票代码；如使用旧模式，则填写 Excel 路径")
+
+
 def _apply_date_range(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
     work = df
     if start_date:
@@ -133,7 +241,8 @@ def _apply_date_range(df: pd.DataFrame, start_date: str, end_date: str) -> pd.Da
 
 def _execution_point(df: pd.DataFrame, signal_idx: int, timing: str) -> tuple[int | None, float | None, str]:
     if timing == "same_day_close":
-        price = df.iloc[signal_idx].get("close")
+        row = df.iloc[signal_idx]
+        price = row.get("raw_close", row.get("close"))
         if pd.isna(price):
             return None, None, "close is NaN"
         return signal_idx, float(price), "same_day_close"
@@ -141,10 +250,18 @@ def _execution_point(df: pd.DataFrame, signal_idx: int, timing: str) -> tuple[in
     exec_idx = signal_idx + 1
     if exec_idx >= len(df):
         return None, None, "next day does not exist"
-    price = df.iloc[exec_idx].get("open")
+    row = df.iloc[exec_idx]
+    price = row.get("raw_open", row.get("open"))
     if pd.isna(price):
         return None, None, "next day open is NaN"
     return exec_idx, float(price), "next_day_open"
+
+
+def _row_price(row: dict, raw_key: str, fallback_key: str) -> float | None:
+    raw = row.get(raw_key, row.get(fallback_key))
+    if pd.isna(raw):
+        return None
+    return float(raw)
 
 
 def _build_eval_row(df: pd.DataFrame, idx: int, max_offset: int) -> dict:
@@ -174,7 +291,7 @@ def _metric_definitions() -> list[dict]:
 
 
 def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
-    df, stock_code, stock_name = load_single_stock_excel(req.excel_path, req.execution_timing)
+    df, stock_code, stock_name = load_single_stock_data(req)
     df = _apply_date_range(df, req.start_date, req.end_date)
 
     buy_rules = parse_condition_expr(req.buy_condition)
@@ -206,7 +323,7 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
 
         if pending_order and pending_order["exec_idx"] == idx:
             exec_price = pending_order["price"]
-            current_close = float(row.get("close")) if not pd.isna(row.get("close")) else exec_price
+            current_close = _row_price(row, "raw_close", "close") or exec_price
             if pending_order["action"] == "BUY":
                 shares = pending_order["shares"]
                 gross_amount = exec_price * shares
@@ -341,7 +458,7 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
                 else:
                     signal_reason = f"buy cooldown active ({req.buy_cooldown_days} days)"
 
-        close_price = float(row.get("close")) if not pd.isna(row.get("close")) else 0.0
+        close_price = _row_price(row, "raw_close", "close") or 0.0
         position_market_value = position * close_price
         equity = cash + position_market_value
         equity_curve.append(equity)
@@ -349,10 +466,10 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
         daily_rows.append(
             {
                 "trade_date": trade_date_text,
-                "open": None if pd.isna(row.get("open")) else float(row.get("open")),
-                "high": None if pd.isna(row.get("high")) else float(row.get("high")),
-                "low": None if pd.isna(row.get("low")) else float(row.get("low")),
-                "close": None if pd.isna(row.get("close")) else float(row.get("close")),
+                "open": _row_price(row, "raw_open", "open"),
+                "high": _row_price(row, "raw_high", "high"),
+                "low": _row_price(row, "raw_low", "low"),
+                "close": _row_price(row, "raw_close", "close"),
                 "vol": None if pd.isna(row.get("vol")) else float(row.get("vol")),
                 "buy_signal": bool(buy_ok),
                 "sell_signal": bool(sell_ok),
@@ -369,7 +486,8 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
             }
         )
 
-    last_close = float(df.iloc[-1].get("close")) if not pd.isna(df.iloc[-1].get("close")) else 0.0
+    last_row = df.iloc[-1].to_dict()
+    last_close = _row_price(last_row, "raw_close", "close") or 0.0
     ending_market_value = position * last_close
     unrealized_pnl = (last_close - avg_cost_per_share) * position if position > 0 else 0.0
     ending_equity = cash + ending_market_value

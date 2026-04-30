@@ -112,6 +112,24 @@ python scripts/run_sector_research.py --start-date 20230101
 - `docs/sector-research-data-dictionary.md`
 - `docs/sector-research-indicator-documentation.md`
 
+前端工作台：
+
+```bash
+python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
+```
+
+启动后打开 `http://127.0.0.1:8083/sector`。页面只读取已经生成的文件，不触发 AKShare 抓取，也不写入任何数据目录。
+
+| 页面区域 | 数据来源 | 用途 |
+| --- | --- | --- |
+| 主题排名 | `sector_research/data/processed/theme_strength_daily.csv` | 查看锂矿锂电、光伏新能源、半导体芯片、存储芯片、AI、机器人、医药等主题强弱 |
+| 强势板块 | `sector_research/data/processed/sector_board_daily.csv` | 查看具体行业/概念板块的综合分、动量、成交额放大和资金流 |
+| 个股暴露 | `sector_research/data/processed/stock_theme_exposure.csv` | 查看股票代码、股票名称、命中主题、命中板块和暴露分 |
+| 主题映射 | `sector_research/data/processed/theme_board_mapping.csv` | 校验主题关键词匹配到了哪些 AKShare 板块 |
+| 异常日志 | `sector_research/reports/sector_research_errors.csv` | 查看抓取或处理失败的阶段、板块和错误信息 |
+
+前端 API 为 `GET /api/sector/overview?processed_dir=...&report_dir=...`。`processed_dir` 默认 `sector_research/data/processed`，`report_dir` 默认 `sector_research/reports`；两个目录都必须位于项目根目录内。
+
 ## 6. 接入当前回测系统
 
 不要直接覆盖当前处理后股票目录。应生成一个增强后的副本目录：
@@ -172,7 +190,7 @@ python -m pip install -r requirements.txt
 python -m pytest tests/test_sector_research.py tests/test_delivery_checks.py
 ```
 
-如果只是同步板块研究代码，不需要重启 `t0-system` 服务；因为当前前端/API 还没有直接调用 `sector_research/`。如果后续把板块研究字段作为前端默认目录或接口逻辑的一部分，则修改后端代码后需要重启：
+如果改动包含 `/sector` 页面、`/api/sector/overview` 接口或 `overnight_bt/sector_dashboard.py`，需要重启 `t0-system` 服务或重新启动临时 `uvicorn`，否则后台进程仍会使用旧代码：
 
 ```bash
 sudo systemctl restart t0-system

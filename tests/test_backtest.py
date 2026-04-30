@@ -52,6 +52,7 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
 
@@ -65,6 +66,12 @@ class BacktestEngineTest(unittest.TestCase):
             self.assertEqual(buy_trade["trade_date"], "20240103")
             self.assertEqual(sell_trade["trade_date"], "20240104")
             self.assertGreater(result["summary"]["ending_equity"], 100000.0)
+            self.assertGreater(len(result["condition_rows"]), 0)
+            self.assertEqual(result["year_rows"][0]["period"], "2024")
+            self.assertEqual(result["month_rows"][0]["period"], "2024-01")
+            self.assertEqual(result["exit_reason_rows"][0]["trade_count"], 1)
+            self.assertIn("profit_factor", result["summary"])
+            self.assertEqual(result["contribution_rows"][0]["name"], "平安银行")
 
     def test_strict_mode_blocks_buy_on_entry_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -93,6 +100,7 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
             self.assertEqual(result["summary"]["blocked_buy_count"], 1)
@@ -126,6 +134,7 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
             self.assertEqual(result["summary"]["blocked_buy_count"], 1)
@@ -161,6 +170,7 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
             self.assertEqual(result["summary"]["blocked_sell_count"], 1)
@@ -203,6 +213,7 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
             self.assertEqual([row["symbol"] for row in result["pick_rows"]], ["000001"])
@@ -244,6 +255,7 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
             sell_trade = next(row for row in result["trade_rows"] if row["action"] == "SELL")
@@ -288,12 +300,106 @@ class BacktestEngineTest(unittest.TestCase):
                     realistic_execution=True,
                     slippage_bps=0.0,
                     min_commission=0.0,
+                    settlement_mode="complete",
                 )
             )
             sell_trade = next(row for row in result["trade_rows"] if row["action"] == "SELL")
             self.assertEqual(sell_trade["trade_date"], "20240105")
             self.assertEqual(sell_trade["exit_reason"], "fixed_or_max_exit")
             self.assertEqual(result["summary"]["max_hold_exit_count"], 1)
+
+    def test_cutoff_mode_marks_open_position_without_future_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.1, "raw_low": 9.9, "raw_close": 10.0, "m20": 0.8, "m5": 0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 10.1, "raw_high": 10.3, "raw_low": 10.0, "raw_close": 10.2, "m20": 0.7, "m5": 0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 10.4, "raw_high": 10.9, "raw_low": 10.3, "raw_close": 10.8, "m20": 0.6, "m5": 0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240105", "raw_open": 11.0, "raw_high": 11.1, "raw_low": 10.9, "raw_close": 11.0, "m20": 0.5, "m5": 0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock])
+            result = run_portfolio_backtest(
+                BacktestRequest(
+                    processed_dir=str(processed_dir),
+                    start_date="20240102",
+                    end_date="20240104",
+                    buy_condition="m20>0",
+                    sell_condition="holding_return>0.05",
+                    score_expression="m20",
+                    top_n=1,
+                    initial_cash=10000.0,
+                    per_trade_budget=10000.0,
+                    lot_size=100,
+                    buy_fee_rate=0.0,
+                    sell_fee_rate=0.0,
+                    stamp_tax_sell=0.0,
+                    entry_offset=1,
+                    exit_offset=5,
+                    min_hold_days=0,
+                    max_hold_days=0,
+                    realistic_execution=True,
+                    slippage_bps=0.0,
+                    min_commission=0.0,
+                )
+            )
+
+            self.assertEqual(result["summary"]["simulation_end_date"], "20240104")
+            self.assertEqual(result["summary"]["buy_count"], 1)
+            self.assertEqual(result["summary"]["sell_count"], 0)
+            self.assertEqual(result["summary"]["open_position_count"], 1)
+            self.assertEqual(result["summary"]["pending_sell_signal_count"], 1)
+            self.assertEqual(result["open_position_rows"][0]["valuation_date"], "20240104")
+            self.assertEqual(result["pending_sell_rows"][0]["symbol"], "000001")
+
+    def test_cutoff_day_still_outputs_buy_prediction_without_future_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.1, "raw_low": 9.9, "raw_close": 10.0, "m20": 0.5, "m5": 0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 10.1, "raw_high": 10.2, "raw_low": 10.0, "raw_close": 10.1, "m20": 0.6, "m5": 0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 10.2, "raw_high": 10.4, "raw_low": 10.1, "raw_close": 10.3, "m20": 0.8, "m5": 0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock])
+            result = run_portfolio_backtest(
+                BacktestRequest(
+                    processed_dir=str(processed_dir),
+                    start_date="20240104",
+                    end_date="20240104",
+                    buy_condition="m20>0",
+                    sell_condition="holding_return>0.05",
+                    score_expression="m20",
+                    top_n=1,
+                    initial_cash=10000.0,
+                    per_trade_budget=10000.0,
+                    lot_size=100,
+                    buy_fee_rate=0.0,
+                    sell_fee_rate=0.0,
+                    stamp_tax_sell=0.0,
+                    entry_offset=1,
+                    exit_offset=5,
+                    min_hold_days=0,
+                    max_hold_days=15,
+                    realistic_execution=True,
+                    slippage_bps=0.0,
+                    min_commission=0.0,
+                )
+            )
+
+            self.assertEqual(result["summary"]["simulation_end_date"], "20240104")
+            self.assertEqual(result["summary"]["buy_count"], 0)
+            self.assertEqual(result["pick_rows"][0]["signal_date"], "20240104")
+            self.assertEqual(result["pick_rows"][0]["planned_entry_date"], "下一交易日")
+            self.assertEqual(result["pick_rows"][0]["planned_exit_date"], "截止日后估值")
+            self.assertEqual(result["pick_rows"][0]["execution_note"], "截止日预测，不在本次回测内成交")
+            self.assertEqual(result["daily_rows"][0]["picked_count"], 1)
 
 
 if __name__ == "__main__":

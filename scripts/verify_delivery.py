@@ -20,13 +20,17 @@ PROJECT_EXTRA_PATHS = (
     Path("docs/backtest-data-dictionary.md"),
     Path("docs/indicator-reference.md"),
     Path("docs/system-documentation.md"),
+    Path("docs/sector-research-system-guide.md"),
     Path("static/index.html"),
     Path("static/single.html"),
+    Path("static/sector.html"),
     Path("static/app.js"),
     Path("static/single.js"),
+    Path("static/sector.js"),
     Path("static/style.css"),
     Path("overnight_bt/app.py"),
     Path("overnight_bt/single_stock.py"),
+    Path("overnight_bt/sector_dashboard.py"),
 )
 PROJECT_README_PHRASES = (
     "TUSHARE_TOKEN",
@@ -34,6 +38,7 @@ PROJECT_README_PHRASES = (
     "scripts/sync_tushare_bundle.py",
     "scripts/build_processed_data.py",
     "python -m uvicorn overnight_bt.app:app",
+    "/sector",
 )
 
 

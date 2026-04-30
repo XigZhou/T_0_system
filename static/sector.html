@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>板块研究工作台</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="sector-page">
+    <div class="shell">
+      <aside class="controls compact-controls">
+        <div class="brand-block">
+          <div>
+            <p class="eyebrow">主题强度观察</p>
+            <h1>板块研究工作台</h1>
+          </div>
+          <div class="brand-actions">
+            <p class="subtle">读取独立板块研究产物，查看主题排名、强势板块、个股暴露和异常记录。</p>
+            <p class="subtle"><a href="/">组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a></p>
+          </div>
+        </div>
+
+        <form id="sectorForm" class="form-grid compact-form sector-form">
+          <label class="field-wide">
+            <span>板块指标目录</span>
+            <input id="sectorProcessedDir" type="text" value="sector_research/data/processed" />
+          </label>
+          <label class="field-dates">
+            <span>报告目录</span>
+            <input id="sectorReportDir" type="text" value="sector_research/reports" />
+          </label>
+          <div class="actions">
+            <button id="loadSectorBtn" type="submit">读取板块研究</button>
+            <button id="resetSectorBtn" type="button" class="secondary">默认目录</button>
+          </div>
+          <p id="sectorStatus" class="status">等待读取。</p>
+        </form>
+      </aside>
+
+      <main class="workspace">
+        <section class="summary-strip">
+          <div class="summary-intro">
+            <p class="eyebrow">研究摘要</p>
+            <h2>主题与板块状态</h2>
+            <p id="sectorPathText" class="panel-note"></p>
+          </div>
+          <div id="sectorSummaryGrid" class="summary-grid"></div>
+        </section>
+
+        <section class="tab-shell">
+          <div class="tab-list" role="tablist" aria-label="板块研究明细">
+            <button type="button" class="tab-button active" data-tab="sector-themes" role="tab" aria-selected="true">主题排名</button>
+            <button type="button" class="tab-button" data-tab="sector-boards" role="tab" aria-selected="false">强势板块</button>
+            <button type="button" class="tab-button" data-tab="sector-exposure" role="tab" aria-selected="false">个股暴露</button>
+            <button type="button" class="tab-button" data-tab="sector-mapping" role="tab" aria-selected="false">主题映射</button>
+            <button type="button" class="tab-button" data-tab="sector-errors" role="tab" aria-selected="false">异常日志</button>
+          </div>
+
+          <div class="tab-panel active" data-tab-panel="sector-themes" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">主题</p>
+                  <h3>最新主题强度</h3>
+                </div>
+                <p class="panel-note">综合分取量价齐升分与极弱反转分的主题聚合结果。</p>
+              </div>
+              <div id="sectorThemeChart" class="sector-chart"></div>
+              <div class="table-wrap">
+                <table id="sectorThemeTable"></table>
+              </div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="sector-boards" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">板块</p>
+                  <h3>最新强势板块</h3>
+                </div>
+                <p class="panel-note">行业板块和概念板块混排，按板块综合分降序展示。</p>
+              </div>
+              <div class="table-wrap"><table id="sectorBoardTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="sector-exposure" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">个股</p>
+                  <h3>主题暴露</h3>
+                </div>
+                <p class="panel-note">同一股票命中的主题和板块越多，暴露分越高；股票代码旁保留股票名称。</p>
+              </div>
+              <div class="table-wrap"><table id="sectorExposureTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="sector-mapping" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">映射</p>
+                  <h3>主题与板块匹配</h3>
+                </div>
+                <p class="panel-note">由 sector_research/configs/themes.yaml 的关键词匹配 AKShare 板块名称。</p>
+              </div>
+              <div class="table-wrap"><table id="sectorMappingTable"></table></div>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="sector-errors" role="tabpanel">
+            <section class="panel compact-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">异常</p>
+                  <h3>抓取与处理日志</h3>
+                </div>
+                <p class="panel-note">网络或单个板块失败会记录在这里；资金流失败不阻断历史行情强度计算。</p>
+              </div>
+              <div id="sectorMessageBox" class="message-box"></div>
+              <div class="table-wrap"><table id="sectorErrorTable"></table></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/sector.js"></script>
+  </body>
+</html>

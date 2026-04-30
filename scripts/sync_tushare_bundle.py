@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,11 +14,11 @@ from overnight_bt.tushare_data import SyncConfig, sync_tushare_bundle
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download raw tushare bundle for the overnight backtest system")
-    parser.add_argument("--env", default="D:/量化/Momentum/code/tushare/.env")
-    parser.add_argument("--bundle-dir", default="D:/量化/Momentum/T_0_system/data_bundle")
-    parser.add_argument("--snapshot-csv", default="D:/量化/Momentum/T_0_system/data_bundle/universe_snapshot.csv")
+    parser.add_argument("--env", default=".env")
+    parser.add_argument("--bundle-dir", default="data_bundle")
+    parser.add_argument("--snapshot-csv", default="data_bundle/universe_snapshot.csv")
     parser.add_argument("--start-date", default="20160101")
-    parser.add_argument("--end-date", default="20260417")
+    parser.add_argument("--end-date", default=datetime.now().strftime("%Y%m%d"))
     parser.add_argument("--sleep-seconds", type=float, default=0.2)
     args = parser.parse_args()
 
