@@ -14,6 +14,7 @@
 - Tushare 原始数据同步
 - 处理后回测主输入生成
 - 前端批量回测页面
+- 独立板块主题研究系统
 - API 导出交易流水
 - 特征分层扫描
 - 训练期/验证期参数探索
@@ -66,6 +67,8 @@ $env:TUSHARE_TOKEN="你的本机 token"
   回测引擎、处理逻辑、表达式解析、研究与交付检查模块
 - [scripts](/D:/量化/Momentum/T_0_system/scripts)
   数据准备、研究、特征扫描与交付校验脚本
+- [sector_research](/D:/量化/Momentum/T_0_system/sector_research)
+  独立板块研究系统，默认只写自己的数据与报告，不覆盖当前回测主目录
 - [static](/D:/量化/Momentum/T_0_system/static)
   前端页面
 - [docs](/D:/量化/Momentum/T_0_system/docs)
@@ -143,6 +146,43 @@ python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bun
 - `theme_focus` 是按主题规则筛出来的全量主题池
 - `theme_focus_top100` 是在主题池基础上按总市值取前 100
 
+### 5. 生成独立板块研究数据
+
+如果你要研究锂矿锂电、光伏新能源、半导体芯片、存储芯片、AI、机器人、医药等方向，可以先独立运行板块研究系统。它默认使用 AKShare 东方财富行业/概念板块、板块历史行情、板块成分股和资金流数据，输出只写入 `sector_research/`，不会影响当前回测主数据。
+
+```bash
+python scripts/run_sector_research.py --start-date 20230101
+```
+
+主要输出：
+
+- `sector_research/data/raw/board_list.csv`
+- `sector_research/data/raw/board_daily_raw.csv`
+- `sector_research/data/raw/board_fund_flow_rank.csv`
+- `sector_research/data/processed/theme_board_mapping.csv`
+- `sector_research/data/processed/sector_board_daily.csv`
+- `sector_research/data/processed/theme_strength_daily.csv`
+- `sector_research/data/processed/theme_constituents_snapshot.csv`
+- `sector_research/data/processed/stock_theme_exposure.csv`
+- `sector_research/reports/theme_strength_report.md`
+- `sector_research/reports/theme_strength_latest.xlsx`
+
+如果要把板块研究字段接入回测，必须写入一个新的处理后目录，例如：
+
+```bash
+python scripts/build_sector_research_features.py \
+  --processed-dir data_bundle/processed_qfq_theme_focus_top100 \
+  --sector-processed-dir sector_research/data/processed \
+  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector
+```
+
+这样会复制原股票 CSV 并增加 `sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_exposure_score` 等字段，原 `data_bundle/processed_qfq_theme_focus_top100` 不会被覆盖。
+
+可用于前端或研究脚本的条件示例：
+
+```text
+sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_exposure_score>0
+```
 ## 启动方式
 
 ```bash
@@ -504,6 +544,9 @@ python scripts/run_topn_hold_compare.py
 - 表达式文档：[expression-reference.md](/D:/量化/Momentum/T_0_system/docs/expression-reference.md)
 - 系统文档：[system-documentation.md](/D:/量化/Momentum/T_0_system/docs/system-documentation.md)
 - 主题股票池文档：[theme-focus-universe-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/theme-focus-universe-data-dictionary.md)
+- 板块研究使用说明：[sector-research-system-guide.md](/D:/量化/Momentum/T_0_system/docs/sector-research-system-guide.md)
+- 板块研究数据文档：[sector-research-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-research-data-dictionary.md)
+- 板块研究指标文档：[sector-research-indicator-documentation.md](/D:/量化/Momentum/T_0_system/docs/sector-research-indicator-documentation.md)
 
 ## 交付前校验
 

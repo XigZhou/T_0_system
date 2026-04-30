@@ -609,7 +609,59 @@ python scripts/verify_delivery.py
 
 - 若缺文件或 README 缺少关键章节，脚本返回非 0 退出码
 
-## 16. 推荐交付流程
+## 16. 独立板块研究系统
+
+### 功能
+
+- 独立抓取 AKShare 东方财富行业/概念板块、板块历史行情、成分股和资金流数据。
+- 研究锂矿锂电、光伏新能源、半导体芯片、存储芯片、AI、机器人、医药等主题方向。
+- 生成板块强度、主题强度、个股主题暴露和 Markdown/Excel 报告。
+- 默认只写入 `sector_research/`，不覆盖当前回测主目录。
+
+### 入口
+
+```bash
+python scripts/run_sector_research.py --start-date 20230101
+```
+
+如需把板块研究结果接入回测，生成独立副本目录：
+
+```bash
+python scripts/build_sector_research_features.py \
+  --processed-dir data_bundle/processed_qfq_theme_focus_top100 \
+  --sector-processed-dir sector_research/data/processed \
+  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector
+```
+
+### 输出结果
+
+- `sector_research/data/raw/board_list.csv`
+- `sector_research/data/raw/board_daily_raw.csv`
+- `sector_research/data/raw/board_fund_flow_rank.csv`
+- `sector_research/data/processed/theme_board_mapping.csv`
+- `sector_research/data/processed/sector_board_daily.csv`
+- `sector_research/data/processed/theme_strength_daily.csv`
+- `sector_research/data/processed/theme_constituents_snapshot.csv`
+- `sector_research/data/processed/stock_theme_exposure.csv`
+- `sector_research/reports/theme_strength_report.md`
+- `sector_research/reports/theme_strength_latest.xlsx`
+
+### 使用方式
+
+```text
+sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_exposure_score>0
+```
+
+### 异常处理
+
+- AKShare 网络或东方财富远端异常时，相关错误会写入 `sector_research_errors.csv`；如果完全无法获取板块列表或历史行情，脚本会失败。
+- 板块资金流抓取失败不影响历史行情和主题强度计算。
+- `build_sector_research_features.py` 要求 `--output-dir` 与 `--processed-dir` 不同，避免覆盖当前回测主数据。
+- 当前回测是 T 日收盘信号、T+1 开盘买入，因此 T 日板块强度可作为 T 日信号字段；如改成盘前信号，需要整体滞后一日。
+
+详细操作见 `docs/sector-research-system-guide.md`；字段和指标说明见 `docs/sector-research-data-dictionary.md`、`docs/sector-research-indicator-documentation.md`。
+
+## 17. 推荐交付流程
 
 1. 更新或同步数据
 2. 重新构建 `processed_qfq/`
