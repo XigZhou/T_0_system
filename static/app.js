@@ -20,6 +20,37 @@ const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const modeInputs = Array.from(document.querySelectorAll('input[name="backtestMode"]'));
 const modeOptions = Array.from(document.querySelectorAll(".mode-option"));
+const strategyPreset = document.getElementById("strategyPreset");
+
+const BASE_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100";
+const SECTOR_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100_sector";
+const BASE_BUY_CONDITION = "m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02";
+const BASE_SCORE_EXPRESSION = "m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30";
+const SECTOR_FILTER_CONDITION = `${BASE_BUY_CONDITION},sector_exposure_score>0,sector_strongest_theme_score>=0.6,sector_strongest_theme_rank_pct<=0.5`;
+const SECTOR_SCORE_EXPRESSION = `${BASE_SCORE_EXPRESSION} + sector_strongest_theme_score * 30 + sector_exposure_score * 10 - sector_strongest_theme_rank_pct * 15`;
+const STRATEGY_PRESETS = {
+  base: {
+    processedDir: BASE_PROCESSED_DIR,
+    buyCondition: BASE_BUY_CONDITION,
+    scoreExpression: BASE_SCORE_EXPRESSION,
+    dataProfile: "auto",
+    note: "已切换为基准动量预设，使用原主题前100处理后目录。",
+  },
+  sector_filter: {
+    processedDir: SECTOR_PROCESSED_DIR,
+    buyCondition: SECTOR_FILTER_CONDITION,
+    scoreExpression: BASE_SCORE_EXPRESSION,
+    dataProfile: "sector",
+    note: "已切换为板块过滤预设，会校验增强目录中的 sector_* 字段。",
+  },
+  sector_score: {
+    processedDir: SECTOR_PROCESSED_DIR,
+    buyCondition: SECTOR_FILTER_CONDITION,
+    scoreExpression: SECTOR_SCORE_EXPRESSION,
+    dataProfile: "sector",
+    note: "已切换为板块过滤 + 评分加权预设，会校验增强目录中的 sector_* 字段。",
+  },
+};
 
 const PERCENT_KEYS = new Set([
   "total_return",
@@ -66,6 +97,15 @@ const PERCENT_KEYS = new Set([
   "industry_strong_ratio",
   "stock_vs_industry_m20",
   "stock_vs_industry_m60",
+  "sector_exposure_score",
+  "sector_strongest_theme_score",
+  "sector_strongest_theme_rank_pct",
+  "sector_strongest_theme_m5",
+  "sector_strongest_theme_m20",
+  "sector_strongest_theme_m60",
+  "sector_strongest_theme_amount_ratio_20",
+  "sector_strongest_theme_board_up_ratio",
+  "sector_strongest_theme_positive_m20_ratio",
 ]);
 
 const COLUMN_LABELS = {
@@ -87,6 +127,7 @@ const COLUMN_LABELS = {
   category: "分类",
   completed_signal_count: "完成信号数",
   completed_days: "完成信号日数",
+  data_profile: "数据口径",
   drawdown: "回撤",
   ending_equity: "期末权益",
   entry_can_buy_open: "买入日可开盘买入",
@@ -164,6 +205,19 @@ const COLUMN_LABELS = {
   sell_count: "卖出次数",
   sell_fee: "卖出费用",
   sell_net_amount: "卖出净金额",
+  sector_board_count: "命中板块数",
+  sector_exposure_score: "板块主题暴露分",
+  sector_strongest_board: "最强板块",
+  sector_strongest_subtheme: "最强子赛道",
+  sector_strongest_theme: "最强主题",
+  sector_strongest_theme_amount_ratio_20: "最强主题成交额放大",
+  sector_strongest_theme_board_up_ratio: "最强主题上涨占比",
+  sector_strongest_theme_m5: "最强主题五日动量",
+  sector_strongest_theme_m20: "最强主题二十日动量",
+  sector_strongest_theme_m60: "最强主题六十日动量",
+  sector_strongest_theme_positive_m20_ratio: "最强主题正动量占比",
+  sector_strongest_theme_rank_pct: "最强主题排名百分位",
+  sector_strongest_theme_score: "最强主题综合分",
   shares: "股数",
   signal_count: "信号数",
   signal_close: "信号日前复权收盘价",
@@ -205,6 +259,9 @@ const VALUE_LABELS = {
   BUY_SKIPPED_CUTOFF: "截止日不买入",
   SELL: "卖出",
   SELL_BLOCKED: "卖出阻塞",
+  auto: "自动识别",
+  base: "基准口径",
+  sector: "板块增强口径",
   entry_date_row_missing: "买入日记录缺失",
   fixed_or_max_exit: "固定或最大持有退出",
   "entry date row missing": "买入日记录缺失",
@@ -241,6 +298,16 @@ if (tabButtons.length) {
   setActiveTab(initialTab);
 }
 
+function applyStrategyPreset(presetKey, showStatus = true) {
+  const preset = STRATEGY_PRESETS[presetKey] || STRATEGY_PRESETS.base;
+  document.getElementById("processedDir").value = preset.processedDir;
+  document.getElementById("buyCondition").value = preset.buyCondition;
+  document.getElementById("scoreExpression").value = preset.scoreExpression;
+  if (showStatus) {
+    setStatus(preset.note);
+  }
+}
+
 function getBacktestMode() {
   return modeInputs.find((input) => input.checked)?.value || "signal_quality";
 }
@@ -270,10 +337,14 @@ modeInputs.forEach((input) => {
   input.addEventListener("change", updateBacktestModeUI);
 });
 updateBacktestModeUI();
+strategyPreset?.addEventListener("change", () => applyStrategyPreset(strategyPreset.value));
+applyStrategyPreset(strategyPreset?.value || "base", false);
 
 function buildPayload() {
+  const preset = STRATEGY_PRESETS[strategyPreset?.value] || STRATEGY_PRESETS.base;
   return {
     processed_dir: document.getElementById("processedDir").value.trim(),
+    data_profile: preset.dataProfile,
     start_date: document.getElementById("startDate").value.trim(),
     end_date: document.getElementById("endDate").value.trim(),
     buy_condition: document.getElementById("buyCondition").value.trim(),
@@ -536,6 +607,7 @@ function ensureDiagnosticRows(result) {
 
 function renderSummary(summary = {}) {
   const signalQualityKeys = [
+    ["data_profile", "数据口径"],
     ["signal_count", "入选信号数"],
     ["completed_signal_count", "完成信号数"],
     ["avg_trade_return", "平均单笔收益"],
@@ -556,6 +628,7 @@ function renderSummary(summary = {}) {
     ["avg_signals_per_day", "平均每日信号"],
   ];
   const accountKeys = [
+    ["data_profile", "数据口径"],
     ["ending_equity", "期末权益"],
     ["ending_cash", "期末现金"],
     ["ending_market_value", "期末持仓市值"],
@@ -727,15 +800,15 @@ function applyResult(result) {
   renderTable(openPositionTable, result.open_position_rows, ["valuation_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "market_value", "unrealized_pnl", "unrealized_return", "holding_days", "planned_exit_date"]);
   renderTable(pendingSellTable, result.pending_sell_rows, ["signal_date", "planned_sell_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_condition", "reason"]);
   if (isSignalQuality) {
-    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
+    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
     renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "rank", "score", "entry_price", "exit_price", "trade_return", "holding_days", "exit_type", "exit_signal_date"]);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "signal_count", "total_signal_return", "win_rate", "avg_trade_return", "median_trade_return"]);
-    diagText.textContent = `信号质量回测：载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
+    diagText.textContent = `信号质量回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
   } else {
-    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
+    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
     renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "action", "price", "shares", "gross_amount", "fees", "net_amount", "cash_after", "trade_return", "price_pnl", "exit_reason", "exit_signal_date"]);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "realized_pnl", "trade_count", "win_rate", "avg_trade_return"]);
-    diagText.textContent = `实盘账户回测：载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
+    diagText.textContent = `实盘账户回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
   }
 }
 

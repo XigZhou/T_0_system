@@ -173,6 +173,16 @@ python scripts/build_sector_research_features.py \
 sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_exposure_score>0
 ```
 
+组合回测页和每日收盘选股页已经内置三套策略预设：
+
+| 预设 | 数据目录 | 说明 |
+| --- | --- | --- |
+| 基准动量 | `data_bundle/processed_qfq_theme_focus_top100` | 不使用 `sector_*` 字段，用于和增强策略对照 |
+| 板块过滤 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 使用板块暴露分、最强主题分和主题排名百分位做买入过滤 |
+| 板块过滤 + 评分加权 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 在板块过滤基础上，把主题强度和暴露分加入评分排序 |
+
+板块增强口径会校验 `sector_feature_manifest.csv` 和必要 `sector_*` 字段，缺失时直接报错，避免回测或每日选股误用未增强的数据目录。
+
 ## 7. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。

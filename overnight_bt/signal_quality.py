@@ -33,6 +33,7 @@ from .expressions import (
     parse_condition_expr,
 )
 from .models import Position, SignalQualityRequest
+from .sector_features import SECTOR_CATEGORICAL_COLUMNS, SECTOR_NUMERIC_COLUMNS, resolve_data_profile, validate_sector_feature_set
 from .utils import to_float
 
 
@@ -74,6 +75,8 @@ _SIGNAL_FEATURE_COLUMNS = (
     "industry_valid_m20_count",
     "stock_vs_industry_m20",
     "stock_vs_industry_m60",
+    *tuple(SECTOR_NUMERIC_COLUMNS),
+    *tuple(SECTOR_CATEGORICAL_COLUMNS),
 )
 
 
@@ -846,6 +849,7 @@ def run_signal_quality_loaded(
     recommended_topk = next((row for row in topk_rows if row.get("recommended")), {})
     summary = {
         "result_mode": "signal_quality",
+        "data_profile": diagnostics.get("data_profile", "base"),
         "start_date": signal_dates[0],
         "end_date": signal_dates[-1],
         "settlement_mode": "截止日估值" if cutoff_mode else "完整结算",
@@ -915,4 +919,14 @@ def run_signal_quality_loaded(
 
 def run_signal_quality(req: SignalQualityRequest) -> dict[str, Any]:
     loaded, diagnostics = load_processed_folder(req.processed_dir)
+    data_profile = resolve_data_profile(
+        requested_profile=req.data_profile,
+        processed_dir=diagnostics["processed_dir"],
+        buy_condition=req.buy_condition,
+        sell_condition=req.sell_condition,
+        score_expression=req.score_expression,
+    )
+    diagnostics["data_profile"] = data_profile
+    if data_profile == "sector":
+        diagnostics.update(validate_sector_feature_set(loaded_items=loaded, processed_dir=diagnostics["processed_dir"]))
     return run_signal_quality_loaded(loaded, diagnostics, req)

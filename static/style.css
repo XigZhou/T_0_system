@@ -193,6 +193,10 @@ body::before {
   grid-column: span 7;
 }
 
+.compact-form > .field-preset {
+  grid-column: span 5;
+}
+
 .compact-form > .field-symbol {
   grid-column: span 5;
 }
@@ -1094,6 +1098,7 @@ tr:last-child td {
   }
 
   .compact-form > .field-wide,
+  .compact-form > .field-preset,
   .compact-form > .field-symbol,
   .compact-form > .field-dates,
   .compact-form > .field-expression,

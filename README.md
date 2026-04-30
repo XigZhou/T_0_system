@@ -208,20 +208,30 @@ python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
 
 如果要把板块研究字段接入回测，必须写入一个新的处理后目录，例如：
 
-`ash
+```bash
 python scripts/build_sector_research_features.py \
   --processed-dir data_bundle/processed_qfq_theme_focus_top100 \
   --sector-processed-dir sector_research/data/processed \
   --output-dir data_bundle/processed_qfq_theme_focus_top100_sector
-`
+```
 
-这样会复制原股票 CSV 并增加 sector_strongest_theme_score、sector_strongest_theme_rank_pct、sector_exposure_score 等字段，原 data_bundle/processed_qfq_theme_focus_top100 不会被覆盖。
+这样会复制原股票 CSV 并增加 `sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_exposure_score` 等字段，原 `data_bundle/processed_qfq_theme_focus_top100` 不会被覆盖。
+
+组合回测页和每日收盘选股页提供三套策略预设：
+
+| 预设 | 数据目录 | 用途 |
+| --- | --- | --- |
+| 基准动量 | `data_bundle/processed_qfq_theme_focus_top100` | 沿用原条件和评分表达式 |
+| 板块过滤 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 增加 `sector_exposure_score>0`、主题强度和排名过滤 |
+| 板块过滤 + 评分加权 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 在板块过滤基础上把主题强度、暴露分和主题排名纳入评分 |
+
+选择板块增强预设时，后端会校验增强目录是否存在 `sector_feature_manifest.csv`，以及股票 CSV 是否包含 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_strongest_theme_m20`。缺失时会直接报错，不会静默退回原数据。
 
 可用于前端或研究脚本的条件示例：
 
-`	ext
+```text
 sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_exposure_score>0
-`
+```
 
 ### 7. 补充或重拉主题前 100 股票最新数据
 

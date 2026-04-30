@@ -8,6 +8,7 @@ from typing import Literal
 
 class BacktestRequest(BaseModel):
     processed_dir: str = Field(..., description="Directory containing per-stock processed CSV files")
+    data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
     start_date: str = Field("", description="Backtest start date YYYYMMDD")
     end_date: str = Field("", description="Backtest end date YYYYMMDD")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
@@ -50,6 +51,7 @@ class BacktestResponse(BaseModel):
 
 class SignalQualityRequest(BaseModel):
     processed_dir: str = Field(..., description="Directory containing per-stock processed CSV files")
+    data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
     start_date: str = Field("", description="Signal quality start date YYYYMMDD")
     end_date: str = Field("", description="Signal quality end date YYYYMMDD")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
@@ -96,6 +98,7 @@ class DailyHolding(BaseModel):
 
 class DailyPlanRequest(BaseModel):
     processed_dir: str = Field(..., description="Directory containing per-stock processed CSV files")
+    data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
     signal_date: str = Field("", description="Signal date YYYYMMDD; empty means latest available trade date")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
     sell_condition: str = Field("", description="Optional sell filters evaluated on current holdings")

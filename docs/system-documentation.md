@@ -205,6 +205,24 @@ python scripts/build_sector_research_features.py \
 
 异常处理：缺少 CSV 时页面显示“暂无数据”并在异常日志页签提示缺失路径；如果传入的目录不在项目根目录内，API 返回 400，避免误读服务器其他目录。
 
+### 板块增强口径接入回测与每日选股
+
+组合回测页 `/` 和每日收盘选股页 `/daily` 都支持“策略预设”：
+
+| 预设 | 处理后数据目录 | 买入条件和评分变化 |
+| --- | --- | --- |
+| 基准动量 | `data_bundle/processed_qfq_theme_focus_top100` | 沿用原动量、大盘过滤和评分表达式 |
+| 板块过滤 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 增加 `sector_exposure_score>0`、`sector_strongest_theme_score>=0.6`、`sector_strongest_theme_rank_pct<=0.5` |
+| 板块过滤 + 评分加权 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 在板块过滤基础上，把 `sector_strongest_theme_score`、`sector_exposure_score`、`sector_strongest_theme_rank_pct` 纳入评分 |
+
+当请求的 `data_profile` 为 `sector`，或买入条件/卖出条件/评分表达式中出现 `sector_*` 字段时，后端会按板块增强口径校验数据。校验内容包括：
+
+- 目录下必须存在 `sector_feature_manifest.csv`
+- 股票 CSV 必须包含 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_strongest_theme_m20`
+- `sector_feature_manifest.csv` 只作为校验清单，不会被误当成股票日线读入
+
+这些字段只来自 `scripts/build_sector_research_features.py` 生成的增强目录，不会覆盖原始主题前 100 处理后目录。
+
 异常处理：
 
 - AKShare 接口不可用或网络失败时，相关阶段错误会写入 sector_research_errors.csv；如果完全无法获取板块列表或历史行情，脚本会直接失败。

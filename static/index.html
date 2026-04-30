@@ -40,9 +40,18 @@
             </label>
           </div>
 
+          <label class="field-preset">
+            <span>策略预设</span>
+            <select id="strategyPreset">
+              <option value="base" selected>基准动量</option>
+              <option value="sector_filter">板块过滤</option>
+              <option value="sector_score">板块过滤 + 评分加权</option>
+            </select>
+          </label>
+
           <label class="field-wide">
             <span>处理后数据目录</span>
-            <input id="processedDir" type="text" value="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100" />
+            <input id="processedDir" type="text" value="data_bundle/processed_qfq_theme_focus_top100" />
           </label>
 
           <div class="two-col field-dates">
