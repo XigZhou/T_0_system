@@ -78,6 +78,8 @@ class DeliveryChecksTest(unittest.TestCase):
             "scripts/build_theme_focus_universe.py",
             "scripts/run_universe_hold_compare.py",
             "scripts/run_topn_hold_compare.py",
+            "scripts/run_sector_research.py",
+            "scripts/build_sector_research_features.py",
         ]:
             result = subprocess.run(
                 [sys.executable, script_name, "--help"],
