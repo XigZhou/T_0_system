@@ -21,6 +21,7 @@ PROJECT_EXTRA_PATHS = (
     Path("docs/indicator-reference.md"),
     Path("docs/system-documentation.md"),
     Path("docs/sector-research-system-guide.md"),
+    Path("docs/after-close-pipeline.md"),
     Path("static/index.html"),
     Path("static/single.html"),
     Path("static/sector.html"),
@@ -31,6 +32,7 @@ PROJECT_EXTRA_PATHS = (
     Path("overnight_bt/app.py"),
     Path("overnight_bt/single_stock.py"),
     Path("overnight_bt/sector_dashboard.py"),
+    Path("scripts/run_after_close_pipeline.sh"),
 )
 PROJECT_README_PHRASES = (
     "TUSHARE_TOKEN",

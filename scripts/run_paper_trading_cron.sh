@@ -6,6 +6,7 @@ VENV_ACTIVATE="${VENV_ACTIVATE:-/home/ubuntu/TencentCloud/myenv/bin/activate}"
 CONFIG_DIR="${CONFIG_DIR:-configs/paper_accounts}"
 LOG_DIR="${LOG_DIR:-${PROJECT_DIR}/logs/paper_trading_cron}"
 LOCK_ROOT="${LOCK_ROOT:-/tmp}"
+PROCESSED_CHECK_DIR="${PROCESSED_CHECK_DIR:-data_bundle/processed_qfq_theme_focus_top100}"
 
 ACTION="${1:-}"
 if [[ -z "${ACTION}" ]]; then
@@ -100,17 +101,17 @@ if [[ "${CHECK_ONLY}" == "1" ]]; then
 fi
 
 ensure_processed_latest() {
-  python - "${RUN_DATE}" <<'PY'
+  python - "${RUN_DATE}" "${PROCESSED_CHECK_DIR}" <<'PY'
 from pathlib import Path
 import sys
 
 import pandas as pd
 
 run_date = sys.argv[1]
-target = Path("data_bundle/processed_qfq_theme_focus_top100")
+target = Path(sys.argv[2])
 files = sorted(path for path in target.glob("*.csv") if "manifest" not in path.name)
 if not files:
-    raise SystemExit("主题前100处理后目录没有 CSV 文件")
+    raise SystemExit(f"{target} 处理后目录没有 CSV 文件")
 
 latest_dates = []
 for path in files:
@@ -121,7 +122,7 @@ for path in files:
 
 min_latest = min(latest_dates)
 max_latest = max(latest_dates)
-print(f"主题前100文件数：{len(files)}，最小最新日期：{min_latest}，最大最新日期：{max_latest}")
+print(f"处理后校验目录：{target}，文件数：{len(files)}，最小最新日期：{min_latest}，最大最新日期：{max_latest}")
 if min_latest < run_date:
     raise SystemExit(f"处理后数据尚未全部更新到 {run_date}，跳过生成下一交易日订单")
 PY
