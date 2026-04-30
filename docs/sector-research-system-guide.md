@@ -122,13 +122,16 @@ python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
 
 | 页面区域 | 数据来源 | 用途 |
 | --- | --- | --- |
+| 大盘环境 | `data_bundle/market_context.csv` | 读取已有上证指数、沪深300、创业板指上下文字段，辅助判断板块强弱所处的大盘背景 |
 | 主题排名 | `sector_research/data/processed/theme_strength_daily.csv` | 查看锂矿锂电、光伏新能源、半导体芯片、存储芯片、AI、机器人、医药等主题强弱 |
 | 强势板块 | `sector_research/data/processed/sector_board_daily.csv` | 查看具体行业/概念板块的综合分、动量、成交额放大和资金流 |
 | 个股暴露 | `sector_research/data/processed/stock_theme_exposure.csv` | 查看股票代码、股票名称、命中主题、命中板块和暴露分 |
 | 主题映射 | `sector_research/data/processed/theme_board_mapping.csv` | 校验主题关键词匹配到了哪些 AKShare 板块 |
 | 异常日志 | `sector_research/reports/sector_research_errors.csv` | 查看抓取或处理失败的阶段、板块和错误信息 |
 
-前端 API 为 `GET /api/sector/overview?processed_dir=...&report_dir=...`。`processed_dir` 默认 `sector_research/data/processed`，`report_dir` 默认 `sector_research/reports`；两个目录都必须位于项目根目录内。
+前端 API 为 `GET /api/sector/overview?processed_dir=...&report_dir=...&market_context_path=...`。`processed_dir` 默认 `sector_research/data/processed`，`report_dir` 默认 `sector_research/reports`，`market_context_path` 默认 `data_bundle/market_context.csv`；这些路径都必须位于项目根目录内。
+
+大盘环境面板只读 `market_context.csv`，不会触发 Tushare 或 AKShare 抓取。接口会优先选取“不晚于板块最新交易日”的最近一条大盘记录，用于避免自定义旧板块目录时误展示未来的大盘数据。展示字段包括上证指数、沪深300、创业板指的收盘点位、日涨跌幅、5 日动量、20 日动量和 60 日动量；字段定义见 `docs/backtest-data-dictionary.md` 的 `market_context.csv` 章节。
 
 ## 6. 接入当前回测系统
 

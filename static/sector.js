@@ -151,6 +151,59 @@ function renderSummary(summary = {}) {
   byId("sectorPathText").textContent = `指标目录：${summary.processed_dir || defaults.processedDir}；报告目录：${summary.report_dir || defaults.reportDir}`;
 }
 
+function renderMarketContext(marketContext = {}) {
+  const grid = byId("sectorMarketGrid");
+  const note = byId("sectorMarketNote");
+  const indexes = marketContext.indexes || [];
+  note.textContent = marketContext.note || "读取本地 data_bundle/market_context.csv，不触发行情抓取。";
+
+  if (marketContext.status !== "ready" || indexes.length === 0) {
+    grid.innerHTML = `
+      <div class="market-card market-card-empty">
+        <div class="market-card-head">
+          <strong>大盘环境未就绪</strong>
+          <span>只读</span>
+        </div>
+        <p>${escapeHtml(marketContext.note || "暂无可展示的大盘上下文数据。")}</p>
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = indexes
+    .map((item) => `
+      <article class="market-card market-${escapeHtml(item.tone || "neutral")}">
+        <div class="market-card-head">
+          <strong>${escapeHtml(item.name || item.code || "-")}</strong>
+          <span>${escapeHtml(item.state || "震荡")}</span>
+        </div>
+        <div class="market-main">
+          <span>收盘</span>
+          <strong>${escapeHtml(formatValue(item.close, "close"))}</strong>
+        </div>
+        <dl class="market-metrics">
+          <div>
+            <dt>日涨跌</dt>
+            <dd>${escapeHtml(formatValue(item.pct_chg, "pct_chg"))}</dd>
+          </div>
+          <div>
+            <dt>5日动量</dt>
+            <dd>${escapeHtml(formatValue(item.m5, "m5"))}</dd>
+          </div>
+          <div>
+            <dt>20日动量</dt>
+            <dd>${escapeHtml(formatValue(item.m20, "m20"))}</dd>
+          </div>
+          <div>
+            <dt>60日动量</dt>
+            <dd>${escapeHtml(formatValue(item.m60, "m60"))}</dd>
+          </div>
+        </dl>
+      </article>
+    `)
+    .join("");
+}
+
 function renderTable(tableId, rows, columns) {
   const table = byId(tableId);
   const thead = document.createElement("thead");
@@ -230,6 +283,7 @@ function renderMessages(payload) {
 function renderPayload(payload) {
   state.payload = payload;
   renderSummary(payload.summary || {});
+  renderMarketContext(payload.market_context || {});
   renderThemeChart(payload.latest_themes || []);
   renderTable("sectorThemeTable", payload.latest_themes || [], themeColumns);
   renderTable("sectorBoardTable", payload.latest_boards || [], boardColumns);

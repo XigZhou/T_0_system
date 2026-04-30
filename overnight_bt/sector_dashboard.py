@@ -10,6 +10,31 @@ import pandas as pd
 
 DEFAULT_SECTOR_PROCESSED_DIR = "sector_research/data/processed"
 DEFAULT_SECTOR_REPORT_DIR = "sector_research/reports"
+DEFAULT_MARKET_CONTEXT_PATH = "data_bundle/market_context.csv"
+
+MARKET_INDEX_CONFIG = [
+    {"code": "sh", "name": "上证指数"},
+    {"code": "hs300", "name": "沪深300"},
+    {"code": "cyb", "name": "创业板指"},
+]
+
+MARKET_FIELD_SUFFIXES = [
+    "close",
+    "pct_chg",
+    "m5",
+    "m20",
+    "m60",
+    "m120",
+    "bias_ma5",
+    "bias_ma10",
+    "amp",
+    "vr",
+]
+MARKET_NUMERIC_COLUMNS = {
+    f"{item['code']}_{suffix}"
+    for item in MARKET_INDEX_CONFIG
+    for suffix in MARKET_FIELD_SUFFIXES
+}
 
 THEME_COLUMNS = [
     "trade_date",
@@ -120,12 +145,14 @@ def build_sector_dashboard_payload(
     base_dir: str | Path,
     processed_dir: str | Path = DEFAULT_SECTOR_PROCESSED_DIR,
     report_dir: str | Path = DEFAULT_SECTOR_REPORT_DIR,
+    market_context_path: str | Path = DEFAULT_MARKET_CONTEXT_PATH,
 ) -> dict[str, Any]:
     """Read sector research outputs and shape them for the read-only dashboard."""
 
     base = Path(base_dir).resolve()
     processed = _resolve_under_base(base, processed_dir)
     report = _resolve_under_base(base, report_dir)
+    market_path = _resolve_under_base(base, market_context_path)
     messages: list[str] = []
 
     theme_strength = _read_csv(processed / "theme_strength_daily.csv", base, messages)
@@ -134,8 +161,16 @@ def build_sector_dashboard_payload(
     mapping = _read_csv(processed / "theme_board_mapping.csv", base, messages)
     errors = _read_csv(report / "sector_research_errors.csv", base, messages, required=False)
     summary_json = _read_json(report / "sector_research_summary.json", base, messages)
+    market_context_frame = _read_csv(market_path, base, messages, required=False)
 
     latest_date = _latest_trade_date(theme_strength, board_strength, summary_json)
+    market_context = _build_market_context(
+        market_context_frame=market_context_frame,
+        path=market_path,
+        base=base,
+        latest_date=latest_date,
+        messages=messages,
+    )
     latest_themes = _latest_rows(theme_strength, latest_date, "theme_score", THEME_COLUMNS, 40)
     latest_boards = _latest_rows(board_strength, latest_date, "theme_board_score", BOARD_COLUMNS, 80)
     exposure_rows = _sorted_rows(stock_exposure, "exposure_score", EXPOSURE_COLUMNS, 120)
@@ -164,8 +199,9 @@ def build_sector_dashboard_payload(
     return {
         "status": status,
         "messages": messages,
-        "paths": _file_paths(base, processed, report),
+        "paths": _file_paths(base, processed, report, market_path),
         "summary": summary,
+        "market_context": market_context,
         "latest_themes": latest_themes,
         "latest_boards": latest_boards,
         "stock_exposure": exposure_rows,
@@ -264,6 +300,155 @@ def _theme_history(theme_strength: pd.DataFrame, latest_themes: list[dict[str, A
     return _records(target, columns=HISTORY_COLUMNS, limit=640)
 
 
+def _build_market_context(
+    *,
+    market_context_frame: pd.DataFrame,
+    path: Path,
+    base: Path,
+    latest_date: str,
+    messages: list[str],
+) -> dict[str, Any]:
+    display_path = _display_path(base, path)
+    if not path.exists():
+        return {
+            "status": "missing",
+            "path": display_path,
+            "latest_trade_date": "",
+            "sector_trade_date": latest_date,
+            "row_count": 0,
+            "indexes": [],
+            "history": [],
+            "note": f"未找到本地大盘环境文件 {display_path}，板块页不触发行情抓取。",
+        }
+    if market_context_frame.empty:
+        return {
+            "status": "empty",
+            "path": display_path,
+            "latest_trade_date": "",
+            "sector_trade_date": latest_date,
+            "row_count": 0,
+            "indexes": [],
+            "history": [],
+            "note": f"本地大盘环境文件 {display_path} 为空。",
+        }
+    if "trade_date" not in market_context_frame.columns:
+        messages.append(f"大盘环境文件缺少 trade_date 字段: {display_path}")
+        return {
+            "status": "invalid",
+            "path": display_path,
+            "latest_trade_date": "",
+            "sector_trade_date": latest_date,
+            "row_count": int(len(market_context_frame)),
+            "indexes": [],
+            "history": [],
+            "note": "大盘环境文件缺少 trade_date，暂不能对齐展示。",
+        }
+
+    target = market_context_frame.copy()
+    target["_trade_date_key"] = target["trade_date"].map(_date_key)
+    target = target[target["_trade_date_key"] != ""]
+    if target.empty:
+        return {
+            "status": "empty",
+            "path": display_path,
+            "latest_trade_date": "",
+            "sector_trade_date": latest_date,
+            "row_count": int(len(market_context_frame)),
+            "indexes": [],
+            "history": [],
+            "note": "大盘环境文件没有可用交易日。",
+        }
+
+    sector_date_key = _date_key(latest_date)
+    aligned = target
+    if sector_date_key:
+        bounded = target[target["_trade_date_key"] <= sector_date_key]
+        if bounded.empty:
+            messages.append(f"大盘环境文件没有不晚于板块交易日 {latest_date} 的记录，暂用文件最新记录。")
+        else:
+            aligned = bounded
+
+    aligned = aligned.sort_values("_trade_date_key")
+    latest_row = aligned.iloc[-1]
+    latest_market_date = str(latest_row.get("trade_date") or latest_row["_trade_date_key"])
+    history_columns = ["trade_date"]
+    for item in MARKET_INDEX_CONFIG:
+        prefix = item["code"]
+        history_columns.extend([f"{prefix}_pct_chg", f"{prefix}_m20", f"{prefix}_m60"])
+
+    is_aligned = bool(sector_date_key) and _date_key(latest_market_date) == sector_date_key
+    note = f"读取本地 {display_path}；大盘交易日 {latest_market_date}。"
+    if latest_date and not is_aligned:
+        note += f" 板块最新交易日为 {latest_date}，已使用不晚于板块日期的最近一条大盘记录。"
+    note += " 该面板只读已有数据，不触发行情抓取。"
+
+    return {
+        "status": "ready",
+        "path": display_path,
+        "latest_trade_date": latest_market_date,
+        "sector_trade_date": latest_date,
+        "row_count": int(len(market_context_frame)),
+        "is_aligned": is_aligned,
+        "indexes": [_market_index_summary(latest_row, item["code"], item["name"]) for item in MARKET_INDEX_CONFIG],
+        "history": _records(aligned.tail(20), columns=history_columns, limit=20),
+        "note": note,
+    }
+
+
+def _market_index_summary(row: pd.Series, code: str, name: str) -> dict[str, Any]:
+    m20 = _number_from_row(row, f"{code}_m20")
+    m60 = _number_from_row(row, f"{code}_m60")
+    state, tone = _market_state(m20, m60)
+    return {
+        "code": code,
+        "name": name,
+        "close": _number_from_row(row, f"{code}_close"),
+        "pct_chg": _number_from_row(row, f"{code}_pct_chg"),
+        "m5": _number_from_row(row, f"{code}_m5"),
+        "m20": m20,
+        "m60": m60,
+        "m120": _number_from_row(row, f"{code}_m120"),
+        "bias_ma5": _number_from_row(row, f"{code}_bias_ma5"),
+        "bias_ma10": _number_from_row(row, f"{code}_bias_ma10"),
+        "amp": _number_from_row(row, f"{code}_amp"),
+        "vr": _number_from_row(row, f"{code}_vr"),
+        "state": state,
+        "tone": tone,
+    }
+
+
+def _market_state(m20: float | None, m60: float | None) -> tuple[str, str]:
+    if m20 is None and m60 is None:
+        return "数据不足", "neutral"
+    if m20 is not None and m20 >= 0.03 and (m60 is None or m60 >= 0):
+        return "偏强", "positive"
+    if m20 is not None and m20 >= 0 and (m60 is None or m60 >= -0.02):
+        return "修复", "positive"
+    if m20 is not None and m20 <= -0.03 and (m60 is None or m60 <= 0):
+        return "偏弱", "negative"
+    if m20 is not None and m20 < 0:
+        return "震荡偏弱", "weak"
+    return "震荡", "neutral"
+
+
+def _number_from_row(row: pd.Series, key: str) -> float | None:
+    if key not in row.index:
+        return None
+    value = row.get(key)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _date_key(value: Any) -> str:
+    digits = "".join(char for char in str(value or "") if char.isdigit())
+    return digits[:8] if len(digits) >= 8 else digits
+
+
 def _records(frame: pd.DataFrame, *, columns: list[str] | None = None, limit: int | None = None) -> list[dict[str, Any]]:
     if frame.empty:
         return []
@@ -271,7 +456,7 @@ def _records(frame: pd.DataFrame, *, columns: list[str] | None = None, limit: in
     keep_cols = [col for col in (columns or list(target.columns)) if col in target.columns]
     target = target[keep_cols]
     for col in keep_cols:
-        if col in NUMERIC_COLUMNS:
+        if col in NUMERIC_COLUMNS or col in MARKET_NUMERIC_COLUMNS:
             target[col] = pd.to_numeric(target[col], errors="coerce")
     if limit is not None:
         target = target.head(limit)
@@ -323,7 +508,7 @@ def _build_summary(
     return summary
 
 
-def _file_paths(base: Path, processed: Path, report: Path) -> dict[str, Any]:
+def _file_paths(base: Path, processed: Path, report: Path, market_context_path: Path) -> dict[str, Any]:
     files = {
         "theme_strength_daily": processed / "theme_strength_daily.csv",
         "sector_board_daily": processed / "sector_board_daily.csv",
@@ -333,6 +518,7 @@ def _file_paths(base: Path, processed: Path, report: Path) -> dict[str, Any]:
         "sector_research_summary": report / "sector_research_summary.json",
         "theme_strength_report": report / "theme_strength_report.md",
         "theme_strength_latest": report / "theme_strength_latest.xlsx",
+        "market_context": market_context_path,
     }
     return {
         "processed_dir": _display_path(base, processed),

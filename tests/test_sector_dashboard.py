@@ -20,8 +20,10 @@ class SectorDashboardTest(unittest.TestCase):
             base = Path(tmpdir)
             processed = base / "sector_research" / "data" / "processed"
             reports = base / "sector_research" / "reports"
+            data_bundle = base / "data_bundle"
             processed.mkdir(parents=True)
             reports.mkdir(parents=True)
+            data_bundle.mkdir(parents=True)
 
             _write_csv(
                 processed / "theme_strength_daily.csv",
@@ -57,11 +59,75 @@ class SectorDashboardTest(unittest.TestCase):
                 json.dumps({"latest_trade_date": "20240103", "error_count": 1}, ensure_ascii=False),
                 encoding="utf-8",
             )
+            _write_csv(
+                data_bundle / "market_context.csv",
+                [
+                    {
+                        "trade_date": "20240102",
+                        "sh_close": "2900",
+                        "sh_pct_chg": "0.20",
+                        "sh_m5": "0.01",
+                        "sh_m20": "-0.01",
+                        "sh_m60": "-0.04",
+                        "hs300_close": "3300",
+                        "hs300_pct_chg": "0.50",
+                        "hs300_m5": "0.02",
+                        "hs300_m20": "0.01",
+                        "hs300_m60": "-0.02",
+                        "cyb_close": "1800",
+                        "cyb_pct_chg": "1.20",
+                        "cyb_m5": "0.03",
+                        "cyb_m20": "0.02",
+                        "cyb_m60": "0.01",
+                    },
+                    {
+                        "trade_date": "20240103",
+                        "sh_close": "3000",
+                        "sh_pct_chg": "0.80",
+                        "sh_m5": "0.02",
+                        "sh_m20": "0.04",
+                        "sh_m60": "0.01",
+                        "hs300_close": "3400",
+                        "hs300_pct_chg": "1.10",
+                        "hs300_m5": "0.03",
+                        "hs300_m20": "0.05",
+                        "hs300_m60": "0.02",
+                        "cyb_close": "1900",
+                        "cyb_pct_chg": "1.50",
+                        "cyb_m5": "0.04",
+                        "cyb_m20": "0.07",
+                        "cyb_m60": "0.05",
+                    },
+                    {
+                        "trade_date": "20240104",
+                        "sh_close": "3100",
+                        "sh_pct_chg": "0.30",
+                        "sh_m5": "0.03",
+                        "sh_m20": "0.05",
+                        "sh_m60": "0.02",
+                        "hs300_close": "3500",
+                        "hs300_pct_chg": "0.40",
+                        "hs300_m5": "0.04",
+                        "hs300_m20": "0.06",
+                        "hs300_m60": "0.03",
+                        "cyb_close": "2000",
+                        "cyb_pct_chg": "0.60",
+                        "cyb_m5": "0.05",
+                        "cyb_m20": "0.08",
+                        "cyb_m60": "0.06",
+                    },
+                ],
+            )
 
             payload = build_sector_dashboard_payload(base_dir=base)
 
         self.assertEqual(payload["status"], "ready")
         self.assertEqual(payload["summary"]["latest_trade_date"], "20240103")
+        self.assertEqual(payload["market_context"]["status"], "ready")
+        self.assertEqual(payload["market_context"]["latest_trade_date"], "20240103")
+        self.assertTrue(payload["market_context"]["is_aligned"])
+        self.assertEqual(payload["market_context"]["indexes"][1]["name"], "沪深300")
+        self.assertEqual(payload["market_context"]["indexes"][1]["m20"], 0.05)
         self.assertEqual(payload["summary"]["theme_count"], 2)
         self.assertEqual(payload["latest_themes"][0]["theme_name"], "锂矿锂电")
         self.assertEqual(payload["latest_boards"][0]["board_name"], "锂电池")
@@ -69,11 +135,15 @@ class SectorDashboardTest(unittest.TestCase):
         self.assertEqual(payload["stock_exposure"][0]["stock_name"], "锂电龙头")
         self.assertEqual(payload["error_rows"][0]["stage"], "fetch_fund_flow_rank")
         self.assertTrue(payload["paths"]["files"]["theme_strength_daily"]["exists"])
+        self.assertTrue(payload["paths"]["files"]["market_context"]["exists"])
 
     def test_build_sector_dashboard_payload_rejects_paths_outside_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(ValueError):
                 build_sector_dashboard_payload(base_dir=tmpdir, processed_dir="../outside")
+
+            with self.assertRaises(ValueError):
+                build_sector_dashboard_payload(base_dir=tmpdir, market_context_path="../outside")
 
 
 if __name__ == "__main__":

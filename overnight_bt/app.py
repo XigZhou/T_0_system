@@ -154,9 +154,18 @@ def paper_ledger_api(config_path: str = "", config_dir: str = "configs/paper_acc
 
 
 @app.get("/api/sector/overview")
-def sector_overview_api(processed_dir: str = "sector_research/data/processed", report_dir: str = "sector_research/reports"):
+def sector_overview_api(
+    processed_dir: str = "sector_research/data/processed",
+    report_dir: str = "sector_research/reports",
+    market_context_path: str = "data_bundle/market_context.csv",
+):
     try:
-        return build_sector_dashboard_payload(base_dir=BASE_DIR, processed_dir=processed_dir, report_dir=report_dir)
+        return build_sector_dashboard_payload(
+            base_dir=BASE_DIR,
+            processed_dir=processed_dir,
+            report_dir=report_dir,
+            market_context_path=market_context_path,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

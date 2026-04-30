@@ -836,6 +836,100 @@ td {
   gap: 10px;
 }
 
+.sector-page .sector-market-panel {
+  min-width: 0;
+}
+
+.sector-page .sector-market-panel .panel-head {
+  align-items: start;
+}
+
+.sector-page .market-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.sector-page .market-card {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-left: 4px solid rgba(102, 94, 82, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.36);
+}
+
+.sector-page .market-card-head,
+.sector-page .market-main,
+.sector-page .market-metrics div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sector-page .market-card-head strong,
+.sector-page .market-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-page .market-card-head span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(102, 94, 82, 0.12);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.sector-page .market-main span,
+.sector-page .market-metrics dt {
+  color: var(--muted);
+}
+
+.sector-page .market-main strong {
+  font-size: 1.2rem;
+}
+
+.sector-page .market-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.sector-page .market-metrics dt,
+.sector-page .market-metrics dd,
+.sector-page .market-card-empty p {
+  margin: 0;
+}
+
+.sector-page .market-metrics dd {
+  font-weight: 650;
+}
+
+.sector-page .market-positive {
+  border-left-color: rgba(69, 119, 104, 0.78);
+}
+
+.sector-page .market-weak {
+  border-left-color: rgba(185, 137, 65, 0.82);
+}
+
+.sector-page .market-negative {
+  border-left-color: rgba(157, 47, 36, 0.8);
+}
+
+.sector-page .market-card-empty {
+  grid-column: 1 / -1;
+}
+
 .sector-page .metric {
   padding: 10px 0;
 }
@@ -995,6 +1089,10 @@ tr:last-child td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .sector-page .market-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .compact-form > .field-wide,
   .compact-form > .field-symbol,
   .compact-form > .field-dates,
@@ -1049,6 +1147,11 @@ tr:last-child td {
   .three-col,
   .actions,
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sector-page .market-grid,
+  .sector-page .market-metrics {
     grid-template-columns: 1fr;
   }
 
