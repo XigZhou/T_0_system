@@ -13,16 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-
-THEME_CLUSTER_MAP = {
-    "AI": "科技成长",
-    "半导体芯片": "科技成长",
-    "存储芯片": "科技成长",
-    "机器人": "科技成长",
-    "光伏新能源": "新能源",
-    "锂矿锂电": "新能源",
-    "医药": "医药防御",
-}
+from overnight_bt.rotation_features import THEME_CLUSTER_MAP
 
 THEME_STRENGTH_COLUMNS = (
     "trade_date",

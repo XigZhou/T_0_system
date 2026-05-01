@@ -19,6 +19,7 @@ from .expressions import (
     parse_condition_expr,
 )
 from .models import BacktestRequest, PendingOrder, Position
+from .rotation_features import ROTATION_NUMERIC_COLUMNS
 from .sector_features import SECTOR_NUMERIC_COLUMNS, resolve_data_profile, sector_display_values, validate_sector_feature_set
 from .utils import to_float
 
@@ -144,6 +145,7 @@ def load_processed_folder(folder_path: str, start_date: str = "", end_date: str 
             if (
                 col in numeric_cols
                 or col in SECTOR_NUMERIC_COLUMNS
+                or col in ROTATION_NUMERIC_COLUMNS
                 or col.startswith(("avg5m", "avg10m", "high_", "low_", "sh_", "hs300_", "cyb_"))
                 or (col.startswith("m") and col[1:].isdigit())
             ):

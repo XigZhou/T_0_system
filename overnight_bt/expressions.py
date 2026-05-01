@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .rotation_features import ROTATION_CATEGORICAL_COLUMNS, ROTATION_NUMERIC_COLUMNS
 from .sector_features import SECTOR_CATEGORICAL_COLUMNS, SECTOR_NUMERIC_COLUMNS
 
 
@@ -67,12 +68,14 @@ _NUMERIC_FIELDS = {
 }
 _NUMERIC_FIELDS.update({f"m{n}" for n in [5, 10, 20, 30, 60, 120]})
 _NUMERIC_FIELDS.update(SECTOR_NUMERIC_COLUMNS)
+_NUMERIC_FIELDS.update(ROTATION_NUMERIC_COLUMNS)
 _CATEGORICAL_FIELDS = {
     "board",
     "market",
     "industry",
 }
 _CATEGORICAL_FIELDS.update(SECTOR_CATEGORICAL_COLUMNS)
+_CATEGORICAL_FIELDS.update(ROTATION_CATEGORICAL_COLUMNS)
 _AVG_FIELD_RE = re.compile(r"^avg(?:5|10)m\d+$")
 _ROLLING_HL_RE = re.compile(r"^(?:high|low)_\d+$")
 _MARKET_PREFIX_RE = re.compile(r"^(sh|hs300|cyb)_(.+)$")

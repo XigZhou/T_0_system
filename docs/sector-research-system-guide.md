@@ -259,14 +259,48 @@ python scripts/run_sector_rotation_diagnosis.py \
 
 轮动状态只用于研究分组，不会直接修改买入或卖出逻辑。字段和分类规则见 `docs/sector-rotation-diagnosis-data-dictionary.md`。
 
-## 9. 交易日对齐规则
+## 9. 板块轮动状态条件网格
+
+轮动诊断确认某些状态或主题簇更有价值后，可以继续运行轮动状态条件网格，验证“上一轮最佳板块候选 + 轮动过滤”是否优于基准和原候选。
+
+```bash
+python scripts/run_sector_rotation_grid.py \
+  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --start-date 20230101 \
+  --end-date 20260429
+```
+
+默认先沿用上一轮最佳板块候选：
+
+```text
+sector_exposure_score>0,sector_strongest_theme_score>=0.4,sector_strongest_theme_rank_pct<=0.7
+```
+
+再叠加以下轮动条件：
+
+| 策略 | 用途 |
+| --- | --- |
+| `候选_新主线启动` | 验证追新主线是否有效 |
+| `候选_主线退潮` | 验证主线退潮状态是否更适合板块过滤 |
+| `候选_轮动观察` | 验证轮动观察状态是否更适合板块过滤 |
+| `候选_退潮或观察` | 合并上一轮诊断中相对更好的状态 |
+| `候选_避开新主线启动` | 验证剔除追新后是否改善 |
+| `候选_科技成长主线` | 只保留科技成长成为主线的信号 |
+| `候选_科技成长且股票匹配` | 科技成长主线下只买科技成长股票 |
+| `候选_避开新能源主线` | 验证新能源主线较弱时是否应剔除 |
+
+输出目录为 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_grid/`，包含汇总表、交易流水、参数配置和中文报告。字段定义见 `docs/sector-rotation-grid-data-dictionary.md`。
+
+该脚本在内存里把轮动字段合并到板块增强股票数据，不覆盖 `data_bundle/processed_qfq_theme_focus_top100_sector`。
+
+## 10. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。
 - 板块研究的 T 日主题强度只使用 T 日及历史数据，可以作为 T 日收盘信号字段。
 - 如果未来改成盘前信号，必须把板块强度整体滞后一日，避免未来函数。
 - 成分股数据是最新快照，不是历史成分，长区间回测时需要说明可能存在幸存者偏差。
 
-## 10. 腾讯云同步流程
+## 11. 腾讯云同步流程
 
 本地完成提交并推送后，在腾讯云执行：
 
@@ -286,7 +320,7 @@ sudo systemctl restart t0-system
 curl http://127.0.0.1:8083/health
 ```
 
-## 11. 常见异常
+## 12. 常见异常
 
 | 异常 | 处理方式 |
 | --- | --- |
@@ -297,13 +331,14 @@ curl http://127.0.0.1:8083/health
 | 合并脚本拒绝覆盖目录 | 确认 `--output-dir` 与 `--processed-dir` 不同 |
 | 网格探索提示缺少 `sector_feature_manifest.csv` | 先运行 `scripts/build_sector_research_features.py` 生成板块增强目录 |
 | 轮动诊断交易股票缺少主题字段 | 确认 `--sector-processed-dir` 指向板块增强目录，而不是基准目录 |
+| 轮动状态网格提示不支持 `rotation_*` 字段 | 确认代码已包含 `overnight_bt/rotation_features.py`，并且表达式白名单已更新 |
 
-## 12. 交付检查
+## 13. 交付检查
 
 建议每次改完板块研究系统后执行：
 
 ```bash
-python -m pytest tests/test_sector_research.py tests/test_sector_parameter_grid.py tests/test_sector_rotation_diagnosis.py tests/test_delivery_checks.py
+python -m pytest tests/test_sector_research.py tests/test_sector_parameter_grid.py tests/test_sector_rotation_diagnosis.py tests/test_sector_rotation_grid.py tests/test_delivery_checks.py
 python scripts/verify_delivery.py
 ```
 

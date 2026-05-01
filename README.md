@@ -288,7 +288,40 @@ python scripts/run_sector_rotation_diagnosis.py \
 
 字段说明见 `docs/sector-rotation-diagnosis-data-dictionary.md`。当前轮动状态只用于研究分组，不直接触发买卖。
 
-### 9. 补充或重拉主题前 100 股票最新数据
+### 9. 板块轮动状态条件网格
+
+轮动诊断之后，可以继续运行轮动状态条件网格，验证“上一轮最佳板块候选 + 某类轮动状态”是否优于基准动量和原板块候选。
+
+```bash
+python scripts/run_sector_rotation_grid.py \
+  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --start-date 20230101 \
+  --end-date 20260429
+```
+
+默认比较：
+
+- `基准动量`
+- `板块候选_score0.4_rank0.7`
+- `候选_新主线启动`
+- `候选_主线退潮`
+- `候选_轮动观察`
+- `候选_退潮或观察`
+- `候选_避开新主线启动`
+- `候选_科技成长主线`
+- `候选_科技成长且股票匹配`
+- `候选_避开新能源主线`
+
+默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_grid/`：
+
+- `sector_rotation_grid_summary.csv`
+- `sector_rotation_grid_trade_records.csv`
+- `sector_rotation_grid_config.json`
+- `sector_rotation_grid_report.md`
+
+字段说明见 `docs/sector-rotation-grid-data-dictionary.md`。该网格仍然是研究脚本，不会修改模拟账户。
+
+### 10. 补充或重拉主题前 100 股票最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
 

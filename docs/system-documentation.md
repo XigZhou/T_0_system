@@ -306,6 +306,55 @@ python scripts/run_sector_rotation_diagnosis.py \
 
 异常处理：主题强度文件缺少必要字段时直接报错；某只交易股票找不到板块增强 CSV 时，该笔交易的股票主题字段为空，但不影响轮动状态打标。字段定义见 `docs/sector-rotation-diagnosis-data-dictionary.md`。
 
+### 板块轮动状态条件网格
+
+用途：把轮动诊断结果作为买入条件变量，验证“上一轮最佳板块候选 + 轮动状态/主题簇过滤”是否优于基准动量和原板块候选。
+
+运行命令：
+
+```bash
+python scripts/run_sector_rotation_grid.py \
+  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --start-date 20230101 \
+  --end-date 20260429
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基准处理后股票目录 |
+| `--sector-processed-dir` | 板块增强股票目录 |
+| `--rotation-daily-path` | 轮动诊断生成的 `sector_rotation_daily.csv` |
+| `--start-date`、`--end-date` | 回测信号日期区间 |
+| `--skip-trade-records` | 是否跳过逐笔交易流水导出 |
+
+默认探索组合包括：
+
+| 策略 | 说明 |
+| --- | --- |
+| `基准动量` | 不使用板块或轮动字段 |
+| `板块候选_score0.4_rank0.7` | 上一步板块参数网格的最佳候选 |
+| `候选_新主线启动` | 只在新主线启动状态买入 |
+| `候选_主线退潮` | 只在主线退潮状态买入 |
+| `候选_轮动观察` | 只在轮动观察状态买入 |
+| `候选_退潮或观察` | 主线退潮或轮动观察 |
+| `候选_避开新主线启动` | 排除新主线启动 |
+| `候选_科技成长主线` | 只在科技成长成为 Top1 主题簇时买入 |
+| `候选_科技成长且股票匹配` | 科技成长主线且股票所属主题簇也匹配 |
+| `候选_避开新能源主线` | 排除新能源 Top1 主线 |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `sector_rotation_grid_summary.csv` | 每组轮动条件的信号质量、账户收益、回撤和交易次数 |
+| `sector_rotation_grid_trade_records.csv` | 每组轮动条件的交易流水 |
+| `sector_rotation_grid_config.json` | 本次运行参数和展开后的策略条件 |
+| `sector_rotation_grid_report.md` | 中文总结报告 |
+
+异常处理：轮动日频文件缺失必要字段、板块增强目录缺失 manifest 或必要 `sector_*` 字段时直接报错。字段定义见 `docs/sector-rotation-grid-data-dictionary.md`。
+
 ### 日常补充主题前 100 最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 中的股票数据只到旧日期，例如 `20260417`，不要直接手工修改处理后 CSV。正确流程是先补原始数据，再重建处理后目录。

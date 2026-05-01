@@ -85,6 +85,18 @@ class ConditionParserTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(reason, "satisfied")
 
+    def test_rotation_fields_supported(self) -> None:
+        rules = parse_condition_expr("rotation_state=主线退潮,rotation_top_cluster=科技成长,rotation_is_favorable_state>0,stock_matches_rotation_top_cluster>0")
+        payload = {
+            "rotation_state": "主线退潮",
+            "rotation_top_cluster": "科技成长",
+            "rotation_is_favorable_state": 1,
+            "stock_matches_rotation_top_cluster": 1,
+        }
+        ok, reason = evaluate_conditions(payload, rules)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "satisfied")
+
 
 if __name__ == "__main__":
     unittest.main()
