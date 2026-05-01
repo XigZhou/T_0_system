@@ -180,9 +180,9 @@ python scripts/build_industry_strength.py --processed-dir data_bundle/processed_
 
 如果你要研究锂矿锂电、光伏新能源、半导体芯片、存储芯片、AI、机器人、医药等方向，可以先独立运行板块研究系统。它默认使用 AKShare 东方财富行业/概念板块、板块历史行情、板块成分股和资金流数据，输出只写入 sector_research/，不会影响当前回测主数据。
 
-`ash
+```bash
 python scripts/run_sector_research.py --start-date 20230101
-`
+```
 
 主要输出：
 
@@ -233,7 +233,35 @@ python scripts/build_sector_research_features.py \
 sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_exposure_score>0
 ```
 
-### 7. 补充或重拉主题前 100 股票最新数据
+### 7. 板块参数网格探索
+
+板块增强目录生成后，可以用网格探索脚本批量比较“基准动量”“板块硬过滤”“只评分加权”三类参数。脚本只读取已经生成的数据目录，不重新抓取 AKShare 或 Tushare 数据。
+
+```bash
+python scripts/run_sector_parameter_grid.py \
+  --start-date 20230101 \
+  --score-thresholds 0.4,0.5,0.6 \
+  --rank-pcts 0.3,0.5,0.7 \
+  --score-weights 10,20,30
+```
+
+默认输入：
+
+- 基准目录：`data_bundle/processed_qfq_theme_focus_top100`
+- 板块增强目录：`data_bundle/processed_qfq_theme_focus_top100_sector`
+- 买入基础条件：`m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02`
+- 卖出条件：`m20<0.08,hs300_m20<0.02`
+
+默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_parameter_grid/`：
+
+- `sector_parameter_grid_summary.csv`：每组参数的信号质量、账户收益、回撤、交易次数和综合排序分
+- `sector_parameter_grid_trade_records.csv`：每组参数的账户买卖流水，含买入、卖出、价格、股数、手续费、金额和盈亏字段
+- `sector_parameter_grid_config.json`：本次运行参数和展开后的全部策略条件
+- `sector_parameter_grid_report.md`：中文总结报告和 Top 参数排序
+
+字段与使用说明见 `docs/sector-parameter-grid-data-dictionary.md`，指标口径见 `docs/sector-research-indicator-documentation.md` 的 `grid_score` 章节。
+
+### 8. 补充或重拉主题前 100 股票最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
 

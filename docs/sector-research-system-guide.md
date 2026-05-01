@@ -183,14 +183,57 @@ sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_e
 
 板块增强口径会校验 `sector_feature_manifest.csv` 和必要 `sector_*` 字段，缺失时直接报错，避免回测或每日选股误用未增强的数据目录。
 
-## 7. 交易日对齐规则
+## 7. 板块参数网格探索
+
+生成 `data_bundle/processed_qfq_theme_focus_top100_sector` 后，可以运行参数网格探索，比较板块增强到底是提升信号质量，还是只是减少交易次数。
+
+```bash
+python scripts/run_sector_parameter_grid.py \
+  --start-date 20230101 \
+  --score-thresholds 0.4,0.5,0.6 \
+  --rank-pcts 0.3,0.5,0.7 \
+  --score-weights 10,20,30
+```
+
+默认探索三类策略：
+
+| 家族 | 数据目录 | 作用 |
+| --- | --- | --- |
+| `baseline` | `data_bundle/processed_qfq_theme_focus_top100` | 不使用板块字段，作为收益和活跃度对照 |
+| `hard_filter` | `data_bundle/processed_qfq_theme_focus_top100_sector` | 在基础动量条件上增加主题强度阈值、主题排名百分位和个股板块暴露过滤 |
+| `score_only` | `data_bundle/processed_qfq_theme_focus_top100_sector` | 不增加板块硬过滤，只把主题强度、暴露分和排名惩罚加入排序分 |
+
+默认基础买入条件：
+
+```text
+m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02
+```
+
+默认卖出条件：
+
+```text
+m20<0.08,hs300_m20<0.02
+```
+
+输出目录默认为 `research_runs/YYYYMMDD_HHMMSS_sector_parameter_grid/`：
+
+| 文件 | 用途 |
+| --- | --- |
+| `sector_parameter_grid_summary.csv` | 每组参数的信号质量、账户收益、回撤、交易次数、胜率和综合排序分 |
+| `sector_parameter_grid_trade_records.csv` | 每组参数的完整账户交易流水，便于复核买入、卖出、费用、金额和盈亏 |
+| `sector_parameter_grid_config.json` | 本次运行 CLI 参数、策略家族、展开后的买入条件和评分表达式 |
+| `sector_parameter_grid_report.md` | 中文 Top 参数总结、基准对照和风险提示 |
+
+脚本只读取既有数据，不触发 AKShare 或 Tushare 抓取。运行前会校验板块增强目录是否存在 `sector_feature_manifest.csv`，以及必要的 `sector_*` 字段是否完整。详细字段定义见 `docs/sector-parameter-grid-data-dictionary.md`。
+
+## 8. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。
 - 板块研究的 T 日主题强度只使用 T 日及历史数据，可以作为 T 日收盘信号字段。
 - 如果未来改成盘前信号，必须把板块强度整体滞后一日，避免未来函数。
 - 成分股数据是最新快照，不是历史成分，长区间回测时需要说明可能存在幸存者偏差。
 
-## 8. 腾讯云同步流程
+## 9. 腾讯云同步流程
 
 本地完成提交并推送后，在腾讯云执行：
 
@@ -210,7 +253,7 @@ sudo systemctl restart t0-system
 curl http://127.0.0.1:8083/health
 ```
 
-## 9. 常见异常
+## 10. 常见异常
 
 | 异常 | 处理方式 |
 | --- | --- |
@@ -219,13 +262,14 @@ curl http://127.0.0.1:8083/health
 | 没有匹配到任何板块 | 检查 `sector_research/configs/themes.yaml` 的关键词是否贴近真实板块名 |
 | 资金流抓取失败 | 可先忽略，历史行情和主题强度仍会生成 |
 | 合并脚本拒绝覆盖目录 | 确认 `--output-dir` 与 `--processed-dir` 不同 |
+| 网格探索提示缺少 `sector_feature_manifest.csv` | 先运行 `scripts/build_sector_research_features.py` 生成板块增强目录 |
 
-## 10. 交付检查
+## 11. 交付检查
 
 建议每次改完板块研究系统后执行：
 
 ```bash
-python -m pytest tests/test_sector_research.py tests/test_delivery_checks.py
+python -m pytest tests/test_sector_research.py tests/test_sector_parameter_grid.py tests/test_delivery_checks.py
 python scripts/verify_delivery.py
 ```
 

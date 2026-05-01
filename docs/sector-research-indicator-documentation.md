@@ -246,3 +246,44 @@ sector_strongest_theme=AI
 sector_strongest_theme_score=0.72
 sector_strongest_theme_rank_pct=0.10
 ```
+
+## 10. 板块参数网格综合排序分 `grid_score`
+
+- 指标用途：在参数网格探索中，把账户收益、信号质量、交易活跃度和回撤风险合成一个初筛排序分
+- 输入字段：`sector_parameter_grid_summary.csv` 中的 `account_total_return`、`signal_median_trade_return`、`signal_win_rate`、`signal_topn_fill_rate`、`account_buy_count`、`account_max_drawdown`
+- 输出字段：`grid_score`
+- 窗口参数：无；按每组策略的完整回测区间汇总结果计算
+
+计算公式：
+
+```text
+activity_bonus = min(account_buy_count / 120, 1) * 0.08
+
+grid_score =
+  account_total_return * 1.2
++ signal_median_trade_return * 1.5
++ signal_win_rate * 0.2
++ signal_topn_fill_rate * 0.08
++ activity_bonus
+- account_max_drawdown * 0.8
+```
+
+边界条件：
+
+- 任一输入为空时按 0 参与计算
+- `account_buy_count >= 120` 时活跃度奖励封顶
+- `grid_score` 只用于初筛参数，不直接等同于实盘优先级；正式接入模拟账户前还要查看逐笔交易、年度表现和最近阶段稳定性
+
+示例：
+
+```text
+account_total_return=0.10
+signal_median_trade_return=0.02
+signal_win_rate=0.55
+signal_topn_fill_rate=0.80
+account_buy_count=90
+account_max_drawdown=0.08
+
+activity_bonus=min(90/120,1)*0.08=0.06
+grid_score=0.10*1.2+0.02*1.5+0.55*0.2+0.80*0.08+0.06-0.08*0.8=0.32
+```

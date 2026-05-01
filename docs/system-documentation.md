@@ -232,6 +232,42 @@ python scripts/build_sector_research_features.py \
 
 完整操作流程见 docs/sector-research-system-guide.md，详细字段与指标说明见 docs/sector-research-data-dictionary.md 和 docs/sector-research-indicator-documentation.md。
 
+### 板块参数网格探索
+
+用途：把板块增强参数作为研究变量，统一比较基准动量、板块硬过滤和只评分加权三类策略，帮助决定是否把某组板块条件接入回测系统或模拟账户。
+
+运行命令：
+
+```bash
+python scripts/run_sector_parameter_grid.py \
+  --start-date 20230101 \
+  --score-thresholds 0.4,0.5,0.6 \
+  --rank-pcts 0.3,0.5,0.7 \
+  --score-weights 10,20,30
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基准处理后股票目录，默认 `data_bundle/processed_qfq_theme_focus_top100` |
+| `--sector-processed-dir` | 板块增强股票目录，默认 `data_bundle/processed_qfq_theme_focus_top100_sector` |
+| `--score-thresholds` | `hard_filter` 家族使用的 `sector_strongest_theme_score` 阈值列表 |
+| `--rank-pcts` | `hard_filter` 家族使用的 `sector_strongest_theme_rank_pct` 阈值列表，越小代表主题越强 |
+| `--score-weights` | `score_only` 家族把板块强度加入评分表达式的权重列表 |
+| `--skip-trade-records` | 只导出汇总和报告，不导出逐笔交易流水；正式交付建议不要开启 |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `research_runs/*_sector_parameter_grid/sector_parameter_grid_summary.csv` | 每组参数的信号质量、账户收益、回撤、交易次数、胜率和综合排序分 |
+| `research_runs/*_sector_parameter_grid/sector_parameter_grid_trade_records.csv` | 每组参数的账户交易流水，含买入、卖出、股票、价格、股数、费用、金额和盈亏 |
+| `research_runs/*_sector_parameter_grid/sector_parameter_grid_config.json` | 本次 CLI 参数和展开后的全部策略条件 |
+| `research_runs/*_sector_parameter_grid/sector_parameter_grid_report.md` | 中文总结报告、Top 参数、基准对照和风险提示 |
+
+异常处理：脚本会先校验板块增强目录的 `sector_feature_manifest.csv` 和必要 `sector_*` 字段；缺失时直接失败，不会静默退回基准目录。字段定义见 `docs/sector-parameter-grid-data-dictionary.md`。
+
 ### 日常补充主题前 100 最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 中的股票数据只到旧日期，例如 `20260417`，不要直接手工修改处理后 CSV。正确流程是先补原始数据，再重建处理后目录。
