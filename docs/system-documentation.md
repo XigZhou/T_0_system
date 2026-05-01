@@ -268,6 +268,44 @@ python scripts/run_sector_parameter_grid.py \
 
 异常处理：脚本会先校验板块增强目录的 `sector_feature_manifest.csv` 和必要 `sector_*` 字段；缺失时直接失败，不会静默退回基准目录。字段定义见 `docs/sector-parameter-grid-data-dictionary.md`。
 
+### 板块轮动诊断
+
+用途：判断主题板块之间是否存在轮动，并把候选策略的每笔交易标记到对应轮动状态下，避免只看静态板块强度阈值。
+
+运行命令：
+
+```bash
+python scripts/run_sector_rotation_diagnosis.py \
+  --theme-strength-path sector_research/data/processed/theme_strength_daily.csv \
+  --trade-records-path research_runs/20260501_142052_sector_parameter_grid/sector_parameter_grid_trade_records.csv \
+  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --cases 基准动量,硬过滤_score0.4_rank0.7
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--theme-strength-path` | 主题强度日频文件，默认来自独立板块研究系统 |
+| `--trade-records-path` | 参数网格探索生成的交易流水 |
+| `--sector-processed-dir` | 板块增强股票目录，用于给交易股票补充信号日最强主题 |
+| `--cases` | 要比较的策略名称，默认比较 `基准动量` 和 `硬过滤_score0.4_rank0.7` |
+| `--strong-rank-pct` | 强主题排名百分位阈值，默认 `0.33` |
+| `--fresh-days` | 新主线启动的连续天数上限，默认 `5` |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `sector_rotation_daily.csv` | 每日 Top1 主题、主题簇、领先幅度、持续天数和轮动状态 |
+| `sector_rotation_theme_runs.csv` | 每段连续 Top1 主题的开始、结束、持续天数和分数变化 |
+| `sector_rotation_transitions.csv` | Top1 主题切换路径和次数 |
+| `sector_rotation_labeled_trades.csv` | 每笔交易的信号日轮动状态、股票所属主题和是否匹配主线 |
+| `sector_rotation_trade_summary.csv` | 按轮动状态、Top1 主题、主题簇和股票主题聚合的收益统计 |
+| `sector_rotation_report.md` | 中文诊断报告 |
+
+异常处理：主题强度文件缺少必要字段时直接报错；某只交易股票找不到板块增强 CSV 时，该笔交易的股票主题字段为空，但不影响轮动状态打标。字段定义见 `docs/sector-rotation-diagnosis-data-dictionary.md`。
+
 ### 日常补充主题前 100 最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 中的股票数据只到旧日期，例如 `20260417`，不要直接手工修改处理后 CSV。正确流程是先补原始数据，再重建处理后目录。

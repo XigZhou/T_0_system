@@ -226,14 +226,47 @@ m20<0.08,hs300_m20<0.02
 
 脚本只读取既有数据，不触发 AKShare 或 Tushare 抓取。运行前会校验板块增强目录是否存在 `sector_feature_manifest.csv`，以及必要的 `sector_*` 字段是否完整。详细字段定义见 `docs/sector-parameter-grid-data-dictionary.md`。
 
-## 8. 交易日对齐规则
+## 8. 板块轮动诊断
+
+参数网格探索找出候选组合后，建议继续运行板块轮动诊断，判断收益是否来自主线轮动，而不是少数个股或单段行情。
+
+```bash
+python scripts/run_sector_rotation_diagnosis.py \
+  --theme-strength-path sector_research/data/processed/theme_strength_daily.csv \
+  --trade-records-path research_runs/20260501_142052_sector_parameter_grid/sector_parameter_grid_trade_records.csv \
+  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --cases 基准动量,硬过滤_score0.4_rank0.7
+```
+
+默认主题簇：
+
+| 主题簇 | 包含主题 |
+| --- | --- |
+| 科技成长 | `AI`、`半导体芯片`、`存储芯片`、`机器人` |
+| 新能源 | `光伏新能源`、`锂矿锂电` |
+| 医药防御 | `医药` |
+
+默认输出目录为 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_diagnosis/`。核心输出包括：
+
+| 文件 | 用途 |
+| --- | --- |
+| `sector_rotation_daily.csv` | 每日 Top1 主题、主题簇、持续天数、领先幅度和轮动状态 |
+| `sector_rotation_theme_runs.csv` | 每段连续主线的开始、结束、持续天数和分数变化 |
+| `sector_rotation_transitions.csv` | Top1 主题之间的切换次数 |
+| `sector_rotation_labeled_trades.csv` | 给每笔交易标记信号日主线、股票所属主题和是否匹配主线 |
+| `sector_rotation_trade_summary.csv` | 按轮动状态、Top1 主题、主题簇和股票主题统计收益 |
+| `sector_rotation_report.md` | 中文诊断报告 |
+
+轮动状态只用于研究分组，不会直接修改买入或卖出逻辑。字段和分类规则见 `docs/sector-rotation-diagnosis-data-dictionary.md`。
+
+## 9. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。
 - 板块研究的 T 日主题强度只使用 T 日及历史数据，可以作为 T 日收盘信号字段。
 - 如果未来改成盘前信号，必须把板块强度整体滞后一日，避免未来函数。
 - 成分股数据是最新快照，不是历史成分，长区间回测时需要说明可能存在幸存者偏差。
 
-## 9. 腾讯云同步流程
+## 10. 腾讯云同步流程
 
 本地完成提交并推送后，在腾讯云执行：
 
@@ -253,7 +286,7 @@ sudo systemctl restart t0-system
 curl http://127.0.0.1:8083/health
 ```
 
-## 10. 常见异常
+## 11. 常见异常
 
 | 异常 | 处理方式 |
 | --- | --- |
@@ -263,13 +296,14 @@ curl http://127.0.0.1:8083/health
 | 资金流抓取失败 | 可先忽略，历史行情和主题强度仍会生成 |
 | 合并脚本拒绝覆盖目录 | 确认 `--output-dir` 与 `--processed-dir` 不同 |
 | 网格探索提示缺少 `sector_feature_manifest.csv` | 先运行 `scripts/build_sector_research_features.py` 生成板块增强目录 |
+| 轮动诊断交易股票缺少主题字段 | 确认 `--sector-processed-dir` 指向板块增强目录，而不是基准目录 |
 
-## 11. 交付检查
+## 12. 交付检查
 
 建议每次改完板块研究系统后执行：
 
 ```bash
-python -m pytest tests/test_sector_research.py tests/test_sector_parameter_grid.py tests/test_delivery_checks.py
+python -m pytest tests/test_sector_research.py tests/test_sector_parameter_grid.py tests/test_sector_rotation_diagnosis.py tests/test_delivery_checks.py
 python scripts/verify_delivery.py
 ```
 

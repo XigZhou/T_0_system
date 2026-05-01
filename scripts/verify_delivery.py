@@ -22,6 +22,7 @@ PROJECT_EXTRA_PATHS = (
     Path("docs/system-documentation.md"),
     Path("docs/sector-research-system-guide.md"),
     Path("docs/sector-parameter-grid-data-dictionary.md"),
+    Path("docs/sector-rotation-diagnosis-data-dictionary.md"),
     Path("docs/after-close-pipeline.md"),
     Path("static/index.html"),
     Path("static/single.html"),
@@ -43,6 +44,7 @@ PROJECT_README_PHRASES = (
     "python -m uvicorn overnight_bt.app:app",
     "/sector",
     "scripts/run_sector_parameter_grid.py",
+    "scripts/run_sector_rotation_diagnosis.py",
 )
 
 

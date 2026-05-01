@@ -261,7 +261,34 @@ python scripts/run_sector_parameter_grid.py \
 
 字段与使用说明见 `docs/sector-parameter-grid-data-dictionary.md`，指标口径见 `docs/sector-research-indicator-documentation.md` 的 `grid_score` 章节。
 
-### 8. 补充或重拉主题前 100 股票最新数据
+### 8. 板块轮动诊断
+
+如果要判断板块增强收益是否来自主题轮动，而不是少数个股或单段行情，可以在参数网格探索后运行轮动诊断脚本。脚本会读取主题强度日频数据和参数网格交易流水，输出每日主线状态、主题切换路径、交易轮动打标和分组收益。
+
+```bash
+python scripts/run_sector_rotation_diagnosis.py \
+  --theme-strength-path sector_research/data/processed/theme_strength_daily.csv \
+  --trade-records-path research_runs/20260501_142052_sector_parameter_grid/sector_parameter_grid_trade_records.csv \
+  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --cases 基准动量,硬过滤_score0.4_rank0.7
+```
+
+默认把主题分为三类：
+
+- 科技成长：`AI`、`半导体芯片`、`存储芯片`、`机器人`
+- 新能源：`光伏新能源`、`锂矿锂电`
+- 医药防御：`医药`
+
+默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_diagnosis/`：
+
+- `sector_rotation_daily.csv`：每日 Top1 主题、主题簇、持续天数和轮动状态
+- `sector_rotation_labeled_trades.csv`：给每笔交易标记信号日主线主题、股票所属主题和是否匹配主线
+- `sector_rotation_trade_summary.csv`：按轮动状态、Top1 主题、主题簇、股票主题统计收益
+- `sector_rotation_report.md`：中文轮动诊断报告
+
+字段说明见 `docs/sector-rotation-diagnosis-data-dictionary.md`。当前轮动状态只用于研究分组，不直接触发买卖。
+
+### 9. 补充或重拉主题前 100 股票最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
 
