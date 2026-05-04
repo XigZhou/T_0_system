@@ -268,6 +268,51 @@ python scripts/run_sector_parameter_grid.py \
 
 异常处理：脚本会先校验板块增强目录的 `sector_feature_manifest.csv` 和必要 `sector_*` 字段；缺失时直接失败，不会静默退回基准目录。字段定义见 `docs/sector-parameter-grid-data-dictionary.md`。
 
+### 板块效应选股条件探索
+
+用途：在已经确认板块增强目录可用之后，进一步验证“优先选择有板块效应的股票”是否有效。它和板块轮动不同，不使用市场级主线状态，而是在个股层面比较三种方式：不使用板块字段、把板块字段作为买入硬过滤、把板块字段作为评分加权。
+
+运行命令：
+
+```bash
+python scripts/run_sector_effect_grid.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_181000_sector_effect_grid_fixed \
+  --score-thresholds 0.4,0.5 \
+  --rank-pcts 0.7 \
+  --exposure-mins 0 \
+  --theme-m20-mins any,0 \
+  --amount-ratio-mins any,1.0 \
+  --score-weights 5,10,15 \
+  --resume
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基准处理后目录，默认 `data_bundle/processed_qfq_theme_focus_top100` |
+| `--sector-processed-dir` | 板块增强目录，默认 `data_bundle/processed_qfq_theme_focus_top100_sector` |
+| `--score-thresholds` | 硬过滤使用的最强主题强度阈值列表 |
+| `--rank-pcts` | 硬过滤使用的主题排名百分位阈值，越小越强 |
+| `--exposure-mins` | 个股主题暴露分阈值 |
+| `--theme-m20-mins` | 最强主题 20 日动量阈值，`any` 表示不启用该过滤 |
+| `--amount-ratio-mins` | 最强主题成交额放大倍数阈值，`any` 表示不启用该过滤 |
+| `--score-weights` | 评分加权家族使用的板块权重 |
+| `--resume` | 读取已有汇总和交易流水，跳过已完成 `case` |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `sector_effect_grid_summary.csv` | 每组策略的信号质量、账户收益、回撤、交易次数和综合排序 |
+| `sector_effect_grid_trade_records.csv` | 每组策略的逐笔账户流水；统一列集合后写出，便于 Excel 或 pandas 复核 |
+| `sector_effect_grid_config.json` | 本次运行参数和展开后的策略组合 |
+| `sector_effect_grid_report.md` | 自动生成的中文 Top 结果和基准对照 |
+
+异常处理：脚本会校验板块增强目录的 manifest 和必要 `sector_*` 字段；旧交易流水如果存在列不一致导致无法续跑，会提示更换输出目录或删除旧文件。字段定义见 `docs/sector-effect-grid-data-dictionary.md`，结果记录见 `docs/sector-effect-grid-result-20260504.md`。
+
 ### 板块轮动诊断
 
 用途：判断主题板块之间是否存在轮动，并把候选策略的每笔交易标记到对应轮动状态下，避免只看静态板块强度阈值。

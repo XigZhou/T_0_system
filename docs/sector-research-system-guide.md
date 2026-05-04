@@ -226,7 +226,35 @@ m20<0.08,hs300_m20<0.02
 
 脚本只读取既有数据，不触发 AKShare 或 Tushare 抓取。运行前会校验板块增强目录是否存在 `sector_feature_manifest.csv`，以及必要的 `sector_*` 字段是否完整。详细字段定义见 `docs/sector-parameter-grid-data-dictionary.md`。
 
-## 8. 板块轮动诊断
+## 8. 板块效应选股条件探索
+
+如果板块参数网格已经说明某组板块候选有价值，下一步可以进一步验证“有板块效应的股票”本身是否应该优先买。对应脚本为：
+
+```bash
+python scripts/run_sector_effect_grid.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_181000_sector_effect_grid_fixed \
+  --score-thresholds 0.4,0.5 \
+  --rank-pcts 0.7 \
+  --exposure-mins 0 \
+  --theme-m20-mins any,0 \
+  --amount-ratio-mins any,1.0 \
+  --score-weights 5,10,15 \
+  --resume
+```
+
+该脚本比较：
+
+| 家族 | 说明 |
+| --- | --- |
+| `baseline` | 不使用板块字段的基准动量 |
+| `hard_filter` | 把板块暴露、主题强度、主题排名、主题 m20 和成交额放大作为买入过滤 |
+| `score_weight` | 买入条件不变，把板块强度字段加入 TopN 评分 |
+
+输出包括 `sector_effect_grid_summary.csv`、`sector_effect_grid_trade_records.csv`、`sector_effect_grid_config.json` 和 `sector_effect_grid_report.md`。交易流水会统一所有动作的列集合后写出，便于后续用 Excel 或 pandas 校验逐笔买卖。字段说明见 `docs/sector-effect-grid-data-dictionary.md`，正式结果记录见 `docs/sector-effect-grid-result-20260504.md`。
+
+## 9. 板块轮动诊断
 
 参数网格探索找出候选组合后，建议继续运行板块轮动诊断，判断收益是否来自主线轮动，而不是少数个股或单段行情。
 
@@ -259,7 +287,7 @@ python scripts/run_sector_rotation_diagnosis.py \
 
 轮动状态只用于研究分组，不会直接修改买入或卖出逻辑。字段和分类规则见 `docs/sector-rotation-diagnosis-data-dictionary.md`。
 
-## 9. 板块轮动状态条件网格
+## 10. 板块轮动状态条件网格
 
 轮动诊断确认某些状态或主题簇更有价值后，可以继续运行轮动状态条件网格，验证“上一轮最佳板块候选 + 轮动过滤”是否优于基准和原候选。
 
@@ -293,14 +321,14 @@ sector_exposure_score>0,sector_strongest_theme_score>=0.4,sector_strongest_theme
 
 该脚本在内存里把轮动字段合并到板块增强股票数据，不覆盖 `data_bundle/processed_qfq_theme_focus_top100_sector`。
 
-## 10. 交易日对齐规则
+## 11. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。
 - 板块研究的 T 日主题强度只使用 T 日及历史数据，可以作为 T 日收盘信号字段。
 - 如果未来改成盘前信号，必须把板块强度整体滞后一日，避免未来函数。
 - 成分股数据是最新快照，不是历史成分，长区间回测时需要说明可能存在幸存者偏差。
 
-## 11. 腾讯云同步流程
+## 12. 腾讯云同步流程
 
 本地完成提交并推送后，在腾讯云执行：
 
@@ -320,7 +348,7 @@ sudo systemctl restart t0-system
 curl http://127.0.0.1:8083/health
 ```
 
-## 12. 常见异常
+## 13. 常见异常
 
 | 异常 | 处理方式 |
 | --- | --- |
@@ -333,7 +361,7 @@ curl http://127.0.0.1:8083/health
 | 轮动诊断交易股票缺少主题字段 | 确认 `--sector-processed-dir` 指向板块增强目录，而不是基准目录 |
 | 轮动状态网格提示不支持 `rotation_*` 字段 | 确认代码已包含 `overnight_bt/rotation_features.py`，并且表达式白名单已更新 |
 
-## 13. 交付检查
+## 14. 交付检查
 
 建议每次改完板块研究系统后执行：
 

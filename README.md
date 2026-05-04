@@ -371,7 +371,40 @@ python scripts/run_sector_rotation_followup.py \
 
 字段说明见 `docs/sector-rotation-followup-data-dictionary.md`。本次正式结果记录见 `docs/sector-rotation-followup-result-20260504.md`。关键结论是：三条策略收益明显集中在 2025；市场级轮动字段直接加到评分里不会改变日内 TopN，因为同一天所有候选股票获得的是同一个常数加减项。后续如果继续研究轮动加权，应优先使用 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme` 这类股票差异化字段。
 
-### 11. 补充或重拉主题前 100 股票最新数据
+### 11. 板块效应选股条件探索
+
+如果想回答“优先选择有板块效应的股票，到底是更适合做硬过滤，还是更适合只加权评分”，可以运行新的板块效应网格脚本。它复用现有的基准处理后目录和板块增强目录，不会重新抓取 AKShare 或 Tushare。
+
+```bash
+python scripts/run_sector_effect_grid.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_181000_sector_effect_grid_fixed \
+  --score-thresholds 0.4,0.5 \
+  --rank-pcts 0.7 \
+  --exposure-mins 0 \
+  --theme-m20-mins any,0 \
+  --amount-ratio-mins any,1.0 \
+  --score-weights 5,10,15 \
+  --resume
+```
+
+默认比较三类策略：
+
+- `baseline`：基准动量，不使用板块字段
+- `hard_filter`：在买入条件里要求板块暴露和最强主题强度/排名/成交额满足阈值
+- `score_weight`：买入条件不变，只把板块强度字段加到评分里
+
+输出目录默认写入 `research_runs/YYYYMMDD_HHMMSS_sector_effect_grid/`，主要文件为：
+
+- `sector_effect_grid_summary.csv`
+- `sector_effect_grid_trade_records.csv`
+- `sector_effect_grid_config.json`
+- `sector_effect_grid_report.md`
+
+字段定义见 `docs/sector-effect-grid-data-dictionary.md`，正式结果见 `docs/sector-effect-grid-result-20260504.md`。
+
+### 12. 补充或重拉主题前 100 股票最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
 
@@ -1132,6 +1165,8 @@ python scripts/run_signal_median_scan.py --processed-dir data_bundle/processed_q
 - 板块研究指标文档：[sector-research-indicator-documentation.md](/D:/量化/Momentum/T_0_system/docs/sector-research-indicator-documentation.md)
 - 板块轮动后续验证数据说明：[sector-rotation-followup-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-data-dictionary.md)
 - 板块轮动后续验证结果：[sector-rotation-followup-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-result-20260504.md)
+- 板块效应选股条件数据说明：[sector-effect-grid-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-data-dictionary.md)
+- 板块效应选股条件结果：[sector-effect-grid-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-result-20260504.md)
 
 ## 交付前校验
 
