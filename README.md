@@ -217,6 +217,18 @@ python scripts/build_sector_research_features.py \
 
 这样会复制原股票 CSV 并增加 `sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_exposure_score` 等字段，原 `data_bundle/processed_qfq_theme_focus_top100` 不会被覆盖。
 
+如果要把“板块轮动诊断”的每日主线字段接入模拟账户，继续生成一个独立轮动增强目录：
+
+```bash
+python scripts/build_sector_rotation_features.py \
+  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector_rotation \
+  --overwrite
+```
+
+该目录的数据来源是 `data_bundle/processed_qfq_theme_focus_top100_sector` 与 `sector_rotation_daily.csv`，会给每只股票 CSV 增加 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_matches_rotation_top_cluster` 等字段；`rotation_feature_manifest.csv` 只是生成清单，不会被当成股票日线读取。当前已经提供两个模拟账户模板：`configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` 对应“板块候选_score0.4_rank0.7”，`configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` 对应“候选_避开新能源主线”。更多运行方式见 `docs/paper-trading-system.md`。
+
 组合回测页和每日收盘选股页提供三套策略预设：
 
 | 预设 | 数据目录 | 用途 |

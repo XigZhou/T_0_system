@@ -355,6 +355,34 @@ python scripts/run_sector_rotation_grid.py \
 
 异常处理：轮动日频文件缺失必要字段、板块增强目录缺失 manifest 或必要 `sector_*` 字段时直接报错。字段定义见 `docs/sector-rotation-grid-data-dictionary.md`。
 
+### 板块增强结果接入模拟账户
+
+用途：把已经确认的板块参数候选接入 `/paper` 多账户模拟系统，使用 T 日收盘信号生成 T+1 待执行订单。当前新增两个模板：
+
+| 账户 | 模板 | 处理后数据目录 | 买入条件差异 |
+| --- | --- | --- | --- |
+| 板块候选_score04_rank07_v1 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector` | 基础动量 + `sector_exposure_score>0` + `sector_strongest_theme_score>=0.4` + `sector_strongest_theme_rank_pct<=0.7` |
+| 板块轮动_避开新能源_v1 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | 在上一个账户基础上增加 `rotation_top_cluster!=新能源` |
+
+策略 2 的数据目录需要先由下面命令生成：
+
+```bash
+python scripts/build_sector_rotation_features.py \
+  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector_rotation \
+  --overwrite
+```
+
+输入来源：`sector_processed_dir` 是已经合并板块研究字段的股票日线目录，`rotation_daily_path` 是轮动诊断脚本输出的每日主线表。输出结果：每只股票 CSV 追加 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster` 等字段，同时生成 `rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 记录源路径、生成时间、股票数量和轮动字段清单。异常处理：输出目录不能等于源目录；不加 `--overwrite` 时目录已存在会拒绝覆盖；模拟交易加载目录时会跳过 `rotation_feature_manifest.csv`，避免把元数据误当股票日线。
+
+手动生成计划示例：
+
+```bash
+python scripts/run_paper_trading.py --config configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml --action generate --date 20260430
+python scripts/run_paper_trading.py --config configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml --action generate --date 20260430
+```
+
 ### 日常补充主题前 100 最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 中的股票数据只到旧日期，例如 `20260417`，不要直接手工修改处理后 CSV。正确流程是先补原始数据，再重建处理后目录。

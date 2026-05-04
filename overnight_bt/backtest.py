@@ -35,6 +35,11 @@ class LoadedSymbol:
 _SCORE_OFFSET_RE = re.compile(r"\[(\d+)\]")
 _CUTOFF_EXIT_DATE = "99991231"
 _CUTOFF_EXIT_LABEL = "截止日后估值"
+PROCESSED_METADATA_CSV_NAMES = {
+    "processing_manifest.csv",
+    "sector_feature_manifest.csv",
+    "rotation_feature_manifest.csv",
+}
 
 
 def _normalize_folder(path_text: str) -> Path:
@@ -68,7 +73,7 @@ def load_processed_folder(folder_path: str, start_date: str = "", end_date: str 
         for p in folder.iterdir()
         if p.is_file()
         and p.suffix.lower() == ".csv"
-        and p.name not in {"processing_manifest.csv", "sector_feature_manifest.csv"}
+        and p.name not in PROCESSED_METADATA_CSV_NAMES
     )
     if not files:
         raise FileNotFoundError(f"no csv found under processed_dir: {folder}")

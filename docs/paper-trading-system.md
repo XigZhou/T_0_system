@@ -106,6 +106,25 @@ python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top
 python scripts/run_paper_trading.py --config-dir configs/paper_accounts --all --action generate --date 20260416
 ```
 
+当前新增两个板块增强模拟账户模板：
+
+| 策略 | 模板路径 | 数据目录 | 账本路径 |
+| --- | --- | --- | --- |
+| 板块候选_score0.4_rank0.7 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector` | `paper_trading/accounts/板块候选_score04_rank07_v1.xlsx` |
+| 候选_避开新能源主线 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | `paper_trading/accounts/板块轮动_避开新能源_v1.xlsx` |
+
+策略 1 直接读取板块增强目录，核心买入条件是在基础动量、大盘动量过滤后增加 `sector_exposure_score>0`、`sector_strongest_theme_score>=0.4`、`sector_strongest_theme_rank_pct<=0.7`，并按原动量评分表达式取 Top2。策略 2 在策略 1 的基础上增加 `rotation_top_cluster!=新能源`，所以运行前必须先生成轮动增强目录：
+
+```bash
+python scripts/build_sector_rotation_features.py \
+  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector_rotation \
+  --overwrite
+```
+
+轮动增强目录的数据定义：股票日线仍来自 `data_bundle/processed_qfq_theme_focus_top100_sector`，轮动字段来自 `sector_rotation_daily.csv`；新增字段包括 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`rotation_top_score`、`rotation_top_rank_pct`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster`。`rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 只用于说明生成时间、源目录、源文件和行数，不参与买卖信号计算。
+
 腾讯云定时任务脚本：
 
 ```bash
