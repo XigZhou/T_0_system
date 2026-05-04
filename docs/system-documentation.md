@@ -400,6 +400,45 @@ python scripts/run_sector_rotation_grid.py \
 
 异常处理：轮动日频文件缺失必要字段、板块增强目录缺失 manifest 或必要 `sector_*` 字段时直接报错。字段定义见 `docs/sector-rotation-grid-data-dictionary.md`。
 
+### 股票匹配主线轮动 TopN 网格
+
+用途：验证轮动是否能真正配合 TopN 排序。上一轮后续验证已经说明，市场级轮动字段在同一天对所有候选股票相同，直接加到评分里不会改变 TopN。本模块改用股票差异化字段：`stock_matches_rotation_top_cluster` 和 `stock_matches_rotation_top_theme`。
+
+运行命令：
+
+```bash
+python scripts/run_sector_rotation_match_grid.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_191500_sector_rotation_match_grid \
+  --cluster-weights 5,10 \
+  --theme-weights 8,12 \
+  --penalty-weights 5,8
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基准处理后目录，默认 `data_bundle/processed_qfq_theme_focus_top100` |
+| `--sector-processed-dir` | 板块增强目录，默认 `data_bundle/processed_qfq_theme_focus_top100_sector` |
+| `--rotation-daily-path` | 轮动诊断日频文件 |
+| `--cluster-weights` | 股票匹配当日 Top1 主题簇时的评分加权列表 |
+| `--theme-weights` | 股票匹配当日 Top1 主题时的评分加权列表 |
+| `--penalty-weights` | 新主线启动时，不匹配主线簇股票的扣分列表 |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `sector_rotation_match_grid_summary.csv` | 策略收益、回撤、信号质量和与原板块候选的 TopN 重合率 |
+| `sector_rotation_match_grid_trade_records.csv` | 每组策略逐笔账户流水 |
+| `sector_rotation_match_grid_pick_records.csv` | 每组策略 TopN 入选股票，额外补充轮动匹配字段 |
+| `sector_rotation_match_grid_config.json` | CLI 参数和展开后的策略组合 |
+| `sector_rotation_match_grid_report.md` | 自动生成的中文摘要 |
+
+异常处理：板块增强字段或轮动日频字段缺失时直接报错；入选记录补充轮动匹配字段只发生在脚本输出中，不修改回测引擎和输入数据目录。字段定义见 `docs/sector-rotation-match-grid-data-dictionary.md`。
+
 ### 板块轮动后续验证
 
 用途：落实 `docs/sector-rotation-grid-result-20260501.md` 的下一步建议，对 `基准动量`、`板块候选_score0.4_rank0.7`、`候选_避开新能源主线` 做全区间、分年度和最近一年对比，同时验证“轮动状态不硬过滤，改成评分加权”的效果。

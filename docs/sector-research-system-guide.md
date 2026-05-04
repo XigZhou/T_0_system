@@ -287,7 +287,31 @@ python scripts/run_sector_rotation_diagnosis.py \
 
 轮动状态只用于研究分组，不会直接修改买入或卖出逻辑。字段和分类规则见 `docs/sector-rotation-diagnosis-data-dictionary.md`。
 
-## 10. 板块轮动状态条件网格
+## 10. 股票匹配主线轮动 TopN 网格
+
+市场级轮动字段直接加到评分里不会改变同日 TopN，因为同一天所有候选股票得到的是同一个常数。要让轮动真正影响 TopN，应使用股票差异化字段：
+
+```bash
+python scripts/run_sector_rotation_match_grid.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_191500_sector_rotation_match_grid \
+  --cluster-weights 5,10 \
+  --theme-weights 8,12 \
+  --penalty-weights 5,8
+```
+
+该脚本会比较：
+
+| 家族 | 说明 |
+| --- | --- |
+| `rotation_match_filter` | 股票必须匹配当日 Top1 主题或主题簇 |
+| `rotation_match_score` | 股票匹配主线时加分，不硬过滤 |
+| `rotation_cluster_guard` | 避开某类市场主线，例如新能源 |
+
+输出中的 `sector_rotation_match_grid_pick_records.csv` 会补充 `stock_matches_rotation_top_cluster` 和 `stock_matches_rotation_top_theme`，汇总表会计算与原 `板块候选_score0.4_rank0.7` 的 TopN 重合率。字段说明见 `docs/sector-rotation-match-grid-data-dictionary.md`。
+
+## 11. 板块轮动状态条件网格
 
 轮动诊断确认某些状态或主题簇更有价值后，可以继续运行轮动状态条件网格，验证“上一轮最佳板块候选 + 轮动过滤”是否优于基准和原候选。
 
@@ -321,14 +345,14 @@ sector_exposure_score>0,sector_strongest_theme_score>=0.4,sector_strongest_theme
 
 该脚本在内存里把轮动字段合并到板块增强股票数据，不覆盖 `data_bundle/processed_qfq_theme_focus_top100_sector`。
 
-## 11. 交易日对齐规则
+## 12. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。
 - 板块研究的 T 日主题强度只使用 T 日及历史数据，可以作为 T 日收盘信号字段。
 - 如果未来改成盘前信号，必须把板块强度整体滞后一日，避免未来函数。
 - 成分股数据是最新快照，不是历史成分，长区间回测时需要说明可能存在幸存者偏差。
 
-## 12. 腾讯云同步流程
+## 13. 腾讯云同步流程
 
 本地完成提交并推送后，在腾讯云执行：
 
@@ -348,7 +372,7 @@ sudo systemctl restart t0-system
 curl http://127.0.0.1:8083/health
 ```
 
-## 13. 常见异常
+## 14. 常见异常
 
 | 异常 | 处理方式 |
 | --- | --- |
@@ -361,7 +385,7 @@ curl http://127.0.0.1:8083/health
 | 轮动诊断交易股票缺少主题字段 | 确认 `--sector-processed-dir` 指向板块增强目录，而不是基准目录 |
 | 轮动状态网格提示不支持 `rotation_*` 字段 | 确认代码已包含 `overnight_bt/rotation_features.py`，并且表达式白名单已更新 |
 
-## 14. 交付检查
+## 15. 交付检查
 
 建议每次改完板块研究系统后执行：
 

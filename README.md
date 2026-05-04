@@ -371,7 +371,32 @@ python scripts/run_sector_rotation_followup.py \
 
 字段说明见 `docs/sector-rotation-followup-data-dictionary.md`。本次正式结果记录见 `docs/sector-rotation-followup-result-20260504.md`。关键结论是：三条策略收益明显集中在 2025；市场级轮动字段直接加到评分里不会改变日内 TopN，因为同一天所有候选股票获得的是同一个常数加减项。后续如果继续研究轮动加权，应优先使用 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme` 这类股票差异化字段。
 
-### 11. 板块效应选股条件探索
+### 11. 股票匹配主线轮动 TopN 网格
+
+市场级轮动字段直接加到评分里不会改变同日股票排序。要验证轮动是否能配合 TopN，应改用股票差异化字段，例如股票最强主题是否匹配当日 Top1 主题或主题簇：
+
+```bash
+python scripts/run_sector_rotation_match_grid.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_191500_sector_rotation_match_grid \
+  --cluster-weights 5,10 \
+  --theme-weights 8,12 \
+  --penalty-weights 5,8
+```
+
+默认比较：
+
+- `板块候选_score0.4_rank0.7`
+- `候选_股票匹配主线簇`
+- `候选_股票匹配Top主题`
+- `主线簇匹配加权_w*`
+- `Top主题匹配加权_w*`
+- `主线匹配加权_新启动惩罚_p*`
+
+输出包括 `sector_rotation_match_grid_summary.csv`、`sector_rotation_match_grid_trade_records.csv`、`sector_rotation_match_grid_pick_records.csv`、`sector_rotation_match_grid_config.json` 和 `sector_rotation_match_grid_report.md`。其中入选记录会补充 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme`，并在汇总表里计算与原板块候选的 TopN 重合率。字段说明见 `docs/sector-rotation-match-grid-data-dictionary.md`。
+
+### 12. 板块效应选股条件探索
 
 如果想回答“优先选择有板块效应的股票，到底是更适合做硬过滤，还是更适合只加权评分”，可以运行新的板块效应网格脚本。它复用现有的基准处理后目录和板块增强目录，不会重新抓取 AKShare 或 Tushare。
 
@@ -404,7 +429,7 @@ python scripts/run_sector_effect_grid.py \
 
 字段定义见 `docs/sector-effect-grid-data-dictionary.md`，正式结果见 `docs/sector-effect-grid-result-20260504.md`。
 
-### 12. 补充或重拉主题前 100 股票最新数据
+### 13. 补充或重拉主题前 100 股票最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
 
@@ -1165,6 +1190,8 @@ python scripts/run_signal_median_scan.py --processed-dir data_bundle/processed_q
 - 板块研究指标文档：[sector-research-indicator-documentation.md](/D:/量化/Momentum/T_0_system/docs/sector-research-indicator-documentation.md)
 - 板块轮动后续验证数据说明：[sector-rotation-followup-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-data-dictionary.md)
 - 板块轮动后续验证结果：[sector-rotation-followup-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-result-20260504.md)
+- 股票匹配主线轮动 TopN 数据说明：[sector-rotation-match-grid-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-grid-data-dictionary.md)
+- 股票匹配主线轮动 TopN 结果：[sector-rotation-match-grid-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-grid-result-20260504.md)
 - 板块效应选股条件数据说明：[sector-effect-grid-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-data-dictionary.md)
 - 板块效应选股条件结果：[sector-effect-grid-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-result-20260504.md)
 
