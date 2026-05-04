@@ -333,7 +333,45 @@ python scripts/run_sector_rotation_grid.py \
 
 字段说明见 `docs/sector-rotation-grid-data-dictionary.md`。该网格仍然是研究脚本，不会修改模拟账户。
 
-### 10. 补充或重拉主题前 100 股票最新数据
+### 10. 板块轮动后续验证
+
+`docs/sector-rotation-grid-result-20260501.md` 建议继续做两类验证：一是把 `基准动量`、`板块候选_score0.4_rank0.7`、`候选_避开新能源主线` 做分年度和最近一年对比；二是把轮动状态从硬过滤改成评分加权。对应脚本为：
+
+```bash
+python scripts/run_sector_rotation_followup.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_130000_sector_rotation_followup
+```
+
+长实验可以分批续跑：
+
+```bash
+python scripts/run_sector_rotation_followup.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_130000_sector_rotation_followup \
+  --resume \
+  --max-weighted-runs 2
+```
+
+默认输入：
+
+- 基准目录：`data_bundle/processed_qfq_theme_focus_top100`
+- 板块增强目录：`data_bundle/processed_qfq_theme_focus_top100_sector`
+- 轮动日频文件：`research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv`
+
+默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_followup/`：
+
+- `sector_rotation_period_comparison.csv`：三条策略的全区间、分年度和最近一年账户/信号对比
+- `sector_rotation_weighted_score_summary.csv`：轮动评分加权网格汇总
+- `sector_rotation_weighted_score_trade_records.csv`：轮动评分加权实验逐笔交易流水
+- `sector_rotation_followup_config.json`：本次运行参数和展开后的策略清单
+- `sector_rotation_followup_report.md`：自动生成的中文总结报告
+
+字段说明见 `docs/sector-rotation-followup-data-dictionary.md`。本次正式结果记录见 `docs/sector-rotation-followup-result-20260504.md`。关键结论是：三条策略收益明显集中在 2025；市场级轮动字段直接加到评分里不会改变日内 TopN，因为同一天所有候选股票获得的是同一个常数加减项。后续如果继续研究轮动加权，应优先使用 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme` 这类股票差异化字段。
+
+### 11. 补充或重拉主题前 100 股票最新数据
 
 如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
 
@@ -1092,6 +1130,8 @@ python scripts/run_signal_median_scan.py --processed-dir data_bundle/processed_q
 - 板块研究使用说明：[sector-research-system-guide.md](/D:/量化/Momentum/T_0_system/docs/sector-research-system-guide.md)
 - 板块研究数据文档：[sector-research-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-research-data-dictionary.md)
 - 板块研究指标文档：[sector-research-indicator-documentation.md](/D:/量化/Momentum/T_0_system/docs/sector-research-indicator-documentation.md)
+- 板块轮动后续验证数据说明：[sector-rotation-followup-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-data-dictionary.md)
+- 板块轮动后续验证结果：[sector-rotation-followup-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-result-20260504.md)
 
 ## 交付前校验
 

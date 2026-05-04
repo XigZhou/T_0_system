@@ -355,6 +355,58 @@ python scripts/run_sector_rotation_grid.py \
 
 异常处理：轮动日频文件缺失必要字段、板块增强目录缺失 manifest 或必要 `sector_*` 字段时直接报错。字段定义见 `docs/sector-rotation-grid-data-dictionary.md`。
 
+### 板块轮动后续验证
+
+用途：落实 `docs/sector-rotation-grid-result-20260501.md` 的下一步建议，对 `基准动量`、`板块候选_score0.4_rank0.7`、`候选_避开新能源主线` 做全区间、分年度和最近一年对比，同时验证“轮动状态不硬过滤，改成评分加权”的效果。
+
+运行命令：
+
+```bash
+python scripts/run_sector_rotation_followup.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_130000_sector_rotation_followup
+```
+
+长实验支持续跑和分批：
+
+```bash
+python scripts/run_sector_rotation_followup.py \
+  --start-date 20230101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260504_130000_sector_rotation_followup \
+  --resume \
+  --max-weighted-runs 2
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基准处理后股票目录，默认 `data_bundle/processed_qfq_theme_focus_top100` |
+| `--sector-processed-dir` | 板块增强股票目录，默认 `data_bundle/processed_qfq_theme_focus_top100_sector` |
+| `--rotation-daily-path` | 轮动诊断生成的 `sector_rotation_daily.csv` |
+| `--start-date`、`--end-date` | 回测信号日期区间 |
+| `--tech-bonuses` | `rotation_top_cluster_tech` 的评分加分权重列表，默认 `0,2,4` |
+| `--new-energy-penalties` | `rotation_top_cluster_new_energy` 的评分扣分权重列表，默认 `0,2,4` |
+| `--new-start-penalties` | `rotation_is_new_start` 的评分扣分权重列表，默认 `0,2,4` |
+| `--resume` | 读取已有输出，跳过已经完成的周期和加权组合 |
+| `--max-weighted-runs` | 单次最多新增运行的加权组合数量，`0` 表示不限制 |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `sector_rotation_period_comparison.csv` | 三条策略的全区间、分年度和最近一年对比，含账户收益、回撤、买入次数、胜率和信号中位收益 |
+| `sector_rotation_weighted_score_summary.csv` | 轮动评分加权网格汇总，含权重、账户收益、信号质量、`grid_score` 和风险提示 |
+| `sector_rotation_weighted_score_trade_records.csv` | 加权网格逐笔交易流水，含策略名、买卖日期、股票、价格、股数、费用、金额和盈亏 |
+| `sector_rotation_followup_config.json` | 本次 CLI 参数、周期定义、对比策略和加权策略清单 |
+| `sector_rotation_followup_report.md` | 自动生成的中文总结报告 |
+
+异常处理：脚本会先加载基准目录、板块增强目录和轮动日频文件；如果板块增强目录缺少 `sector_feature_manifest.csv` 或必要 `sector_*` 字段，会直接失败。续跑时如果输出目录已有部分 CSV，脚本会按 `period_label + case` 和 `case` 跳过已完成组合，交易流水采用追加写入，避免长实验一次性占用过多内存。
+
+字段定义见 `docs/sector-rotation-followup-data-dictionary.md`。当前正式结果见 `docs/sector-rotation-followup-result-20260504.md`。结论是三条策略收益明显集中在 2025，2023 和 2026YTD 偏弱；市场级轮动字段直接加到评分里不会改变日内 TopN，因为同一天所有候选股票获得的是同一个常数加减项。后续继续研究轮动加权时，应改用 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme` 或二者与 `rotation_is_new_start` 的交互项这类股票差异化字段。
+
 ### 板块增强结果接入模拟账户
 
 用途：把已经确认的板块参数候选接入 `/paper` 多账户模拟系统，使用 T 日收盘信号生成 T+1 待执行订单。当前新增两个模板：
