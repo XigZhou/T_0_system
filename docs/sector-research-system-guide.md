@@ -311,7 +311,31 @@ python scripts/run_sector_rotation_match_grid.py \
 
 输出中的 `sector_rotation_match_grid_pick_records.csv` 会补充 `stock_matches_rotation_top_cluster` 和 `stock_matches_rotation_top_theme`，汇总表会计算与原 `板块候选_score0.4_rank0.7` 的 TopN 重合率。字段说明见 `docs/sector-rotation-match-grid-data-dictionary.md`。
 
-## 11. 板块轮动状态条件网格
+## 11. 板块轮动匹配稳定性验证
+
+如果 `主线簇匹配加权_w5` 在全区间优于原板块候选，还需要验证它是否在不同年份和滚动窗口都稳定。稳定性验证脚本为：
+
+```bash
+python scripts/run_sector_rotation_match_stability.py \
+  --start-date 20160101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260505_120000_sector_rotation_match_stability
+```
+
+该脚本比较：
+
+| 策略 | 说明 |
+| --- | --- |
+| `基准动量` | 不使用板块或轮动字段 |
+| `板块候选_score0.4_rank0.7` | 原板块候选 |
+| `主线簇匹配加权_w5` | 股票所属主题簇匹配当日 Top1 主线簇时加 5 分 |
+| `候选_避开新能源主线` | 在原板块候选基础上排除新能源成为 Top1 主线的日期 |
+
+输出目录为 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_match_stability/`，包含区间汇总、策略稳定性汇总、字段覆盖表、完整交易流水、参数配置和中文报告。脚本支持 `--resume` 续跑，也支持 `--fill-missing-trade-records` 补齐已完成汇总中缺失的交易流水。
+
+注意：当前股票数据虽然从 2016 年开始，但板块强度和轮动状态字段从 `20230403` 才满足公平比较要求。2016-2022 只输出 `基准动量` 历史参考，不用于判断板块轮动策略好坏。字段定义见 `docs/sector-rotation-match-stability-data-dictionary.md`，结果记录见 `docs/sector-rotation-match-stability-result-20260505.md`。
+
+## 12. 板块轮动状态条件网格
 
 轮动诊断确认某些状态或主题簇更有价值后，可以继续运行轮动状态条件网格，验证“上一轮最佳板块候选 + 轮动过滤”是否优于基准和原候选。
 
@@ -345,14 +369,14 @@ sector_exposure_score>0,sector_strongest_theme_score>=0.4,sector_strongest_theme
 
 该脚本在内存里把轮动字段合并到板块增强股票数据，不覆盖 `data_bundle/processed_qfq_theme_focus_top100_sector`。
 
-## 12. 交易日对齐规则
+## 13. 交易日对齐规则
 
 - 当前回测系统默认是 T 日收盘产生信号，T+1 日开盘买入。
 - 板块研究的 T 日主题强度只使用 T 日及历史数据，可以作为 T 日收盘信号字段。
 - 如果未来改成盘前信号，必须把板块强度整体滞后一日，避免未来函数。
 - 成分股数据是最新快照，不是历史成分，长区间回测时需要说明可能存在幸存者偏差。
 
-## 13. 腾讯云同步流程
+## 14. 腾讯云同步流程
 
 本地完成提交并推送后，在腾讯云执行：
 
@@ -372,7 +396,7 @@ sudo systemctl restart t0-system
 curl http://127.0.0.1:8083/health
 ```
 
-## 14. 常见异常
+## 15. 常见异常
 
 | 异常 | 处理方式 |
 | --- | --- |

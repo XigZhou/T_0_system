@@ -439,6 +439,45 @@ python scripts/run_sector_rotation_match_grid.py \
 
 异常处理：板块增强字段或轮动日频字段缺失时直接报错；入选记录补充轮动匹配字段只发生在脚本输出中，不修改回测引擎和输入数据目录。字段定义见 `docs/sector-rotation-match-grid-data-dictionary.md`。
 
+### 板块轮动匹配稳定性验证
+
+用途：验证 `主线簇匹配加权_w5` 是否在分年度、最近一年和滚动窗口中稳定，避免只根据全区间收益决定是否接入模拟账户。
+
+运行命令：
+
+```bash
+python scripts/run_sector_rotation_match_stability.py \
+  --start-date 20160101 \
+  --end-date 20260429 \
+  --out-dir research_runs/20260505_120000_sector_rotation_match_stability
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基准处理后股票目录，默认 `data_bundle/processed_qfq_theme_focus_top100` |
+| `--sector-processed-dir` | 板块增强股票目录，默认 `data_bundle/processed_qfq_theme_focus_top100_sector` |
+| `--rotation-daily-path` | 轮动诊断生成的 `sector_rotation_daily.csv` |
+| `--start-date`、`--end-date` | 用户希望检查的总区间；脚本会根据字段覆盖率自动确定板块/轮动公平可比区间 |
+| `--rolling-months` | 滚动窗口月份列表，默认 `6,12` |
+| `--min-coverage` | 板块和轮动字段进入可比区间的最低覆盖率，默认 `0.95` |
+| `--resume` | 同一输出目录已有结果时跳过已完成的 `period_label + case` |
+| `--fill-missing-trade-records` | 配合 `--resume` 使用，只补齐已有汇总中缺失的交易流水 |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `sector_rotation_match_stability_summary.csv` | 每个区间、每条策略的收益、回撤、信号质量和交易次数 |
+| `sector_rotation_match_stability_by_case.csv` | 每条策略的正收益区间占比、跑赢板块候选次数和跑赢基准次数 |
+| `sector_rotation_match_stability_coverage.csv` | 2016-2026 年板块强度和轮动字段覆盖率 |
+| `sector_rotation_match_stability_trade_records.csv` | 全部区间策略组合的逐笔账户流水 |
+| `sector_rotation_match_stability_config.json` | CLI 参数、区间清单和策略清单 |
+| `sector_rotation_match_stability_report.md` | 自动生成的中文报告 |
+
+使用注意：当前可比区间从 `20230403` 开始，因为 2016-2022 缺少板块强度和轮动状态字段。脚本会把 2016-2022 单独作为 `基准历史参考_2016-2022`，只运行 `基准动量`。字段定义见 `docs/sector-rotation-match-stability-data-dictionary.md`，结果记录见 `docs/sector-rotation-match-stability-result-20260505.md`。
+
 ### 板块轮动后续验证
 
 用途：落实 `docs/sector-rotation-grid-result-20260501.md` 的下一步建议，对 `基准动量`、`板块候选_score0.4_rank0.7`、`候选_避开新能源主线` 做全区间、分年度和最近一年对比，同时验证“轮动状态不硬过滤，改成评分加权”的效果。
