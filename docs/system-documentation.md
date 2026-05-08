@@ -197,12 +197,14 @@ python scripts/build_sector_research_features.py \
 | 大盘环境 | `data_bundle/market_context.csv` | 上证指数、沪深300、创业板指的 `close`、`pct_chg`、`m5`、`m20`、`m60` |
 | 主题排名 | `theme_strength_daily.csv` | `theme_name`、`theme_score`、`volume_price_score`、`reversal_score`、`m5`、`m20`、`strongest_board` |
 | 强势板块 | `sector_board_daily.csv` | `board_name`、`board_type`、`theme_board_score`、`m20`、`amount_ratio_20`、资金流字段 |
-| 个股暴露 | `stock_theme_exposure.csv` | `stock_code`、`stock_name`、`theme_names`、`board_names`、`exposure_score` |
+| 个股暴露 | `stock_theme_exposure.csv` | `stock_code`、`stock_name`、`theme_names`、`board_names`、`exposure_score`；页面另按 `theme_names` 全部命中统计每个主题覆盖股票数 |
 | 主题映射 | `theme_board_mapping.csv` | `theme_name`、`subtheme_name`、`matched_keyword`、`board_name` |
 | 异常日志 | `sector_research_errors.csv` | `stage`、`board_type`、`board_name`、`error` |
 
 大盘环境不会与回测系统已有大盘字段冲突：它读取同一个 `data_bundle/market_context.csv`，只在 `/sector` 看板上展示，不写入 `sector_research/`，也不改变模拟交易和回测的买卖条件。接口会选取不晚于板块最新交易日的最近一条大盘记录，避免使用未来数据。
 
+
+个股暴露中的 `primary_theme` 不是排他分类字段，不能用来判断某个主题股票池只有多少只股票。主题覆盖数、股票池分层和策略接入应使用 `theme_names` 的全部命中集合。
 异常处理：缺少 CSV 时页面显示“暂无数据”并在异常日志页签提示缺失路径；如果传入的目录不在项目根目录内，API 返回 400，避免误读服务器其他目录。
 
 ### 板块增强口径接入回测与每日选股

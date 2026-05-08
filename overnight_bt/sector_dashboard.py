@@ -97,6 +97,14 @@ EXPOSURE_COLUMNS = [
     "latest_fetched_at",
 ]
 
+THEME_EXPOSURE_COUNT_COLUMNS = [
+    "theme_name",
+    "stock_count",
+    "primary_stock_count",
+    "coverage_ratio",
+    "top_stocks",
+]
+
 MAPPING_COLUMNS = [
     "theme_name",
     "subtheme_name",
@@ -137,6 +145,9 @@ NUMERIC_COLUMNS = {
     "exposure_score",
     "theme_count",
     "subtheme_count",
+    "stock_count",
+    "primary_stock_count",
+    "coverage_ratio",
 }
 
 
@@ -174,6 +185,7 @@ def build_sector_dashboard_payload(
     latest_themes = _latest_rows(theme_strength, latest_date, "theme_score", THEME_COLUMNS, 40)
     latest_boards = _latest_rows(board_strength, latest_date, "theme_board_score", BOARD_COLUMNS, 80)
     exposure_rows = _sorted_rows(stock_exposure, "exposure_score", EXPOSURE_COLUMNS, 120)
+    theme_exposure_counts = _theme_exposure_counts(stock_exposure)
     mapping_rows = _sorted_rows(mapping, "theme_name", MAPPING_COLUMNS, 500, numeric_sort=False)
     error_rows = _records(errors.tail(200), limit=200) if not errors.empty else []
     theme_history = _theme_history(theme_strength, latest_themes)
@@ -205,6 +217,7 @@ def build_sector_dashboard_payload(
         "latest_themes": latest_themes,
         "latest_boards": latest_boards,
         "stock_exposure": exposure_rows,
+        "theme_exposure_counts": theme_exposure_counts,
         "mapping_rows": mapping_rows,
         "error_rows": error_rows,
         "theme_history": theme_history,
@@ -298,6 +311,65 @@ def _theme_history(theme_strength: pd.DataFrame, latest_themes: list[dict[str, A
         target = target.sort_values(["theme_name", "trade_date"])
     target = target.groupby("theme_name", as_index=False, group_keys=False).tail(80)
     return _records(target, columns=HISTORY_COLUMNS, limit=640)
+
+
+def _split_multi_value(value: Any) -> list[str]:
+    delimiter = chr(0x3001)
+    text = str(value or "").replace(chr(0xFF0C), delimiter).replace(",", delimiter)
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in text.split(delimiter):
+        item = item.strip()
+        if item and item not in seen:
+            values.append(item)
+            seen.add(item)
+    return values
+
+
+def _theme_exposure_counts(stock_exposure: pd.DataFrame, limit: int = 80) -> list[dict[str, Any]]:
+    if stock_exposure.empty or "theme_names" not in stock_exposure.columns:
+        return []
+
+    target = stock_exposure.copy()
+    if "exposure_score" in target.columns:
+        target["_exposure_sort"] = pd.to_numeric(target["exposure_score"], errors="coerce").fillna(-1)
+        target = target.sort_values("_exposure_sort", ascending=False, na_position="last")
+
+    delimiter = chr(0x3001)
+    theme_stocks: dict[str, set[str]] = {}
+    primary_stocks: dict[str, set[str]] = {}
+    examples: dict[str, list[str]] = {}
+    all_stocks: set[str] = set()
+
+    for idx, row in target.iterrows():
+        stock_code = str(row.get("stock_code") or "").strip()
+        stock_name = str(row.get("stock_name") or "").strip()
+        stock_key = stock_code or stock_name or str(idx)
+        all_stocks.add(stock_key)
+        label = f"{stock_name}({stock_code})" if stock_name and stock_code else stock_name or stock_code or stock_key
+        themes = _split_multi_value(row.get("theme_names"))
+        for theme in themes:
+            theme_stocks.setdefault(theme, set()).add(stock_key)
+            sample = examples.setdefault(theme, [])
+            if len(sample) < 6 and label not in sample:
+                sample.append(label)
+        primary_theme = str(row.get("primary_theme") or "").strip()
+        if primary_theme:
+            primary_stocks.setdefault(primary_theme, set()).add(stock_key)
+
+    total = max(len(all_stocks), 1)
+    rows = [
+        {
+            "theme_name": theme,
+            "stock_count": len(stocks),
+            "primary_stock_count": len(primary_stocks.get(theme, set())),
+            "coverage_ratio": len(stocks) / total,
+            "top_stocks": delimiter.join(examples.get(theme, [])),
+        }
+        for theme, stocks in theme_stocks.items()
+    ]
+    rows.sort(key=lambda item: (-int(item["stock_count"]), str(item["theme_name"])))
+    return _records(pd.DataFrame(rows), columns=THEME_EXPOSURE_COUNT_COLUMNS, limit=limit)
 
 
 def _build_market_context(

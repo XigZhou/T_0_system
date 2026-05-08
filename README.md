@@ -204,7 +204,7 @@ python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
 
 启动后打开 `http://127.0.0.1:8083/sector`。页面只读取已经生成的 CSV/JSON，不会触发 AKShare 抓取，也不会触发 Tushare 指数更新。接口为 `GET /api/sector/overview?processed_dir=...&report_dir=...&market_context_path=...`，默认读取 `sector_research/data/processed`、`sector_research/reports` 和 `data_bundle/market_context.csv`。
 
-页面数据来源：大盘环境来自已有 `data_bundle/market_context.csv`，主题排名来自 `theme_strength_daily.csv`，强势板块来自 `sector_board_daily.csv`，个股暴露来自 `stock_theme_exposure.csv`，主题映射来自 `theme_board_mapping.csv`，异常日志来自 `sector_research_errors.csv`。大盘环境面板只展示上证指数、沪深300、创业板指的收盘、日涨跌、5/20/60 日动量；不会写入板块研究目录，也不会和回测、模拟交易已有大盘字段产生重复。
+页面数据来源：大盘环境来自已有 `data_bundle/market_context.csv`，主题排名来自 `theme_strength_daily.csv`，强势板块来自 `sector_board_daily.csv`，个股暴露来自 `stock_theme_exposure.csv`，主题映射来自 `theme_board_mapping.csv`，异常日志来自 `sector_research_errors.csv`。大盘环境面板只展示上证指数、沪深300、创业板指的收盘、日涨跌、5/20/60 日动量；不会写入板块研究目录，也不会和回测、模拟交易已有大盘字段产生重复。个股暴露页签的主题覆盖统计按 `theme_names` 全部命中统计，不按 `primary_theme` 排他统计，因此多主题股票会计入所有命中的主题股票池。
 
 如果要把板块研究字段接入回测，必须写入一个新的处理后目录，例如：
 

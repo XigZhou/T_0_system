@@ -43,8 +43,42 @@ class SectorDashboardTest(unittest.TestCase):
             _write_csv(
                 processed / "stock_theme_exposure.csv",
                 [
-                    {"stock_code": "300001", "stock_name": "锂电龙头", "theme_names": "锂矿锂电", "theme_count": "1", "board_count": "2", "exposure_score": "1"},
-                    {"stock_code": "300002", "stock_name": "算力龙头", "theme_names": "AI", "theme_count": "1", "board_count": "1", "exposure_score": "0.5"},
+                    {
+                        "stock_code": "300001",
+                        "stock_name": "锂电龙头",
+                        "primary_theme": "锂矿锂电",
+                        "theme_names": "锂矿锂电",
+                        "theme_count": "1",
+                        "board_count": "2",
+                        "exposure_score": "1",
+                    },
+                    {
+                        "stock_code": "300002",
+                        "stock_name": "算力龙头",
+                        "primary_theme": "AI",
+                        "theme_names": "AI",
+                        "theme_count": "1",
+                        "board_count": "1",
+                        "exposure_score": "0.5",
+                    },
+                    {
+                        "stock_code": "300003",
+                        "stock_name": "存储材料",
+                        "primary_theme": "半导体芯片",
+                        "theme_names": "半导体芯片、存储芯片",
+                        "theme_count": "2",
+                        "board_count": "3",
+                        "exposure_score": "0.8",
+                    },
+                    {
+                        "stock_code": "300004",
+                        "stock_name": "存储封测",
+                        "primary_theme": "AI",
+                        "theme_names": "AI、存储芯片",
+                        "theme_count": "2",
+                        "board_count": "2",
+                        "exposure_score": "0.6",
+                    },
                 ],
             )
             _write_csv(
@@ -133,6 +167,10 @@ class SectorDashboardTest(unittest.TestCase):
         self.assertEqual(payload["latest_boards"][0]["board_name"], "锂电池")
         self.assertEqual(payload["stock_exposure"][0]["stock_code"], "300001")
         self.assertEqual(payload["stock_exposure"][0]["stock_name"], "锂电龙头")
+        exposure_counts = {row["theme_name"]: row for row in payload["theme_exposure_counts"]}
+        self.assertEqual(exposure_counts["存储芯片"]["stock_count"], 2)
+        self.assertEqual(exposure_counts["存储芯片"]["primary_stock_count"], 0)
+        self.assertIn("存储材料(300003)", exposure_counts["存储芯片"]["top_stocks"])
         self.assertEqual(payload["error_rows"][0]["stage"], "fetch_fund_flow_rank")
         self.assertTrue(payload["paths"]["files"]["theme_strength_daily"]["exists"])
         self.assertTrue(payload["paths"]["files"]["market_context"]["exists"])

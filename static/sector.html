@@ -103,8 +103,12 @@
                   <p class="eyebrow">个股</p>
                   <h3>主题暴露</h3>
                 </div>
-                <p class="panel-note">同一股票命中的主题和板块越多，暴露分越高；股票代码旁保留股票名称。</p>
+                <p class="panel-note">同一股票命中的主题和板块越多，暴露分越高；主题股票池按全部命中主题统计。</p>
               </div>
+              <h4 class="subsection-title">主题覆盖统计</h4>
+              <p class="panel-note exposure-note">按 theme_names 全部命中统计，不按首个命中主题统计；例如一只股票同时命中 AI、半导体芯片、存储芯片，会分别计入三个主题。</p>
+              <div class="table-wrap exposure-count-wrap"><table id="sectorThemeExposureCountTable"></table></div>
+              <h4 class="subsection-title">个股明细</h4>
               <div class="table-wrap"><table id="sectorExposureTable"></table></div>
             </section>
           </div>

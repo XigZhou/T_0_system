@@ -40,16 +40,23 @@ const boardColumns = [
 const exposureColumns = [
   ["stock_code", "股票代码"],
   ["stock_name", "股票名称"],
-  ["primary_theme", "主主题"],
-  ["primary_subtheme", "主子赛道"],
+  ["primary_theme", "首个命中主题"],
+  ["primary_subtheme", "首个命中子赛道"],
   ["exposure_score", "暴露分"],
   ["theme_count", "主题数"],
   ["board_count", "板块数"],
-  ["theme_names", "命中主题"],
+  ["theme_names", "全部命中主题"],
   ["board_names", "命中板块"],
   ["matched_keywords", "关键词"],
 ];
 
+const themeExposureCountColumns = [
+  ["theme_name", "主题"],
+  ["stock_count", "全部命中股票数"],
+  ["primary_stock_count", "首个命中股票数"],
+  ["coverage_ratio", "覆盖占比"],
+  ["top_stocks", "高暴露示例"],
+];
 const mappingColumns = [
   ["theme_name", "主题"],
   ["subtheme_name", "子赛道"],
@@ -71,6 +78,7 @@ const percentColumns = new Set([
   "theme_rank_pct",
   "drawdown_from_120_high",
   "position_in_250_range",
+  "coverage_ratio",
 ]);
 
 const scoreColumns = new Set([
@@ -287,6 +295,7 @@ function renderPayload(payload) {
   renderThemeChart(payload.latest_themes || []);
   renderTable("sectorThemeTable", payload.latest_themes || [], themeColumns);
   renderTable("sectorBoardTable", payload.latest_boards || [], boardColumns);
+  renderTable("sectorThemeExposureCountTable", payload.theme_exposure_counts || [], themeExposureCountColumns);
   renderTable("sectorExposureTable", payload.stock_exposure || [], exposureColumns);
   renderTable("sectorMappingTable", payload.mapping_rows || [], mappingColumns);
   renderDynamicTable("sectorErrorTable", payload.error_rows || []);

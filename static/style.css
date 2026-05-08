@@ -1044,8 +1044,22 @@ td {
   overflow: auto;
 }
 
+.sector-page .exposure-note {
+  margin: -4px 0 10px;
+}
+
+.sector-page .exposure-count-wrap {
+  height: min(28vh, 220px);
+  min-height: 150px;
+  margin-bottom: 14px;
+}
+
 .sector-page table {
   min-width: 920px;
+}
+
+.sector-page .exposure-count-wrap table {
+  min-width: 640px;
 }
 
 .paper-page th,

@@ -243,9 +243,12 @@ sector_research/configs/themes.yaml
 | `matched_keywords` | 命中关键词集合 | 字符串 | 允许为空 | |
 | `sources` | 数据来源集合 | 字符串 | 允许为空 | |
 | `latest_fetched_at` | 最新抓取时间 | 时间文本 | 允许为空 | |
-| `primary_theme` | 首个主题标签 | 字符串 | 允许为空 | 便于快速浏览 |
-| `primary_subtheme` | 首个子赛道标签 | 字符串 | 允许为空 | 便于快速浏览 |
+| `primary_theme` | 首个命中主题标签 | 字符串 | 允许为空 | 仅用于表格快速浏览，不代表股票只属于该主题，也不作为主题股票池统计口径 |
+| `primary_subtheme` | 首个命中子赛道标签 | 字符串 | 允许为空 | 仅用于表格快速浏览 |
 | `exposure_score` | 主题暴露分 | `0~1` | 不允许缺失 | `board_count / 全样本最大 board_count` |
+
+主题股票池、主题覆盖数量和后续 L0-L4 分层实验必须使用 `theme_names` 的全部命中集合统计，不能使用 `primary_theme` 做排他分类。例如雅克科技同时命中 `半导体芯片、存储芯片`，应同时计入半导体芯片和存储芯片股票池。
+
 
 ### 4.9 `sector_research/reports/`
 
