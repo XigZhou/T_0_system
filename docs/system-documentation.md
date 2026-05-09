@@ -515,7 +515,7 @@ python scripts/run_sector_rotation_match_stability.py \
 
 用途：验证主题股票池按市值分层后，哪些层更适合当前 TopN 动量、板块候选和板块轮动策略。该模块不修改线上模拟账户目录，只在实验输出目录下生成每层临时 `base/sector` 数据副本。
 
-运行命令：
+快速交集口径运行命令：
 
 ```bash
 python scripts/run_stock_pool_layer_grid.py \
@@ -526,11 +526,50 @@ python scripts/run_stock_pool_layer_grid.py \
   --overwrite
 ```
 
+推荐 Top500 完整口径运行命令：
+
+```bash
+python scripts/build_theme_tradeable_universe.py \
+  --as-of 20260508 \
+  --top-sizes 500,1000 \
+  --min-total-mv-yi 30 \
+  --min-listed-days 250
+
+python scripts/build_theme_layer_snapshot.py \
+  --layers-csv sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top500_layers.csv \
+  --out data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
+  --layers L0,L1,L2,L3,L4 \
+  --pool-name Top500
+
+python scripts/sync_tushare_bundle.py \
+  --env .env \
+  --bundle-dir data_bundle/theme_tradeable_top500_4y \
+  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
+  --start-date 20210701 \
+  --end-date 20260508 \
+  --sleep-seconds 0.2
+
+python scripts/build_processed_data.py \
+  --bundle-dir data_bundle/theme_tradeable_top500_4y \
+  --output-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
+  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv
+
+python scripts/run_stock_pool_layer_grid.py \
+  --base-processed-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
+  --start-date 20220101 \
+  --end-date 20260507 \
+  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --out-dir research_runs/20260509_top500_stock_pool_layer_grid_account \
+  --fast-account \
+  --rolling-months 0 \
+  --overwrite
+```
+
 主要输入参数：
 
 | 参数 | 说明 |
 | --- | --- |
-| `--base-processed-dir` | 基础处理后股票目录，默认 `data_bundle/processed_qfq`，用于扩大到当前可回测主题交集 |
+| `--base-processed-dir` | 基础处理后股票目录，默认 `data_bundle/processed_qfq`；Top500 完整口径应指向 `data_bundle/theme_tradeable_top500_4y/processed_qfq` |
 | `--exposure-path` | 个股主题暴露表，默认 `sector_research/data/processed/stock_theme_exposure.csv` |
 | `--sector-processed-dir` | 独立板块研究处理后目录，默认 `sector_research/data/processed` |
 | `--rotation-daily-path` | 轮动诊断日频文件 |
@@ -555,7 +594,7 @@ python scripts/run_stock_pool_layer_grid.py \
 | `stock_pool_layer_grid_config.json` | CLI 参数、分层目录和代表策略清单 |
 | `stock_pool_layer_grid_report.md` | 自动生成的中文总结报告 |
 
-异常处理：如果 `stock_theme_exposure.csv` 与处理后股票目录没有交集，脚本会直接失败；没有 `total_mv_snapshot` 的股票会被剔除，因为无法按市值分层。板块和轮动字段覆盖不足时，脚本会自动把早期区间作为基准历史参考，不把它们和板块策略横向比较。字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`，实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`。
+异常处理：如果 `stock_theme_exposure.csv` 与处理后股票目录没有交集，脚本会直接失败；没有 `total_mv_snapshot` 的股票会被剔除，因为无法按市值分层。板块和轮动字段覆盖不足时，脚本会自动把早期区间作为基准历史参考，不把它们和板块策略横向比较。字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`，304 只交集实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`，Top500 完整口径实验记录见 `docs/stock-pool-layer-grid-top500-result-20260509.md`。
 
 ### 板块轮动后续验证
 

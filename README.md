@@ -241,13 +241,57 @@ python scripts/build_sector_research_features.py \
 
 ### 7. L0-L4 股票池分层实验
 
-如果要验证当前主题股票池是否过度偏向大市值，可以运行 L0-L4 分层实验。脚本默认用 `stock_theme_exposure.csv` 与 `data_bundle/processed_qfq` 的可回测交集，按最新 `total_mv_snapshot` 等频切成 L0-L4 五层，并在每层上比较基准动量、板块候选、主线簇匹配加权和避开新能源主线四类代表策略。
+如果要验证当前主题股票池是否过度偏向大市值，可以运行 L0-L4 分层实验。这里有两种口径：
+
+- 快速交集口径：脚本默认用 `stock_theme_exposure.csv` 与 `data_bundle/processed_qfq` 的可回测交集，适合先快速判断是否值得继续研究。
+- 推荐 Top500 完整口径：先用统一主题可交易母池生成 Top500 分层，再只给这 500 只股票补最近四年日线，适合做更公平的 L0-L4 对比。
+
+快速交集口径命令：
 
 ```bash
 python scripts/run_stock_pool_layer_grid.py \
   --start-date 20210101 \
   --end-date 20260508 \
   --out-dir research_runs/20260509_stock_pool_layer_grid_account \
+  --fast-account \
+  --rolling-months 0 \
+  --overwrite
+```
+
+Top500 完整口径复现流程：
+
+```bash
+python scripts/build_theme_tradeable_universe.py \
+  --as-of 20260508 \
+  --top-sizes 500,1000 \
+  --min-total-mv-yi 30 \
+  --min-listed-days 250
+
+python scripts/build_theme_layer_snapshot.py \
+  --layers-csv sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top500_layers.csv \
+  --out data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
+  --layers L0,L1,L2,L3,L4 \
+  --pool-name Top500
+
+python scripts/sync_tushare_bundle.py \
+  --env .env \
+  --bundle-dir data_bundle/theme_tradeable_top500_4y \
+  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
+  --start-date 20210701 \
+  --end-date 20260508 \
+  --sleep-seconds 0.2
+
+python scripts/build_processed_data.py \
+  --bundle-dir data_bundle/theme_tradeable_top500_4y \
+  --output-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
+  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv
+
+python scripts/run_stock_pool_layer_grid.py \
+  --base-processed-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
+  --start-date 20220101 \
+  --end-date 20260507 \
+  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --out-dir research_runs/20260509_top500_stock_pool_layer_grid_account \
   --fast-account \
   --rolling-months 0 \
   --overwrite
@@ -262,7 +306,7 @@ python scripts/run_stock_pool_layer_grid.py \
 - `stock_pool_layer_grid_trade_records.csv`：逐笔买卖记录
 - `stock_pool_layer_grid_report.md`：中文总结报告
 
-字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`，实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`。当前正式结果显示 L3 市值层表现最好，L1/L2/L4 也整体优于 L0，说明后续应优先研究 L1-L3、L2-L4 或 L3-only 候选池。当前脚本不会修改模拟账户正在使用的 `data_bundle/processed_qfq_theme_focus_top100*` 目录。
+字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`。早期 304 只交集实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`；Top500 完整口径结果见 `docs/stock-pool-layer-grid-top500-result-20260509.md`。Top500 结果显示 L2 中等市值层表现最好：全区间基准动量收益 105.01%、最大回撤 13.70%，2023、2024、2025、2026YTD 四个年度均为正收益。当前脚本不会修改模拟账户正在使用的 `data_bundle/processed_qfq_theme_focus_top100*` 目录。
 
 如果要把“板块轮动诊断”的每日主线字段接入模拟账户，继续生成一个独立轮动增强目录：
 

@@ -13,6 +13,8 @@
 
 当前脚本只纳入“同时存在个股主题暴露和处理后股票日线 CSV”的交集。也就是说，`stock_theme_exposure.csv` 中有 3922 只股票并不代表这次都能回测；如果 `data_bundle/processed_qfq` 里缺少某只股票的历史日线，它不会进入 L0-L4。
 
+如果要做 Top500 完整口径，先用 `scripts/build_theme_tradeable_universe.py` 生成 `theme_tradeable_top500_layers.csv`，再用 `scripts/build_theme_layer_snapshot.py` 转成 Tushare 取数快照，最后把 `--base-processed-dir` 指向专用目录 `data_bundle/theme_tradeable_top500_4y/processed_qfq`。这种方式不会覆盖日常模拟账户的 Top100 目录。
+
 ## 2. 分层定义
 
 默认分层方法为 `--layer-method quantile`：
@@ -23,6 +25,8 @@
    L0 最大市值，L1 偏大市值，L2 中等市值，L3 偏小市值，L4 最小市值。
 
 也可以使用 `--layer-method rank_bands --rank-bands 100,200,300,500`。这种模式按固定排名分层，更适合以后补齐全量 3922 只主题股票行情后复用；在当前 304 只左右可回测交集下，默认不推荐固定排名分层，因为 L3/L4 可能样本过少。
+
+Top500 完整口径推荐直接使用 `theme_tradeable_top500_layers.csv` 中已经按总市值生成的 L0-L4，每层 100 只股票。随后处理后的每只股票 CSV 会带入同一份快照中的 `total_mv` 作为 `total_mv_snapshot`，`run_stock_pool_layer_grid.py` 再次按 `total_mv_snapshot` 等频分层时应得到同样的 100/100/100/100/100 结构。
 
 ## 3. 输出文件
 
@@ -101,6 +105,41 @@ python scripts/run_stock_pool_layer_grid.py \
 ```
 
 `--fast-account` 使用固定代表策略快速路径，不计算信号质量统计，因此 `signal_*` 字段会留空；账户收益、回撤、买入次数、胜率、逐笔交易记录仍会输出。后续只需要对表现较好的层和策略再补跑完整信号质量。
+
+Top500 完整口径复现命令：
+
+```bash
+python scripts/build_theme_layer_snapshot.py \
+  --layers-csv sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top500_layers.csv \
+  --out data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
+  --layers L0,L1,L2,L3,L4 \
+  --pool-name Top500
+
+python scripts/sync_tushare_bundle.py \
+  --env .env \
+  --bundle-dir data_bundle/theme_tradeable_top500_4y \
+  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
+  --start-date 20210701 \
+  --end-date 20260508 \
+  --sleep-seconds 0.2
+
+python scripts/build_processed_data.py \
+  --bundle-dir data_bundle/theme_tradeable_top500_4y \
+  --output-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
+  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv
+
+python scripts/run_stock_pool_layer_grid.py \
+  --base-processed-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
+  --start-date 20220101 \
+  --end-date 20260507 \
+  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --out-dir research_runs/20260509_top500_stock_pool_layer_grid_account \
+  --fast-account \
+  --rolling-months 0 \
+  --overwrite
+```
+
+`build_theme_layer_snapshot.py` 输出的 `universe_snapshot_top500.csv` 字段沿用 Tushare 同步脚本需要的快照口径：`ts_code`、`symbol`、`name`、`area`、`industry`、`market`、`list_date`、`close`、`total_mv`、`turnover_rate_f`、`pe_ttm`、`pb`。同名 `.manifest.json` 会记录来源文件、输出行数、层级过滤和生成时间。
 
 ## 6. 缺失值与注意事项
 
