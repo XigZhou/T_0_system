@@ -56,7 +56,7 @@ def latest_open_trade_date(pro, end_date: str) -> str:
     cal = pro.trade_cal(exchange="", start_date=start_date, end_date=end_date, is_open="1", fields="cal_date")
     if cal is None or cal.empty:
         raise RuntimeError("failed to fetch trade calendar")
-    return str(cal.iloc[-1]["cal_date"])
+    return str(cal["cal_date"].astype(str).max())
 
 
 def infer_board(symbol: str) -> str:

@@ -147,6 +147,27 @@ python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bun
 - `theme_focus` 是按主题规则筛出来的全量主题池
 - `theme_focus_top100` 是在主题池基础上按总市值取前 100
 
+### 4.1 生成统一主题可交易股票池快照
+
+如果要比较 Top500、Top1000 或 L0-L4 市值分层，先不要直接拉 3922 只主题股的四年日线。推荐先生成统一主题可交易母池快照，再决定给哪个派生池补日线数据：
+
+```bash
+python scripts/build_theme_tradeable_universe.py \
+  --as-of 20260508 \
+  --top-sizes 500,1000 \
+  --min-total-mv-yi 30 \
+  --min-listed-days 250
+```
+
+默认输出：
+
+- `sector_research/data/processed/theme_tradeable_universe/theme_tradeable_universe_snapshot.csv`
+- `sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top500_layers.csv`
+- `sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top1000_layers.csv`
+- `sector_research/data/processed/theme_tradeable_universe/current_top100_layer_compare.csv`
+
+说明文档见 `docs/theme-tradeable-universe-data-dictionary.md`。这个步骤只拉 Tushare 最新基础信息和最新 `daily_basic`，不拉四年日线，也不会修改当前模拟账户正在使用的 Top100、板块增强或轮动增强目录。
+
 ### 5. 生成行业强度指标
 
 当前 2000 积分方案不依赖 Tushare 行业指数行情，而是用处理后股票日线里的 `industry` 字段自行聚合行业强度。生成或重建 `processed_qfq_theme_focus_top100/` 后，建议继续运行：

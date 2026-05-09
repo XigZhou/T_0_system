@@ -235,6 +235,35 @@ python scripts/build_sector_research_features.py \
 
 完整操作流程见 docs/sector-research-system-guide.md，详细字段与指标说明见 docs/sector-research-data-dictionary.md 和 docs/sector-research-indicator-documentation.md。
 
+### 统一主题可交易股票池快照
+
+用途：在拉取大批量历史日线前，先把板块主题股票池、当前模拟 Top100、Top500/Top1000 分层池统一到同一张母池快照上，避免回测股票池和模拟股票池各说各话。
+
+运行命令：
+
+```bash
+python scripts/build_theme_tradeable_universe.py \
+  --as-of 20260508 \
+  --top-sizes 500,1000 \
+  --min-total-mv-yi 30 \
+  --min-listed-days 250
+```
+
+主要输入：
+
+- `sector_research/data/processed/stock_theme_exposure.csv`：个股主题暴露。
+- Tushare `stock_basic`：上市状态、上市日期、行业、市场。
+- Tushare `daily_basic`：最新总市值、换手率、估值。
+- `data_bundle/universe_snapshot_theme_focus_top100.csv`：当前模拟系统 Top100 对照。
+
+主要输出：
+
+- `theme_tradeable_universe_snapshot.csv`：统一主题母池及过滤原因。
+- `theme_tradeable_top500_layers.csv`、`theme_tradeable_top1000_layers.csv`：TopN 的 L0-L4 分层明细。
+- `current_top100_layer_compare.csv`：当前模拟 Top100 在统一母池和分层池中的位置。
+
+详细字段见 `docs/theme-tradeable-universe-data-dictionary.md`。该步骤不拉四年日线，不改模拟账户目录，可作为后续 Top500/Top1000 补数据和 L0-L4 回测的前置检查。
+
 ### 板块参数网格探索
 
 用途：把板块增强参数作为研究变量，统一比较基准动量、板块硬过滤和只评分加权三类策略，帮助决定是否把某组板块条件接入回测系统或模拟账户。

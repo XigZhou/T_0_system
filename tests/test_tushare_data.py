@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from overnight_bt.tushare_data import SyncConfig, sync_tushare_bundle
+from overnight_bt.utils import latest_open_trade_date
 
 
 class _FakePro:
@@ -62,6 +63,19 @@ class _FakePro:
 
 
 class TushareDataTest(unittest.TestCase):
+    def test_latest_open_trade_date_uses_max_date_when_tushare_returns_descending(self) -> None:
+        class _CalendarPro:
+            def trade_cal(self, **kwargs):
+                return pd.DataFrame(
+                    [
+                        {"cal_date": "20260508"},
+                        {"cal_date": "20260507"},
+                        {"cal_date": "20260324"},
+                    ]
+                )
+
+        self.assertEqual(latest_open_trade_date(_CalendarPro(), "20260508"), "20260508")
+
     def test_sync_tushare_bundle_fetches_limit_and_suspend_per_symbol(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
