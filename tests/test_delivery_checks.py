@@ -80,6 +80,7 @@ class DeliveryChecksTest(unittest.TestCase):
             "scripts/run_topn_hold_compare.py",
             "scripts/run_sector_research.py",
             "scripts/build_sector_research_features.py",
+            "scripts/run_stock_pool_layer_grid.py",
         ]:
             result = subprocess.run(
                 [sys.executable, script_name, "--help"],

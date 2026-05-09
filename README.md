@@ -218,6 +218,31 @@ python scripts/build_sector_research_features.py \
 
 这样会复制原股票 CSV 并增加 `sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_exposure_score` 等字段，原 `data_bundle/processed_qfq_theme_focus_top100` 不会被覆盖。`--overwrite` 会先清理输出目录中的旧 CSV，避免 Top100 更新后增强目录残留旧股票。
 
+### 7. L0-L4 股票池分层实验
+
+如果要验证当前主题股票池是否过度偏向大市值，可以运行 L0-L4 分层实验。脚本默认用 `stock_theme_exposure.csv` 与 `data_bundle/processed_qfq` 的可回测交集，按最新 `total_mv_snapshot` 等频切成 L0-L4 五层，并在每层上比较基准动量、板块候选、主线簇匹配加权和避开新能源主线四类代表策略。
+
+```bash
+python scripts/run_stock_pool_layer_grid.py \
+  --start-date 20210101 \
+  --end-date 20260508 \
+  --out-dir research_runs/20260509_stock_pool_layer_grid_account \
+  --fast-account \
+  --rolling-months 0 \
+  --overwrite
+```
+
+主要输出：
+
+- `stock_pool_layer_constituents.csv`：每层股票成分、主题、市值排名
+- `stock_pool_layer_summary.csv`：每层股票数、市值范围、主题覆盖
+- `stock_pool_layer_grid_summary.csv`：每层、每周期、每策略回测结果
+- `stock_pool_layer_grid_by_layer_case.csv`：按年度聚合的稳定性结果
+- `stock_pool_layer_grid_trade_records.csv`：逐笔买卖记录
+- `stock_pool_layer_grid_report.md`：中文总结报告
+
+字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`，实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`。当前正式结果显示 L3 市值层表现最好，L1/L2/L4 也整体优于 L0，说明后续应优先研究 L1-L3、L2-L4 或 L3-only 候选池。当前脚本不会修改模拟账户正在使用的 `data_bundle/processed_qfq_theme_focus_top100*` 目录。
+
 如果要把“板块轮动诊断”的每日主线字段接入模拟账户，继续生成一个独立轮动增强目录：
 
 ```bash

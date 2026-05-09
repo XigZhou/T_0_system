@@ -481,6 +481,53 @@ python scripts/run_sector_rotation_match_stability.py \
 
 使用注意：当前可比区间从 `20230403` 开始，因为 2016-2022 缺少板块强度和轮动状态字段。脚本会把 2016-2022 单独作为 `基准历史参考_2016-2022`，只运行 `基准动量`。字段定义见 `docs/sector-rotation-match-stability-data-dictionary.md`，结果记录见 `docs/sector-rotation-match-stability-result-20260505.md`。
 
+
+### L0-L4 股票池分层实验
+
+用途：验证主题股票池按市值分层后，哪些层更适合当前 TopN 动量、板块候选和板块轮动策略。该模块不修改线上模拟账户目录，只在实验输出目录下生成每层临时 `base/sector` 数据副本。
+
+运行命令：
+
+```bash
+python scripts/run_stock_pool_layer_grid.py \
+  --start-date 20210101 \
+  --end-date 20260508 \
+  --out-dir research_runs/20260509_stock_pool_layer_grid_account \
+  --fast-account \
+  --overwrite
+```
+
+主要输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--base-processed-dir` | 基础处理后股票目录，默认 `data_bundle/processed_qfq`，用于扩大到当前可回测主题交集 |
+| `--exposure-path` | 个股主题暴露表，默认 `sector_research/data/processed/stock_theme_exposure.csv` |
+| `--sector-processed-dir` | 独立板块研究处理后目录，默认 `sector_research/data/processed` |
+| `--rotation-daily-path` | 轮动诊断日频文件 |
+| `--layer-method` | 分层方法，默认 `quantile`；也支持 `rank_bands` |
+| `--layer-count` | 等频分层数量，默认 `5`，对应 L0-L4 |
+| `--rank-bands` | 固定排名分层边界，例如 `100,200,300,500` |
+| `--fast-account` | 使用固定代表策略快速账户路径，适合 L0-L4 批量分层实验 |
+| `--account-only` | 只运行通用账户回测，不计算信号质量统计；速度比完整信号质量快，但仍走通用表达式引擎 |
+| `--resume` | 同一输出目录已有结果时跳过已经完成的 `layer + period_label + case` |
+| `--max-runs` | 单次最多新增运行组合数，适合长实验分批续跑 |
+
+输出结果：
+
+| 文件 | 说明 |
+| --- | --- |
+| `stock_pool_layer_constituents.csv` | L0-L4 每层股票成分、市值排名、主题暴露 |
+| `stock_pool_layer_summary.csv` | 每层股票数、市值范围和主题命中统计 |
+| `stock_pool_layer_grid_summary.csv` | 每层、每周期、每策略收益、回撤、信号质量和交易次数 |
+| `stock_pool_layer_grid_by_layer_case.csv` | 按年度聚合的稳定性结果 |
+| `stock_pool_layer_coverage.csv` | 每层每年板块强度和轮动字段覆盖率 |
+| `stock_pool_layer_grid_trade_records.csv` | 逐笔买卖流水，含分层、周期、策略、股票、价格、股数、费用、金额和盈亏 |
+| `stock_pool_layer_grid_config.json` | CLI 参数、分层目录和代表策略清单 |
+| `stock_pool_layer_grid_report.md` | 自动生成的中文总结报告 |
+
+异常处理：如果 `stock_theme_exposure.csv` 与处理后股票目录没有交集，脚本会直接失败；没有 `total_mv_snapshot` 的股票会被剔除，因为无法按市值分层。板块和轮动字段覆盖不足时，脚本会自动把早期区间作为基准历史参考，不把它们和板块策略横向比较。字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`，实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`。
+
 ### 板块轮动后续验证
 
 用途：落实 `docs/sector-rotation-grid-result-20260501.md` 的下一步建议，对 `基准动量`、`板块候选_score0.4_rank0.7`、`候选_避开新能源主线` 做全区间、分年度和最近一年对比，同时验证“轮动状态不硬过滤，改成评分加权”的效果。
