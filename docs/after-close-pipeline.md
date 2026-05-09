@@ -1,6 +1,6 @@
 # 收盘后统一调度任务说明
 
-本文档说明腾讯云上如何用一个定时任务统一调度股票数据、独立板块研究、板块字段合并和模拟账户收盘任务。
+本文档说明腾讯云上如何用一个定时任务统一调度股票数据、独立板块研究、板块字段合并、板块轮动字段合并和模拟账户收盘任务。
 
 ## 1. 目标
 
@@ -26,8 +26,10 @@ scripts/run_after_close_pipeline.sh YYYYMMDD
 | 2 | 校验 `data_bundle/processed_qfq_theme_focus_top100` | 至少 100 个股票 CSV，最新日期等于任务日期 |
 | 3 | `scripts/run_sector_research.py` | 抓取 AKShare 板块历史、成分股和资金流 |
 | 4 | 校验 `sector_research/data/processed` | `theme_strength_daily.csv` 与 `sector_board_daily.csv` 最新日期等于任务日期 |
-| 5 | `scripts/build_sector_research_features.py` | 生成 `data_bundle/processed_qfq_theme_focus_top100_sector` |
-| 6 | `scripts/run_paper_trading_cron.sh after-close` | 收盘估值并生成 T+1 待执行订单 |
+| 5 | `scripts/build_sector_research_features.py --overwrite` | 清理旧 CSV 后生成 `data_bundle/processed_qfq_theme_focus_top100_sector` |
+| 6 | `scripts/run_sector_rotation_diagnosis.py` | 用当天 `theme_strength_daily.csv` 生成 `research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv` |
+| 7 | `scripts/build_sector_rotation_features.py --overwrite` | 清理旧 CSV 后生成 `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` |
+| 8 | `scripts/run_paper_trading_cron.sh after-close` | 校验股票池一致后，收盘估值并生成 T+1 待执行订单 |
 
 ## 4. 关键目录
 
@@ -37,6 +39,10 @@ scripts/run_after_close_pipeline.sh YYYYMMDD
 | `SECTOR_PROCESSED_DIR` | `sector_research/data/processed` | 独立板块研究指标目录 |
 | `SECTOR_REPORT_DIR` | `sector_research/reports` | 板块研究报告目录 |
 | `SECTOR_OUTPUT_DIR` | `data_bundle/processed_qfq_theme_focus_top100_sector` | 合并板块字段后的增强目录 |
+| `ROTATION_REPORT_DIR` | `research_runs/latest_sector_rotation_diagnosis` | 每日轮动诊断固定输出目录 |
+| `ROTATION_DAILY_PATH` | `research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv` | 轮动增强目录使用的日频主线状态文件 |
+| `ROTATION_OUTPUT_DIR` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | 合并板块轮动字段后的增强目录 |
+| `BUILD_ROTATION_FEATURES` | `1` | 是否在统一调度中生成轮动诊断和轮动增强目录 |
 | `PAPER_CONFIG_DIR` | `configs/paper_accounts` | 模拟账户 YAML 模板目录 |
 
 运行产物和日志位于：
@@ -48,6 +54,8 @@ logs/paper_trading_cron/
 sector_research/data/
 sector_research/reports/
 data_bundle/processed_qfq_theme_focus_top100_sector/
+data_bundle/processed_qfq_theme_focus_top100_sector_rotation/
+research_runs/latest_sector_rotation_diagnosis/
 ```
 
 这些属于运行数据或日志，不提交到 GitHub。
@@ -72,6 +80,12 @@ scripts/run_after_close_pipeline.sh --check-only 20260430
 
 ```bash
 RUN_PAPER_AFTER_CLOSE=0 scripts/run_after_close_pipeline.sh 20260430
+```
+
+只重建板块增强目录、不生成轮动增强目录：
+
+```bash
+BUILD_ROTATION_FEATURES=0 RUN_PAPER_AFTER_CLOSE=0 scripts/run_after_close_pipeline.sh 20260430
 ```
 
 ## 6. cron 示例
@@ -100,11 +114,13 @@ crontab -e
 
 - 如果 Tushare 股票数据没有更新到任务日期，脚本停止，不生成订单。
 - 如果 AKShare 板块数据没有更新到任务日期，脚本停止，不生成订单。
-- 如果增强目录缺少 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`，脚本停止。
+- 如果板块增强目录缺少 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`，脚本停止。
+- 如果轮动增强目录缺少 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_matches_rotation_top_cluster`，脚本停止。
+- 如果 `data_bundle/processed_qfq_theme_focus_top100`、`data_bundle/processed_qfq_theme_focus_top100_sector`、`data_bundle/processed_qfq_theme_focus_top100_sector_rotation` 的股票代码集合不一致，脚本停止，不运行模拟账户。
 - 每次成功会写入 `logs/after_close_pipeline/latest_success.txt`。
 
 ## 8. 与模拟账户的关系
 
-当前统一调度会生成增强目录 `data_bundle/processed_qfq_theme_focus_top100_sector`。如果模拟账户买入条件或评分表达式要使用板块字段，需要把账户 YAML 中的 `处理后数据目录` 改为这个增强目录。
+当前统一调度会生成两层增强目录：`data_bundle/processed_qfq_theme_focus_top100_sector` 和 `data_bundle/processed_qfq_theme_focus_top100_sector_rotation`。三套目录必须来自同一批 Top100 股票池：基础目录只含股票日线和行业字段，板块增强目录增加 `sector_*` 字段，轮动增强目录再增加 `rotation_*` 和 `stock_matches_rotation_*` 字段。
 
-在未修改账户 YAML 前，模拟账户仍按原有目录和原有条件运行；统一调度只保证增强目录已经准备好，方便后续逐步接入板块字段。
+模拟账户模板可以分别引用这三套目录做对照。这样账户之间的差异来自买入条件、评分表达式和板块/轮动字段，而不是来自股票池不同。统一调度会在运行模拟账户前检查三套目录股票代码集合完全一致。

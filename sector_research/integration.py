@@ -43,6 +43,7 @@ class SectorFeatureMergeResult:
     unmatched_files: int
     rows_written: int
     manifest_path: str
+    removed_csv_files: int = 0
 
 
 def merge_sector_features_to_processed_dir(
@@ -50,6 +51,7 @@ def merge_sector_features_to_processed_dir(
     processed_dir: str | Path,
     sector_processed_dir: str | Path = "sector_research/data/processed",
     output_dir: str | Path,
+    overwrite: bool = False,
 ) -> SectorFeatureMergeResult:
     """Write a separate processed stock directory enriched with sector research fields."""
 
@@ -60,7 +62,7 @@ def merge_sector_features_to_processed_dir(
         raise FileNotFoundError(f"处理后股票目录不存在: {processed_dir}")
     if output_dir.resolve() == processed_dir.resolve():
         raise ValueError("板块研究特征必须写入独立输出目录，不能覆盖原 processed_dir")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    removed_csv_files = _prepare_output_dir(processed_dir, sector_processed_dir, output_dir, overwrite=overwrite)
 
     exposure_path = sector_processed_dir / "stock_theme_exposure.csv"
     theme_strength_path = sector_processed_dir / "theme_strength_daily.csv"
@@ -131,7 +133,34 @@ def merge_sector_features_to_processed_dir(
         unmatched_files=stock_files - matched_files,
         rows_written=rows_written,
         manifest_path=str(manifest_path),
+        removed_csv_files=removed_csv_files,
     )
+
+
+def _prepare_output_dir(
+    processed_dir: Path,
+    sector_processed_dir: Path,
+    output_dir: Path,
+    *,
+    overwrite: bool,
+) -> int:
+    processed_resolved = processed_dir.resolve()
+    sector_resolved = sector_processed_dir.resolve()
+    output_resolved = output_dir.resolve()
+    if output_resolved == processed_resolved:
+        raise ValueError("output_dir must not equal processed_dir")
+    if output_resolved == sector_resolved:
+        raise ValueError("output_dir must not equal sector_processed_dir")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if not overwrite:
+        return 0
+
+    removed = 0
+    for path in output_dir.glob("*.csv"):
+        path.unlink()
+        removed += 1
+    return removed
 
 
 def _merge_one_stock(frame: pd.DataFrame, exposure_row: dict[str, Any], theme_strength: pd.DataFrame) -> pd.DataFrame:

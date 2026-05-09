@@ -169,10 +169,11 @@ python scripts/run_sector_research.py --start-date 20230101
 python scripts/build_sector_research_features.py \
   --processed-dir data_bundle/processed_qfq_theme_focus_top100 \
   --sector-processed-dir sector_research/data/processed \
-  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector
+  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector \
+  --overwrite
 `
 
-合并后会新增 sector_theme_names、sector_exposure_score、sector_strongest_theme_score、sector_strongest_theme_rank_pct、sector_strongest_theme_m20 等字段。--output-dir 必须不同于 --processed-dir，脚本会拒绝覆盖原目录。
+合并后会新增 sector_theme_names、sector_exposure_score、sector_strongest_theme_score、sector_strongest_theme_rank_pct、sector_strongest_theme_m20 等字段。--output-dir 必须不同于 --processed-dir，脚本会拒绝覆盖原目录；使用 --overwrite 时只清理输出目录中的旧 CSV，不会修改原始 Top100 目录。
 前端工作台：
 
 启动 FastAPI 后打开 `/sector`。该页面是只读看板，不会连接 AKShare，也不会写入 `sector_research/` 或 `data_bundle/`。页面输入参数如下：
@@ -223,7 +224,7 @@ python scripts/build_sector_research_features.py \
 - 股票 CSV 必须包含 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_strongest_theme_m20`
 - `sector_feature_manifest.csv` 只作为校验清单，不会被误当成股票日线读入
 
-这些字段只来自 `scripts/build_sector_research_features.py` 生成的增强目录，不会覆盖原始主题前 100 处理后目录。
+这些字段只来自 `scripts/build_sector_research_features.py` 生成的增强目录，不会覆盖原始主题前 100 处理后目录。日常收盘调度会同时重建板块增强目录和轮动增强目录，并检查 `data_bundle/processed_qfq_theme_focus_top100`、`data_bundle/processed_qfq_theme_focus_top100_sector`、`data_bundle/processed_qfq_theme_focus_top100_sector_rotation` 的股票代码集合完全一致；三套目录的区别应该只在新增字段，不应该在股票池。
 
 异常处理：
 

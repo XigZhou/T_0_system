@@ -16,13 +16,16 @@ def main() -> None:
     parser.add_argument("--processed-dir", required=True, help="现有处理后股票 CSV 目录，例如 data_bundle/processed_qfq_theme_focus_top100")
     parser.add_argument("--sector-processed-dir", default="sector_research/data/processed", help="板块研究处理后数据目录")
     parser.add_argument("--output-dir", required=True, help="增强后的输出目录；必须不同于 --processed-dir")
+    parser.add_argument("--overwrite", action="store_true", help="Clean old CSV files in output dir before writing")
     args = parser.parse_args()
 
     result = merge_sector_features_to_processed_dir(
         processed_dir=args.processed_dir,
         sector_processed_dir=args.sector_processed_dir,
         output_dir=args.output_dir,
+        overwrite=args.overwrite,
     )
+    print(f"Removed old CSV files: {result.removed_csv_files}")
     print(
         "板块研究特征合并完成："
         f"股票文件 {result.stock_files} 个，命中主题 {result.matched_files} 个，"

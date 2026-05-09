@@ -11,6 +11,11 @@ SECTOR_START_DATE="${SECTOR_START_DATE:-20230101}"
 SECTOR_PROCESSED_DIR="${SECTOR_PROCESSED_DIR:-sector_research/data/processed}"
 SECTOR_REPORT_DIR="${SECTOR_REPORT_DIR:-sector_research/reports}"
 SECTOR_OUTPUT_DIR="${SECTOR_OUTPUT_DIR:-data_bundle/processed_qfq_theme_focus_top100_sector}"
+ROTATION_START_DATE="${ROTATION_START_DATE:-${SECTOR_START_DATE}}"
+ROTATION_REPORT_DIR="${ROTATION_REPORT_DIR:-research_runs/latest_sector_rotation_diagnosis}"
+ROTATION_DAILY_PATH="${ROTATION_DAILY_PATH:-${ROTATION_REPORT_DIR}/sector_rotation_daily.csv}"
+ROTATION_OUTPUT_DIR="${ROTATION_OUTPUT_DIR:-data_bundle/processed_qfq_theme_focus_top100_sector_rotation}"
+BUILD_ROTATION_FEATURES="${BUILD_ROTATION_FEATURES:-1}"
 PAPER_CONFIG_DIR="${PAPER_CONFIG_DIR:-configs/paper_accounts}"
 RUN_PAPER_AFTER_CLOSE="${RUN_PAPER_AFTER_CLOSE:-1}"
 
@@ -143,6 +148,41 @@ if not_latest:
 PY
 }
 
+validate_same_stock_pool() {
+  python - "$@" <<'PY'
+from pathlib import Path
+import sys
+
+pairs = []
+for raw in sys.argv[1:]:
+    if "=" not in raw:
+        raise SystemExit(f"bad argument: {raw}")
+    label, path_text = raw.split("=", 1)
+    pairs.append((label, Path(path_text)))
+
+sets = {}
+for label, folder in pairs:
+    files = sorted(path for path in folder.glob("*.csv") if "manifest" not in path.name)
+    symbols = set()
+    for path in files:
+        stem = path.stem.split(".", 1)[0]
+        digits = "".join(ch for ch in stem if ch.isdigit())
+        if digits:
+            symbols.add(digits[-6:].zfill(6))
+    sets[label] = symbols
+    print(f"{label} stock pool count: {len(symbols)}")
+
+base_label, base_symbols = next(iter(sets.items()))
+for label, symbols in list(sets.items())[1:]:
+    if symbols != base_symbols:
+        only_base = sorted(base_symbols - symbols)[:20]
+        only_other = sorted(symbols - base_symbols)[:20]
+        raise SystemExit(
+            f"stock pool mismatch: {base_label} only={only_base}; {label} only={only_other}"
+        )
+PY
+}
+
 validate_sector_research() {
   python - "${RUN_DATE}" "${SECTOR_PROCESSED_DIR}" "${SECTOR_REPORT_DIR}" <<'PY'
 from pathlib import Path
@@ -186,38 +226,38 @@ if [[ "${CHECK_ONLY}" == "1" ]]; then
   [[ -x "scripts/run_paper_trading_cron.sh" ]] || fail "缺少 scripts/run_paper_trading_cron.sh 执行权限"
   [[ -f "scripts/run_sector_research.py" ]] || fail "缺少 scripts/run_sector_research.py"
   [[ -f "scripts/build_sector_research_features.py" ]] || fail "缺少 scripts/build_sector_research_features.py"
+  [[ -f "scripts/run_sector_rotation_diagnosis.py" ]] || fail "missing scripts/run_sector_rotation_diagnosis.py"
+  [[ -f "scripts/build_sector_rotation_features.py" ]] || fail "missing scripts/build_sector_rotation_features.py"
   exit 0
 fi
 
-log "1/6 更新股票主数据和主题前100目录"
+log "1/8 更新股票主数据和主题前100目录"
 scripts/run_daily_top100_update.sh "${RUN_DATE}"
 
-log "2/6 校验主题前100目录"
+log "2/8 校验主题前100目录"
 validate_processed_dir "${TOP100_DIR}" 100
 
-log "3/6 更新独立板块研究"
+log "3/8 更新独立板块研究"
 python scripts/run_sector_research.py \
   --start-date "${SECTOR_START_DATE}" \
   --end-date "${RUN_DATE}" \
   --processed-dir "${SECTOR_PROCESSED_DIR}" \
   --report-dir "${SECTOR_REPORT_DIR}"
 
-log "4/6 校验板块研究结果"
+log "4/8 校验板块研究结果"
 validate_sector_research
 
-log "5/6 生成带板块字段的增强 processed 目录"
+log "5/8 生成带板块字段的增强 processed 目录"
 SECTOR_OUTPUT_ABS="$(assert_under_project "${SECTOR_OUTPUT_DIR}")"
 EXPECTED_OUTPUT_ABS="$(assert_under_project "data_bundle/processed_qfq_theme_focus_top100_sector")"
 if [[ "${SECTOR_OUTPUT_ABS}" != "${EXPECTED_OUTPUT_ABS}" ]]; then
   fail "拒绝清理非预期增强目录：${SECTOR_OUTPUT_ABS}"
 fi
-mkdir -p "${SECTOR_OUTPUT_ABS}"
-find "${SECTOR_OUTPUT_ABS}" -maxdepth 1 -type f -name "*.csv" -delete
-
 python scripts/build_sector_research_features.py \
   --processed-dir "${TOP100_DIR}" \
   --sector-processed-dir "${SECTOR_PROCESSED_DIR}" \
-  --output-dir "${SECTOR_OUTPUT_DIR}"
+  --output-dir "${SECTOR_OUTPUT_DIR}" \
+  --overwrite
 
 validate_processed_dir \
   "${SECTOR_OUTPUT_DIR}" \
@@ -226,11 +266,51 @@ validate_processed_dir \
   sector_strongest_theme_score \
   sector_strongest_theme_rank_pct
 
-log "6/6 运行模拟账户收盘估值和生成 T+1 待执行订单"
-if [[ "${RUN_PAPER_AFTER_CLOSE}" == "1" ]]; then
-  CONFIG_DIR="${PAPER_CONFIG_DIR}" PROCESSED_CHECK_DIR="${SECTOR_OUTPUT_DIR}" scripts/run_paper_trading_cron.sh after-close "${RUN_DATE}"
+if [[ "${BUILD_ROTATION_FEATURES}" == "1" ]]; then
+  log "6/8 build daily sector rotation diagnosis"
+  assert_under_project "${ROTATION_REPORT_DIR}" >/dev/null
+  python scripts/run_sector_rotation_diagnosis.py \
+    --theme-strength-path "${SECTOR_PROCESSED_DIR}/theme_strength_daily.csv" \
+    --trade-records-path "" \
+    --sector-processed-dir "${SECTOR_OUTPUT_DIR}" \
+    --start-date "${ROTATION_START_DATE}" \
+    --end-date "${RUN_DATE}" \
+    --out-dir "${ROTATION_REPORT_DIR}" \
+    --cases ""
+
+  log "7/8 build sector rotation enhanced processed dir"
+  python scripts/build_sector_rotation_features.py \
+    --sector-processed-dir "${SECTOR_OUTPUT_DIR}" \
+    --rotation-daily-path "${ROTATION_DAILY_PATH}" \
+    --output-dir "${ROTATION_OUTPUT_DIR}" \
+    --overwrite
+
+  validate_processed_dir \
+    "${ROTATION_OUTPUT_DIR}" \
+    100 \
+    rotation_state \
+    rotation_top_theme \
+    rotation_top_cluster \
+    stock_matches_rotation_top_cluster
+
+  validate_same_stock_pool \
+    "top100=${TOP100_DIR}" \
+    "sector=${SECTOR_OUTPUT_DIR}" \
+    "rotation=${ROTATION_OUTPUT_DIR}"
+  PROCESSED_CHECK_TARGET="${ROTATION_OUTPUT_DIR}"
 else
-  log "RUN_PAPER_AFTER_CLOSE=${RUN_PAPER_AFTER_CLOSE}，跳过模拟账户 after-close。"
+  log "6/8 skip rotation enhanced processed dir: BUILD_ROTATION_FEATURES=${BUILD_ROTATION_FEATURES}"
+  validate_same_stock_pool \
+    "top100=${TOP100_DIR}" \
+    "sector=${SECTOR_OUTPUT_DIR}"
+  PROCESSED_CHECK_TARGET="${SECTOR_OUTPUT_DIR}"
+fi
+
+log "8/8 run paper accounts after-close"
+if [[ "${RUN_PAPER_AFTER_CLOSE}" == "1" ]]; then
+  CONFIG_DIR="${PAPER_CONFIG_DIR}" PROCESSED_CHECK_DIR="${PROCESSED_CHECK_TARGET}" scripts/run_paper_trading_cron.sh after-close "${RUN_DATE}"
+else
+  log "RUN_PAPER_AFTER_CLOSE=${RUN_PAPER_AFTER_CLOSE}, skip paper after-close."
 fi
 
 SUCCESS_FILE="${LOG_DIR}/latest_success.txt"
@@ -240,6 +320,9 @@ SUCCESS_FILE="${LOG_DIR}/latest_success.txt"
   echo "top100_dir=${TOP100_DIR}"
   echo "sector_processed_dir=${SECTOR_PROCESSED_DIR}"
   echo "sector_output_dir=${SECTOR_OUTPUT_DIR}"
+  echo "rotation_report_dir=${ROTATION_REPORT_DIR}"
+  echo "rotation_daily_path=${ROTATION_DAILY_PATH}"
+  echo "rotation_output_dir=${ROTATION_OUTPUT_DIR}"
   echo "paper_config_dir=${PAPER_CONFIG_DIR}"
   echo "log_file=${LOG_FILE}"
 } > "${SUCCESS_FILE}"

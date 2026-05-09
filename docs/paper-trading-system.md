@@ -113,17 +113,19 @@ python scripts/run_paper_trading.py --config-dir configs/paper_accounts --all --
 | 板块候选_score0.4_rank0.7 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector` | `paper_trading/accounts/板块候选_score04_rank07_v1.xlsx` |
 | 候选_避开新能源主线 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | `paper_trading/accounts/板块轮动_避开新能源_v1.xlsx` |
 
-策略 1 直接读取板块增强目录，核心买入条件是在基础动量、大盘动量过滤后增加 `sector_exposure_score>0`、`sector_strongest_theme_score>=0.4`、`sector_strongest_theme_rank_pct<=0.7`，并按原动量评分表达式取 Top2。策略 2 在策略 1 的基础上增加 `rotation_top_cluster!=新能源`，所以运行前必须先生成轮动增强目录：
+策略 1 直接读取板块增强目录，核心买入条件是在基础动量、大盘动量过滤后增加 `sector_exposure_score>0`、`sector_strongest_theme_score>=0.4`、`sector_strongest_theme_rank_pct<=0.7`，并按原动量评分表达式取 Top2。策略 2 在策略 1 的基础上增加 `rotation_top_cluster!=新能源`。
+
+为了保证模拟账户可比，`data_bundle/processed_qfq_theme_focus_top100`、`data_bundle/processed_qfq_theme_focus_top100_sector`、`data_bundle/processed_qfq_theme_focus_top100_sector_rotation` 必须是同一批 100 只股票：基础目录只提供原始股票日线和行业字段，板块增强目录增加 `sector_*` 字段，轮动增强目录再增加 `rotation_*` 和 `stock_matches_rotation_*` 字段。不要手工往增强目录追加旧 CSV。运行前建议用统一调度生成轮动增强目录：
 
 ```bash
 python scripts/build_sector_rotation_features.py \
   --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
-  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
+  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
   --output-dir data_bundle/processed_qfq_theme_focus_top100_sector_rotation \
   --overwrite
 ```
 
-轮动增强目录的数据定义：股票日线仍来自 `data_bundle/processed_qfq_theme_focus_top100_sector`，轮动字段来自 `sector_rotation_daily.csv`；新增字段包括 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`rotation_top_score`、`rotation_top_rank_pct`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster`。`rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 只用于说明生成时间、源目录、源文件和行数，不参与买卖信号计算。
+轮动增强目录的数据定义：股票日线仍来自 `data_bundle/processed_qfq_theme_focus_top100_sector`，轮动字段来自 `sector_rotation_daily.csv`；新增字段包括 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`rotation_top_score`、`rotation_top_rank_pct`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster`。`rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 只用于说明生成时间、源目录、源文件和行数，不参与买卖信号计算。`--overwrite` 会先清理输出目录里的旧 CSV，避免 Top100 更新后残留旧股票。
 
 腾讯云定时任务脚本：
 
@@ -144,8 +146,9 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 
 - `execute` 在开盘后执行所有模板账户的待成交订单，适合使用东方财富或腾讯股票实时行情；同一批到期订单会先执行卖出、再执行买入，避免需要卖出释放现金时新买入先因为现金不足失败。
 - `after-close` 在数据更新完成后运行，先更新持仓估值，再生成下一交易日订单。
+- 推荐收盘后正式任务使用 `scripts/run_after_close_pipeline.sh`，它会先更新基础 Top100、板块研究、板块增强目录和轮动增强目录，再调用本脚本。
 - 脚本会先判断是否为 A 股交易日，非交易日自动跳过。
-- `after-close` 会检查主题前 100 处理后数据是否已经更新到当天；如果数据还没更新，会跳过生成订单，避免用旧数据下计划。
+- `after-close` 会检查传入的处理后数据目录是否已经更新到当天；统一调度默认检查轮动增强目录，避免某个板块/轮动账户用旧数据生成计划。
 - 生成买入订单时，系统使用 T 日未复权收盘价做价格筛选；超过 `买入价格筛选.最高收盘价` 的股票不会进入最终 TopN，会继续向后寻找符合价格要求的候选。
 - `买入数量.股数` 是基础股数，`买入数量.最低买入金额` 是下限；系统会用 T 日收盘价估算买入市值，并按 `买入数量.每手股数` 向上补足。例如股价 25 元、基础 200 股、最低 10000 元，会计划买 400 股；股价 70 元、基础 300 股时，基础市值已经 21000 元，就仍买 300 股。
 - `/paper` 页面里的“获取当前持仓最新价格”会调用 `refresh` 动作，只更新当前持仓价格、市值、浮动盈亏和每日资产，不生成订单、不执行买卖。交易时段一般是盘中最新价；已收盘后通常是当日收盘价或收盘后的最新可用价格；非交易日或节假日通常是最近交易日收盘价或行情源最后可用价格。页面摘要和运行日志会写明当时的行情状态。

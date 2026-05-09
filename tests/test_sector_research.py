@@ -220,6 +220,61 @@ themes:
             self.assertNotIn("sector_theme_names", original.columns)
             self.assertTrue((base / "processed_qfq_sector" / "sector_feature_manifest.csv").exists())
 
+    def test_merge_sector_features_overwrite_removes_stale_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            config_path = base / "themes.yaml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "themes:",
+                        "  \u9502\u77ff\u9502\u7535:",
+                        "    subthemes:",
+                        "      \u9502\u7535\u6c60: [\"\u9502\u7535\u6c60\"]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_sector_research(
+                config_path=config_path,
+                start_date="20240101",
+                end_date="20240501",
+                raw_dir=base / "raw",
+                processed_dir=base / "sector_processed",
+                report_dir=base / "reports",
+                provider=FakeSectorProvider(),
+            )
+
+            processed_dir = base / "processed_qfq"
+            processed_dir.mkdir()
+            stock_frame = pd.DataFrame(
+                {
+                    "trade_date": ["20240102", "20240103"],
+                    "close": [10.0, 10.2],
+                }
+            )
+            stock_frame.to_csv(processed_dir / "300001.csv", index=False, encoding="utf-8-sig")
+
+            output_dir = base / "processed_qfq_sector"
+            output_dir.mkdir()
+            stale_path = output_dir / "999999.csv"
+            stale_path.write_text("trade_date,close\n20240102,1\n", encoding="utf-8")
+            sidecar_path = output_dir / "notes.txt"
+            sidecar_path.write_text("keep", encoding="utf-8")
+
+            result = merge_sector_features_to_processed_dir(
+                processed_dir=processed_dir,
+                sector_processed_dir=base / "sector_processed",
+                output_dir=output_dir,
+                overwrite=True,
+            )
+
+            self.assertEqual(result.stock_files, 1)
+            self.assertGreaterEqual(result.removed_csv_files, 1)
+            self.assertFalse(stale_path.exists())
+            self.assertTrue((output_dir / "300001.csv").exists())
+            self.assertTrue(sidecar_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
