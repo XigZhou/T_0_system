@@ -16,6 +16,54 @@ const logTable = document.getElementById("logTable");
 const paperTabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const paperTabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
+const TABLE_HEADER_LABELS = {
+  累计收益: "累计收益率",
+};
+
+const PERCENT_FIELDS = new Set(["浮动收益率", "收益率", "累计收益", "累计收益率"]);
+const MONEY_FIELDS = new Set([
+  "现金",
+  "持仓市值",
+  "总资产",
+  "初始资金",
+  "最低买入金额",
+  "成交金额",
+  "手续费",
+  "印花税",
+  "总金额",
+  "买入成本",
+  "实现盈亏",
+  "现金余额",
+  "买入成交金额",
+  "买入手续费",
+  "买入总成本",
+  "当前市值",
+  "浮动盈亏",
+  "cash",
+  "market_value",
+  "total_equity",
+]);
+const PRICE_FIELDS = new Set(["信号收盘价", "成交价格", "买入价格", "当前价格"]);
+const INTEGER_FIELDS = new Set([
+  "planned_buy_count",
+  "planned_sell_count",
+  "price_filtered_count",
+  "added_order_count",
+  "executed_count",
+  "failed_count",
+  "updated_holding_count",
+  "failed_holding_count",
+  "order_count",
+  "trade_count",
+  "holding_count",
+  "asset_count",
+  "log_count",
+  "计划股数",
+  "股数",
+  "持有天数",
+  "排名",
+]);
+
 const SUMMARY_LABELS = {
   account_id: "账户编号",
   account_name: "账户名称",
@@ -74,12 +122,45 @@ if (paperTabButtons.length) {
   setPaperActiveTab(paperTabButtons[0].dataset.tab);
 }
 
-function formatValue(value) {
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const cleaned = value.trim().replace(/,/g, "").replace(/%$/, "");
+    if (!cleaned) {
+      return null;
+    }
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatValue(value, fieldName = "") {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
   }
-  if (typeof value === "number") {
-    return value.toLocaleString("zh-CN", { maximumFractionDigits: Math.abs(value) >= 1000 ? 2 : 6 });
+  const num = toFiniteNumber(value);
+  if (num !== null) {
+    if (PERCENT_FIELDS.has(fieldName)) {
+      const rawText = typeof value === "string" ? value.trim() : "";
+      const percentValue = rawText.endsWith("%") ? num : num * 100;
+      return `${percentValue.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+    }
+    if (MONEY_FIELDS.has(fieldName)) {
+      return `${num.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 元`;
+    }
+    if (PRICE_FIELDS.has(fieldName)) {
+      return `${num.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} 元`;
+    }
+    if (INTEGER_FIELDS.has(fieldName)) {
+      return Math.round(num).toLocaleString("zh-CN");
+    }
+    return num.toLocaleString("zh-CN", { maximumFractionDigits: Math.abs(num) >= 1000 ? 2 : 4 });
   }
   return String(value);
 }
@@ -87,7 +168,7 @@ function formatValue(value) {
 function renderSummary(summary = {}) {
   const keys = Object.keys(SUMMARY_LABELS).filter((key) => summary[key] !== undefined);
   paperSummaryGrid.innerHTML = keys
-    .map((key) => `<div class="metric"><p class="metric-label">${SUMMARY_LABELS[key]}</p><p class="metric-value">${formatValue(summary[key])}</p></div>`)
+    .map((key) => `<div class="metric"><p class="metric-label">${SUMMARY_LABELS[key]}</p><p class="metric-value">${formatValue(summary[key], key)}</p></div>`)
     .join("");
 }
 
@@ -113,8 +194,8 @@ function renderTable(el, rows) {
     }, new Set())
   );
   el.innerHTML = `
-    <thead><tr>${keys.map((key) => `<th>${key}</th>`).join("")}</tr></thead>
-    <tbody>${rows.map((row) => `<tr>${keys.map((key) => `<td>${formatValue(row[key])}</td>`).join("")}</tr>`).join("")}</tbody>
+    <thead><tr>${keys.map((key) => `<th>${TABLE_HEADER_LABELS[key] || key}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${keys.map((key) => `<td>${formatValue(row[key], key)}</td>`).join("")}</tr>`).join("")}</tbody>
   `;
 }
 
