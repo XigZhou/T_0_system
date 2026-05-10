@@ -13,6 +13,7 @@ from .models import (
     BacktestResponse,
     DailyPlanRequest,
     DailyPlanResponse,
+    PaperTemplateSaveRequest,
     PaperTemplateResponse,
     PaperTradingRunRequest,
     PaperTradingRunResponse,
@@ -21,7 +22,14 @@ from .models import (
     SingleStockBacktestRequest,
     SingleStockBacktestResponse,
 )
-from .paper_trading import list_paper_account_templates, read_paper_trading_ledger, run_paper_trading
+from .paper_trading import (
+    delete_paper_account_template,
+    list_paper_account_templates,
+    read_paper_account_template,
+    read_paper_trading_ledger,
+    run_paper_trading,
+    save_paper_account_template,
+)
 from .signal_quality import run_signal_quality
 from .sector_dashboard import build_sector_dashboard_payload
 from .single_stock import run_single_stock_backtest
@@ -118,6 +126,42 @@ def daily_plan_api(req: DailyPlanRequest):
 def paper_templates_api(config_dir: str = "configs/paper_accounts"):
     try:
         return {"templates": list_paper_account_templates(config_dir)}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/paper/template")
+def paper_template_api(config_path: str, config_dir: str = "configs/paper_accounts"):
+    try:
+        return read_paper_account_template(config_path=config_path, config_dir=config_dir)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/paper/template")
+def paper_template_save_api(req: PaperTemplateSaveRequest):
+    try:
+        return save_paper_account_template(req)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete("/api/paper/template")
+def paper_template_delete_api(config_path: str, config_dir: str = "configs/paper_accounts"):
+    try:
+        return delete_paper_account_template(config_path=config_path, config_dir=config_dir)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

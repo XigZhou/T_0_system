@@ -1245,6 +1245,9 @@ http://127.0.0.1:8083/
 - 账本目录：`paper_trading/accounts/`
 - 日志目录：`paper_trading/logs/`
 - API：`GET /api/paper/templates`
+- API：`GET /api/paper/template`
+- API：`POST /api/paper/template`
+- API：`DELETE /api/paper/template`
 - API：`GET /api/paper/ledger`
 - API：`POST /api/paper/run`
 - 命令行：`python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action generate --date 20260416`
@@ -1283,6 +1286,24 @@ http://127.0.0.1:8083/
 | `费用.最低佣金` | 单笔最低佣金 |
 | `输出.账本路径` | Excel 账本路径 |
 | `输出.日志目录` | 文本日志目录 |
+
+### 前端模板管理
+
+`/paper` 页面左侧提供“模板管理”编辑区，可直接新建、载入、保存、另存和删除中文 YAML 模板。模板管理只操作 `configs/paper_accounts/` 下的 `.yaml` 文件；不会直接改写历史 Excel 账本，也不会把旧账本自动迁移到新策略。
+
+保存规则：
+
+- `保存模板` 只允许覆盖当前正在编辑的模板路径。
+- `另存为新模板` 必须使用未占用的模板文件名。
+- 后端会检查账户编号、账户名称和账本路径是否已被其他模板占用。
+- 新模板不能复用已经存在的 Excel 账本路径；如确实要用旧账本，应手工明确处理账本文件，避免历史交易和新策略混在一起。
+- `删除模板` 只删除 YAML 模板文件，返回结果会说明 Excel 账本路径和账本是否仍存在。
+
+常见错误处理：
+
+- 文件名包含目录、`..` 或非 `.yaml` 后缀时拒绝保存。
+- 模板路径不在当前模板目录内时拒绝读取、保存或删除。
+- 账户编号、账户名称、账本路径冲突时返回 400，页面状态栏会显示具体冲突项。
 
 ### 执行动作
 

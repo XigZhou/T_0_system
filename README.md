@@ -831,6 +831,11 @@ curl http://127.0.0.1:8083/health
   - 执行动作：`收盘生成待执行订单`、`开盘执行待成交订单`、`收盘更新持仓估值`
   - 动作日期；留空时会按数据最新交易日自动识别
 - 页面按钮：
+  - `载入当前模板`：把当前 YAML 模板内容载入到页面下方的模板编辑区
+  - `新建模板`：初始化一个新账户模板草稿，不会修改旧账本
+  - `保存模板`：覆盖保存当前 YAML 模板；只写模板文件，不直接修改 Excel 账本
+  - `另存为新模板`：用新的模板文件名、账户编号和账本路径保存新账户，后端会检查冲突
+  - `删除模板`：只删除 YAML 模板，Excel 账本保留，避免历史记录被误删
   - `获取当前持仓最新价格`：使用东方财富或腾讯股票最新行情刷新当前持仓、市值、浮动盈亏和每日资产，不生成订单、不执行买卖
 - 页面输出：
   - 账户摘要
@@ -844,6 +849,7 @@ curl http://127.0.0.1:8083/health
 - 买入股数支持最低买入金额下限：`买入数量.股数` 是基础股数，`买入数量.最低买入金额` 会按 T 日收盘价和 `每手股数` 向上补足，例如 25 元股票基础 200 股会补到 400 股以超过 10000 元
 - 实时刷新在交易时段通常使用盘中最新价，收盘后通常使用当日收盘价或收盘后的最新可用价格，非交易日或节假日通常使用最近交易日收盘价或行情源最后可用价格；页面摘要和运行日志会写明行情状态
 - 每个模板互不影响：不同模板写入不同 Excel 账本，适合同步观察 Top3、Top5、行业增强、大盘过滤等多套实盘模拟效果
+- 模板管理会检查模板文件名、账户编号、账户名称和账本路径冲突；新模板或另存为不能复用已经存在的 Excel 账本路径，避免新策略和旧历史记录混在一起
 
 命令行示例：
 
@@ -887,6 +893,9 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - `POST /api/run-backtest-export`
 - `POST /api/daily-plan`
 - `GET /api/paper/templates`
+- `GET /api/paper/template`
+- `POST /api/paper/template`
+- `DELETE /api/paper/template`
 - `GET /api/paper/ledger`
 - `POST /api/paper/run`
 - `POST /api/run-single-stock`
@@ -958,6 +967,8 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - `diagnostics`
 
 `/api/paper/ledger` 是只读接口，用于前端打开 `/paper` 时直接读取已有 Excel 账本，不会生成新订单或执行成交。
+
+`/api/paper/template` 用于前端模板管理：`GET` 读取单个 YAML 模板为编辑表单字段，`POST` 保存或另存模板，`DELETE` 删除 YAML 模板。删除模板不会删除 Excel 账本；保存新模板会拒绝复用其他模板或既有账本路径。
 
 `/api/run-single-stock` 返回：
 

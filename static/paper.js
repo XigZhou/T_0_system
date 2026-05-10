@@ -4,10 +4,16 @@ const refreshQuotesBtn = document.getElementById("refreshQuotesBtn");
 const loadLedgerBtn = document.getElementById("loadLedgerBtn");
 const reloadTemplatesBtn = document.getElementById("reloadTemplatesBtn");
 const paperStatus = document.getElementById("paperStatus");
+const templateStatus = document.getElementById("templateStatus");
 const paperSummaryGrid = document.getElementById("paperSummaryGrid");
 const templateSelect = document.getElementById("templateSelect");
 const configPathInput = document.getElementById("configPath");
 const configDirInput = document.getElementById("configDir");
+const loadTemplateBtn = document.getElementById("loadTemplateBtn");
+const newTemplateBtn = document.getElementById("newTemplateBtn");
+const saveTemplateBtn = document.getElementById("saveTemplateBtn");
+const saveAsTemplateBtn = document.getElementById("saveAsTemplateBtn");
+const deleteTemplateBtn = document.getElementById("deleteTemplateBtn");
 const pendingTable = document.getElementById("pendingTable");
 const tradeTable = document.getElementById("tradeTable");
 const holdingTable = document.getElementById("holdingTable");
@@ -15,6 +21,39 @@ const assetTable = document.getElementById("assetTable");
 const logTable = document.getElementById("logTable");
 const paperTabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const paperTabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+const templateFields = {
+  file_name: document.getElementById("tplFileName"),
+  account_id: document.getElementById("tplAccountId"),
+  account_name: document.getElementById("tplAccountName"),
+  initial_cash: document.getElementById("tplInitialCash"),
+  processed_dir: document.getElementById("tplProcessedDir"),
+  buy_condition: document.getElementById("tplBuyCondition"),
+  sell_condition: document.getElementById("tplSellCondition"),
+  score_expression: document.getElementById("tplScoreExpression"),
+  top_n: document.getElementById("tplTopN"),
+  entry_offset: document.getElementById("tplEntryOffset"),
+  min_hold_days: document.getElementById("tplMinHoldDays"),
+  max_hold_days: document.getElementById("tplMaxHoldDays"),
+  buy_quantity_mode: document.getElementById("tplBuyQuantityMode"),
+  buy_shares: document.getElementById("tplBuyShares"),
+  buy_lot_size: document.getElementById("tplBuyLotSize"),
+  min_buy_amount: document.getElementById("tplMinBuyAmount"),
+  buy_min_close: document.getElementById("tplBuyMinClose"),
+  buy_max_close: document.getElementById("tplBuyMaxClose"),
+  price_primary: document.getElementById("tplPricePrimary"),
+  price_fallback: document.getElementById("tplPriceFallback"),
+  price_field: document.getElementById("tplPriceField"),
+  buy_fee_rate: document.getElementById("tplBuyFeeRate"),
+  sell_fee_rate: document.getElementById("tplSellFeeRate"),
+  stamp_tax_sell: document.getElementById("tplStampTaxSell"),
+  slippage_bps: document.getElementById("tplSlippageBps"),
+  min_commission: document.getElementById("tplMinCommission"),
+  ledger_path: document.getElementById("tplLedgerPath"),
+  log_dir: document.getElementById("tplLogDir"),
+  skip_if_holding: document.getElementById("tplSkipIfHolding"),
+  skip_if_pending_order: document.getElementById("tplSkipIfPendingOrder"),
+  strict_execution: document.getElementById("tplStrictExecution"),
+};
 
 const TABLE_HEADER_LABELS = {
   累计收益: "累计收益率",
@@ -99,6 +138,11 @@ const SUMMARY_LABELS = {
 function setPaperStatus(text, error = false) {
   paperStatus.textContent = text;
   paperStatus.style.color = error ? "#8a2f13" : "";
+}
+
+function setTemplateStatus(text, error = false) {
+  templateStatus.textContent = text;
+  templateStatus.style.color = error ? "#8a2f13" : "";
 }
 
 function setPaperActiveTab(tabName) {
@@ -199,6 +243,111 @@ function renderTable(el, rows) {
   `;
 }
 
+function numberValue(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function intValue(value, fallback = 0) {
+  return Math.round(numberValue(value, fallback));
+}
+
+function defaultTemplateValues() {
+  const suffix = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  return {
+    file_name: `new_paper_account_${suffix}.yaml`,
+    account_id: `新账户_${suffix}`,
+    account_name: `新模拟账户_${suffix}`,
+    initial_cash: 100000,
+    processed_dir: "data_bundle/processed_qfq_theme_focus_top100",
+    buy_condition: "m20>0",
+    sell_condition: "",
+    score_expression: "m20",
+    top_n: 5,
+    entry_offset: 1,
+    min_hold_days: 0,
+    max_hold_days: 15,
+    buy_quantity_mode: "固定股数",
+    buy_shares: 200,
+    buy_lot_size: 100,
+    min_buy_amount: 10000,
+    buy_min_close: 0,
+    buy_max_close: 150,
+    price_primary: "东方财富",
+    price_fallback: "腾讯股票",
+    price_field: "开盘价",
+    buy_fee_rate: 0.00003,
+    sell_fee_rate: 0.00003,
+    stamp_tax_sell: 0,
+    slippage_bps: 3,
+    min_commission: 0,
+    ledger_path: `paper_trading/accounts/新账户_${suffix}.xlsx`,
+    log_dir: "paper_trading/logs",
+    skip_if_holding: true,
+    skip_if_pending_order: true,
+    strict_execution: true,
+  };
+}
+
+function populateTemplateEditor(data = {}) {
+  const merged = { ...defaultTemplateValues(), ...data };
+  Object.entries(templateFields).forEach(([key, el]) => {
+    if (!el) {
+      return;
+    }
+    if (el.type === "checkbox") {
+      el.checked = Boolean(merged[key]);
+    } else {
+      el.value = merged[key] ?? "";
+    }
+  });
+}
+
+function collectTemplatePayload(overwriteExisting) {
+  return {
+    config_dir: configDirInput.value.trim() || "configs/paper_accounts",
+    config_path: configPathInput.value.trim(),
+    file_name: templateFields.file_name.value.trim(),
+    overwrite_existing: overwriteExisting,
+    account_id: templateFields.account_id.value.trim(),
+    account_name: templateFields.account_name.value.trim(),
+    initial_cash: numberValue(templateFields.initial_cash.value, 100000),
+    processed_dir: templateFields.processed_dir.value.trim(),
+    buy_condition: templateFields.buy_condition.value.trim(),
+    sell_condition: templateFields.sell_condition.value.trim(),
+    score_expression: templateFields.score_expression.value.trim(),
+    top_n: intValue(templateFields.top_n.value, 5),
+    entry_offset: intValue(templateFields.entry_offset.value, 1),
+    min_hold_days: intValue(templateFields.min_hold_days.value, 0),
+    max_hold_days: intValue(templateFields.max_hold_days.value, 15),
+    buy_quantity_mode: templateFields.buy_quantity_mode.value.trim() || "固定股数",
+    buy_shares: intValue(templateFields.buy_shares.value, 200),
+    buy_lot_size: intValue(templateFields.buy_lot_size.value, 100),
+    min_buy_amount: numberValue(templateFields.min_buy_amount.value, 10000),
+    buy_min_close: numberValue(templateFields.buy_min_close.value, 0),
+    buy_max_close: numberValue(templateFields.buy_max_close.value, 150),
+    price_primary: templateFields.price_primary.value.trim() || "东方财富",
+    price_fallback: templateFields.price_fallback.value.trim(),
+    price_field: templateFields.price_field.value || "开盘价",
+    skip_if_holding: templateFields.skip_if_holding.checked,
+    skip_if_pending_order: templateFields.skip_if_pending_order.checked,
+    strict_execution: templateFields.strict_execution.checked,
+    buy_fee_rate: numberValue(templateFields.buy_fee_rate.value, 0.00003),
+    sell_fee_rate: numberValue(templateFields.sell_fee_rate.value, 0.00003),
+    stamp_tax_sell: numberValue(templateFields.stamp_tax_sell.value, 0),
+    slippage_bps: numberValue(templateFields.slippage_bps.value, 3),
+    min_commission: numberValue(templateFields.min_commission.value, 0),
+    ledger_path: templateFields.ledger_path.value.trim(),
+    log_dir: templateFields.log_dir.value.trim() || "paper_trading/logs",
+  };
+}
+
+function setTemplateButtonsDisabled(disabled) {
+  [loadTemplateBtn, newTemplateBtn, saveTemplateBtn, saveAsTemplateBtn, deleteTemplateBtn].forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -211,10 +360,13 @@ async function fetchJson(url, options = {}) {
 async function loadTemplates() {
   const configDir = encodeURIComponent(configDirInput.value.trim() || "configs/paper_accounts");
   const data = await fetchJson(`/api/paper/templates?config_dir=${configDir}`);
+  const previousValue = configPathInput.value.trim();
   templateSelect.innerHTML = "";
   if (!data.templates.length) {
     templateSelect.appendChild(new Option("没有找到模板，可手动填写路径", ""));
     setPaperStatus("没有找到模板，请检查模板目录或手动填写模板路径。", true);
+    populateTemplateEditor();
+    setTemplateStatus("没有找到模板，可以先填写新模板后保存。");
     return;
   }
   data.templates.forEach((item) => {
@@ -223,13 +375,18 @@ async function loadTemplates() {
     option.dataset.ledgerPath = item.ledger_path || "";
     templateSelect.appendChild(option);
   });
+  if (previousValue && Array.from(templateSelect.options).some((option) => option.value === previousValue)) {
+    templateSelect.value = previousValue;
+  }
   configPathInput.value = templateSelect.value;
   setPaperStatus(`已读取 ${data.templates.length} 个模拟账户模板，正在读取账本。`);
+  await loadCurrentTemplate(false);
   await loadLedger(false);
 }
 
 templateSelect.addEventListener("change", () => {
   configPathInput.value = templateSelect.value;
+  loadCurrentTemplate(false).catch((error) => setTemplateStatus(`读取模板失败：${error.message}`, true));
   loadLedger(false).catch((error) => setPaperStatus(`读取账本失败：${error.message}`, true));
 });
 
@@ -238,6 +395,94 @@ reloadTemplatesBtn.addEventListener("click", async () => {
     await loadTemplates();
   } catch (error) {
     setPaperStatus(`读取模板失败：${error.message}`, true);
+  }
+});
+
+async function loadCurrentTemplate(showStatus = true) {
+  const configPath = configPathInput.value.trim();
+  if (!configPath) {
+    populateTemplateEditor();
+    setTemplateStatus("未选择模板，可以新建一个模板。");
+    return;
+  }
+  if (showStatus) {
+    setTemplateStatus("正在载入模板...");
+  }
+  const params = new URLSearchParams({
+    config_path: configPath,
+    config_dir: configDirInput.value.trim() || "configs/paper_accounts",
+  });
+  const data = await fetchJson(`/api/paper/template?${params.toString()}`);
+  populateTemplateEditor(data);
+  setTemplateStatus(`模板已载入：${data.config_path}；账本${data.ledger_exists ? "已存在" : "尚未创建"}。`);
+}
+
+loadTemplateBtn.addEventListener("click", async () => {
+  try {
+    await loadCurrentTemplate(true);
+  } catch (error) {
+    setTemplateStatus(`读取模板失败：${error.message}`, true);
+  }
+});
+
+newTemplateBtn.addEventListener("click", () => {
+  configPathInput.value = "";
+  templateSelect.value = "";
+  populateTemplateEditor();
+  setTemplateStatus("已初始化新模板。保存前请确认账户编号、文件名和账本路径不会与旧模板冲突。");
+});
+
+async function saveTemplate(overwriteExisting) {
+  setTemplateButtonsDisabled(true);
+  setTemplateStatus(overwriteExisting ? "正在保存模板..." : "正在另存为新模板...");
+  try {
+    const payload = collectTemplatePayload(overwriteExisting);
+    const data = await fetchJson("/api/paper/template", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const savedPath = data.template.config_path;
+    configPathInput.value = savedPath;
+    await loadTemplates();
+    configPathInput.value = savedPath;
+    templateSelect.value = savedPath;
+    populateTemplateEditor(data.template);
+    setTemplateStatus(data.message || "模板已保存；Excel 账本未被修改。");
+  } catch (error) {
+    setTemplateStatus(`保存失败：${error.message}`, true);
+  } finally {
+    setTemplateButtonsDisabled(false);
+  }
+}
+
+saveTemplateBtn.addEventListener("click", () => saveTemplate(true));
+saveAsTemplateBtn.addEventListener("click", () => saveTemplate(false));
+
+deleteTemplateBtn.addEventListener("click", async () => {
+  const configPath = configPathInput.value.trim();
+  if (!configPath) {
+    setTemplateStatus("请先选择要删除的模板。", true);
+    return;
+  }
+  if (!window.confirm("只删除 YAML 模板，不删除 Excel 账本。确认删除当前模板吗？")) {
+    return;
+  }
+  setTemplateButtonsDisabled(true);
+  setTemplateStatus("正在删除模板...");
+  try {
+    const params = new URLSearchParams({
+      config_path: configPath,
+      config_dir: configDirInput.value.trim() || "configs/paper_accounts",
+    });
+    const data = await fetchJson(`/api/paper/template?${params.toString()}`, { method: "DELETE" });
+    configPathInput.value = "";
+    await loadTemplates();
+    setTemplateStatus(data.message || "模板已删除；Excel 账本保留不动。");
+  } catch (error) {
+    setTemplateStatus(`删除失败：${error.message}`, true);
+  } finally {
+    setTemplateButtonsDisabled(false);
   }
 });
 

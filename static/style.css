@@ -682,6 +682,98 @@ td {
   box-shadow: 0 8px 16px rgba(172, 79, 42, 0.18);
 }
 
+.paper-page .paper-template-editor {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.paper-page .template-editor-head {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.55fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.paper-page .template-editor-head h2 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.paper-page .template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.paper-page .template-actions #saveTemplateBtn {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(172, 79, 42, 0.16);
+}
+
+.paper-page .template-actions .danger {
+  border: 1px solid rgba(138, 47, 19, 0.28);
+  background: rgba(138, 47, 19, 0.1);
+  color: #8a2f13;
+}
+
+.paper-page .template-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.paper-page .template-editor-grid label {
+  grid-column: span 3;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.74rem;
+}
+
+.paper-page .template-editor-grid .field-wide {
+  grid-column: span 6;
+}
+
+.paper-page .template-editor-grid .field-expression {
+  grid-column: span 4;
+}
+
+.paper-page .template-editor-grid input,
+.paper-page .template-editor-grid textarea,
+.paper-page .template-editor-grid select {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.paper-page .template-editor-grid textarea {
+  min-height: 64px;
+  max-height: 110px;
+}
+
+.paper-page .template-editor-grid .check-field {
+  display: flex;
+  grid-column: span 4;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.paper-page .template-editor-grid .check-field input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .paper-page .workspace {
   gap: 12px;
   min-width: 0;

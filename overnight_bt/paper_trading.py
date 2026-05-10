@@ -21,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on minimal server en
     yaml = None
 
 from .daily_plan import build_daily_plan
-from .models import DailyHolding, DailyPlanRequest, PaperTradingRunRequest
+from .models import DailyHolding, DailyPlanRequest, PaperTemplateSaveRequest, PaperTradingRunRequest
 from .utils import load_env, to_float
 
 
@@ -354,6 +354,95 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _relative_text(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _normalize_template_dir(config_dir: str | Path) -> Path:
+    folder = _normalize_path(config_dir or DEFAULT_CONFIG_DIR)
+    return folder.resolve()
+
+
+def _normalize_template_file_name(file_name: str, account_id: str) -> str:
+    raw = str(file_name or "").strip() or f"{account_id}.yaml"
+    raw = raw.replace("\\", "/")
+    if "/" in raw or raw in {".", ".."} or ".." in Path(raw).parts:
+        raise ValueError("模板文件名只能填写文件名，不能包含目录或上级路径")
+    if not raw.lower().endswith((".yaml", ".yml")):
+        raw = f"{raw}.yaml"
+    if not raw.lower().endswith(".yaml"):
+        raise ValueError("模板文件必须使用 .yaml 后缀")
+    return raw
+
+
+def _resolve_template_path(config_path: str | Path, config_dir: str | Path) -> Path:
+    folder = _normalize_template_dir(config_dir)
+    path_text = str(config_path or "").strip()
+    if not path_text:
+        raise ValueError("请先选择或填写模板路径")
+    raw_path = Path(path_text).expanduser()
+    if not raw_path.is_absolute() and len(raw_path.parts) == 1:
+        path = (folder / raw_path).resolve()
+    else:
+        path = _normalize_path(path_text).resolve()
+    if path.suffix.lower() not in {".yaml", ".yml"}:
+        raise ValueError("模板路径必须是 .yaml 或 .yml 文件")
+    if not _is_relative_to(path, folder):
+        raise ValueError("模板路径必须位于当前模板目录内")
+    return path
+
+
+def _template_payload_from_config(cfg: PaperAccountConfig, config_path: Path) -> dict[str, Any]:
+    return {
+        "config_dir": _relative_text(config_path.parent),
+        "config_path": str(config_path),
+        "file_name": config_path.name,
+        "account_id": cfg.account_id,
+        "account_name": cfg.account_name,
+        "initial_cash": cfg.initial_cash,
+        "processed_dir": cfg.processed_dir,
+        "buy_condition": cfg.buy_condition,
+        "sell_condition": cfg.sell_condition,
+        "score_expression": cfg.score_expression,
+        "top_n": cfg.top_n,
+        "entry_offset": cfg.entry_offset,
+        "min_hold_days": cfg.min_hold_days,
+        "max_hold_days": cfg.max_hold_days,
+        "buy_quantity_mode": cfg.buy_quantity_mode,
+        "buy_shares": cfg.buy_shares,
+        "buy_lot_size": cfg.buy_lot_size,
+        "min_buy_amount": cfg.min_buy_amount,
+        "buy_min_close": cfg.buy_min_close,
+        "buy_max_close": cfg.buy_max_close,
+        "price_primary": cfg.price_primary,
+        "price_fallback": cfg.price_fallback,
+        "price_field": cfg.price_field,
+        "skip_if_holding": cfg.skip_if_holding,
+        "skip_if_pending_order": cfg.skip_if_pending_order,
+        "strict_execution": cfg.strict_execution,
+        "buy_fee_rate": cfg.buy_fee_rate,
+        "sell_fee_rate": cfg.sell_fee_rate,
+        "stamp_tax_sell": cfg.stamp_tax_sell,
+        "slippage_bps": cfg.slippage_bps,
+        "min_commission": cfg.min_commission,
+        "ledger_path": _relative_text(cfg.ledger_path),
+        "log_dir": _relative_text(cfg.log_dir),
+        "ledger_exists": cfg.ledger_path.exists(),
+        "raw_config": cfg.raw_config,
+    }
+
+
 def load_paper_account_config(config_path: str | Path) -> PaperAccountConfig:
     path = _normalize_path(config_path)
     data = _read_yaml(path)
@@ -431,6 +520,152 @@ def list_paper_account_templates(config_dir: str | Path = DEFAULT_CONFIG_DIR) ->
         except Exception as exc:  # noqa: BLE001
             rows.append({"account_id": path.stem, "account_name": "模板读取失败", "config_path": str(path), "error": str(exc)})
     return rows
+
+
+def read_paper_account_template(config_path: str, config_dir: str | Path = DEFAULT_CONFIG_DIR) -> dict[str, Any]:
+    path = _resolve_template_path(config_path, config_dir)
+    cfg = load_paper_account_config(path)
+    return _template_payload_from_config(cfg, path)
+
+
+def _template_config_from_request(req: PaperTemplateSaveRequest, ledger_path: Path, log_dir: Path) -> dict[str, Any]:
+    fees: dict[str, Any] = {
+        "印花税": req.stamp_tax_sell,
+        "滑点bps": req.slippage_bps,
+        "最低佣金": req.min_commission,
+    }
+    if abs(float(req.buy_fee_rate) - float(req.sell_fee_rate)) < 1e-12:
+        fees["买卖费率"] = req.buy_fee_rate
+    else:
+        fees["买入费率"] = req.buy_fee_rate
+        fees["卖出费率"] = req.sell_fee_rate
+    return {
+        "账户编号": req.account_id.strip(),
+        "账户名称": req.account_name.strip(),
+        "初始资金": req.initial_cash,
+        "处理后数据目录": req.processed_dir.strip(),
+        "买入条件": req.buy_condition.strip(),
+        "卖出条件": req.sell_condition.strip(),
+        "评分表达式": req.score_expression.strip(),
+        "买入排名数量": req.top_n,
+        "买入偏移": req.entry_offset,
+        "最短持有天数": req.min_hold_days,
+        "最大持有天数": req.max_hold_days,
+        "买入数量": {
+            "方式": req.buy_quantity_mode.strip() or "固定股数",
+            "股数": req.buy_shares,
+            "每手股数": req.buy_lot_size,
+            "最低买入金额": req.min_buy_amount,
+        },
+        "买入价格筛选": {
+            "最低收盘价": req.buy_min_close,
+            "最高收盘价": req.buy_max_close,
+        },
+        "行情源": {
+            "首选": req.price_primary.strip() or "东方财富",
+            "备用": req.price_fallback.strip(),
+            "价格字段": req.price_field.strip() or "开盘价",
+        },
+        "交易规则": {
+            "持仓时不重复买入": "是" if req.skip_if_holding else "否",
+            "有待成交订单时不重复买入": "是" if req.skip_if_pending_order else "否",
+            "严格成交": "是" if req.strict_execution else "否",
+        },
+        "费用": fees,
+        "输出": {
+            "账本路径": _relative_text(ledger_path),
+            "日志目录": _relative_text(log_dir),
+        },
+    }
+
+
+def _write_template_yaml(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if yaml is not None:
+        text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    else:  # pragma: no cover - PyYAML is available in normal dev/test envs
+        lines: list[str] = []
+        for key, value in data.items():
+            if isinstance(value, dict):
+                lines.append(f"{key}:")
+                for sub_key, sub_value in value.items():
+                    lines.append(f"  {sub_key}: {sub_value}")
+            else:
+                lines.append(f"{key}: {value}")
+        text = "\n".join(lines) + "\n"
+    path.write_text(text, encoding="utf-8")
+
+
+def save_paper_account_template(req: PaperTemplateSaveRequest) -> dict[str, Any]:
+    folder = _normalize_template_dir(req.config_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    account_id = req.account_id.strip()
+    account_name = req.account_name.strip()
+    if not account_id:
+        raise ValueError("账户编号不能为空")
+    if not account_name:
+        raise ValueError("账户名称不能为空")
+
+    target_name = _normalize_template_file_name(req.file_name, account_id)
+    target_path = (folder / target_name).resolve()
+    current_path = _resolve_template_path(req.config_path, folder) if req.config_path.strip() else None
+    is_same_template = current_path is not None and target_path == current_path
+    old_cfg = load_paper_account_config(current_path) if current_path is not None and current_path.exists() else None
+    if target_path.exists() and not is_same_template:
+        raise ValueError(f"模板文件名已存在，请换一个文件名: {target_path.name}")
+    if target_path.exists() and not req.overwrite_existing:
+        raise ValueError("覆盖已有模板时必须使用保存模板操作")
+    if req.overwrite_existing and current_path is None:
+        raise ValueError("覆盖保存必须提供当前模板路径")
+    if req.overwrite_existing and not is_same_template:
+        raise ValueError("覆盖保存只能写回当前模板；如需新模板请使用另存为")
+    if req.overwrite_existing and not target_path.exists():
+        raise ValueError("当前模板文件不存在，请使用另存为新模板")
+
+    ledger_path = _normalize_path(req.ledger_path or DEFAULT_LEDGER_DIR / f"{account_id}.xlsx").resolve()
+    log_dir = _normalize_path(req.log_dir or DEFAULT_LOG_DIR).resolve()
+    for row in list_paper_account_templates(folder):
+        other_path = _normalize_path(row.get("config_path", "")).resolve()
+        if other_path == target_path:
+            continue
+        if row.get("error"):
+            continue
+        if str(row.get("account_id") or "").strip() == account_id:
+            raise ValueError(f"账户编号已被其他模板使用: {account_id}")
+        if str(row.get("account_name") or "").strip() == account_name:
+            raise ValueError(f"账户名称已被其他模板使用: {account_name}")
+        other_ledger = _normalize_path(row.get("ledger_path", "")).resolve()
+        if other_ledger == ledger_path:
+            raise ValueError(f"账本路径已被其他模板使用: {_relative_text(ledger_path)}")
+
+    if ledger_path.exists():
+        if not is_same_template:
+            raise ValueError(f"账本文件已存在，为避免新旧策略混用，请换一个账本路径: {_relative_text(ledger_path)}")
+        if old_cfg is not None and old_cfg.ledger_path.resolve() != ledger_path:
+            raise ValueError(f"覆盖保存不能切换到已有账本，请换一个新账本路径: {_relative_text(ledger_path)}")
+
+    data = _template_config_from_request(req, ledger_path, log_dir)
+    _write_template_yaml(target_path, data)
+    cfg = load_paper_account_config(target_path)
+    return {
+        "template": _template_payload_from_config(cfg, target_path),
+        "message": f"模板已保存：{_relative_text(target_path)}；Excel 账本未被修改。",
+    }
+
+
+def delete_paper_account_template(config_path: str, config_dir: str | Path = DEFAULT_CONFIG_DIR) -> dict[str, Any]:
+    path = _resolve_template_path(config_path, config_dir)
+    if not path.exists():
+        raise FileNotFoundError(f"模板不存在: {path}")
+    cfg = load_paper_account_config(path)
+    ledger_path = cfg.ledger_path
+    path.unlink()
+    return {
+        "deleted_template_path": str(path),
+        "ledger_path": str(ledger_path),
+        "ledger_exists": ledger_path.exists(),
+        "message": f"模板已删除：{_relative_text(path)}；Excel 账本保留不动。",
+    }
 
 
 def _empty_ledger() -> dict[str, pd.DataFrame]:

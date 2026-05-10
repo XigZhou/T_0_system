@@ -7,8 +7,16 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from overnight_bt.models import PaperTradingRunRequest
-from overnight_bt.paper_trading import PriceQuote, list_paper_account_templates, read_paper_trading_ledger, run_paper_trading
+from overnight_bt.models import PaperTemplateSaveRequest, PaperTradingRunRequest
+from overnight_bt.paper_trading import (
+    PriceQuote,
+    delete_paper_account_template,
+    list_paper_account_templates,
+    read_paper_account_template,
+    read_paper_trading_ledger,
+    run_paper_trading,
+    save_paper_account_template,
+)
 from tests.helpers import make_processed_stock, write_processed_dir
 
 
@@ -290,6 +298,113 @@ class PaperTradingTest(unittest.TestCase):
 
             self.assertEqual(generated["summary"]["added_order_count"], 1)
             self.assertEqual(generated["pending_order_rows"][0]["计划执行日期"], "20240105")
+
+    def test_save_template_writes_yaml_and_reads_editor_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            config_dir = base / "configs" / "paper_accounts"
+            processed_dir = base / "processed_qfq"
+            processed_dir.mkdir()
+            result = save_paper_account_template(
+                PaperTemplateSaveRequest(
+                    config_dir=str(config_dir),
+                    file_name="editor_account.yaml",
+                    account_id="编辑账户",
+                    account_name="编辑模拟账户",
+                    processed_dir=str(processed_dir),
+                    buy_condition="m20>0.1",
+                    sell_condition="m20<0",
+                    score_expression="m20",
+                    ledger_path=str(base / "paper_trading" / "accounts" / "editor_account.xlsx"),
+                    log_dir=str(base / "paper_trading" / "logs"),
+                )
+            )
+
+            saved_path = Path(result["template"]["config_path"])
+            self.assertTrue(saved_path.exists())
+            loaded = read_paper_account_template(str(saved_path), str(config_dir))
+            self.assertEqual(loaded["account_id"], "编辑账户")
+            self.assertEqual(loaded["buy_condition"], "m20>0.1")
+            self.assertEqual(Path(loaded["ledger_path"]), base / "paper_trading" / "accounts" / "editor_account.xlsx")
+
+    def test_save_template_rejects_conflicting_identity_and_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            processed_dir = base / "processed_qfq"
+            processed_dir.mkdir()
+            existing = self._write_config(base, processed_dir)
+            config_dir = existing.parent
+            existing_ledger = base / "paper_trading" / "accounts" / "test_account.xlsx"
+
+            with self.assertRaises(ValueError):
+                save_paper_account_template(
+                    PaperTemplateSaveRequest(
+                        config_dir=str(config_dir),
+                        file_name="duplicate_id.yaml",
+                        account_id="测试账户",
+                        account_name="另一个账户",
+                        processed_dir=str(processed_dir),
+                        buy_condition="m20>0",
+                        score_expression="m20",
+                        ledger_path=str(base / "paper_trading" / "accounts" / "duplicate_id.xlsx"),
+                    )
+                )
+
+            with self.assertRaises(ValueError):
+                save_paper_account_template(
+                    PaperTemplateSaveRequest(
+                        config_dir=str(config_dir),
+                        file_name="duplicate_ledger.yaml",
+                        account_id="新账户",
+                        account_name="新模拟账户",
+                        processed_dir=str(processed_dir),
+                        buy_condition="m20>0",
+                        score_expression="m20",
+                        ledger_path=str(existing_ledger),
+                    )
+                )
+
+    def test_delete_template_keeps_excel_ledger_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            processed_dir = base / "processed_qfq"
+            processed_dir.mkdir()
+            config_path = self._write_config(base, processed_dir)
+            ledger_path = base / "paper_trading" / "accounts" / "test_account.xlsx"
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            ledger_path.write_bytes(b"ledger placeholder")
+
+            result = delete_paper_account_template(str(config_path), str(config_path.parent))
+
+            self.assertFalse(config_path.exists())
+            self.assertTrue(ledger_path.exists())
+            self.assertTrue(result["ledger_exists"])
+
+    def test_overwrite_template_rejects_switching_to_existing_old_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            processed_dir = base / "processed_qfq"
+            processed_dir.mkdir()
+            config_path = self._write_config(base, processed_dir)
+            old_ledger = base / "paper_trading" / "accounts" / "old_strategy.xlsx"
+            old_ledger.parent.mkdir(parents=True, exist_ok=True)
+            old_ledger.write_bytes(b"old ledger")
+
+            with self.assertRaises(ValueError):
+                save_paper_account_template(
+                    PaperTemplateSaveRequest(
+                        config_dir=str(config_path.parent),
+                        config_path=str(config_path),
+                        file_name=config_path.name,
+                        overwrite_existing=True,
+                        account_id="测试账户",
+                        account_name="测试模拟账户",
+                        processed_dir=str(processed_dir),
+                        buy_condition="m20>0",
+                        score_expression="m20",
+                        ledger_path=str(old_ledger),
+                    )
+                )
 
 
 if __name__ == "__main__":

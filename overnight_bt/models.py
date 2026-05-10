@@ -124,6 +124,43 @@ class PaperTemplateResponse(BaseModel):
     templates: list[dict]
 
 
+class PaperTemplateSaveRequest(BaseModel):
+    config_dir: str = Field("configs/paper_accounts", description="模拟账户模板目录")
+    config_path: str = Field("", description="当前模板路径；覆盖保存时必须填写")
+    file_name: str = Field("", description="模板文件名，例如 my_account.yaml")
+    overwrite_existing: bool = Field(False, description="是否覆盖当前 config_path 指向的模板")
+    account_id: str = Field(..., min_length=1, description="账户编号")
+    account_name: str = Field(..., min_length=1, description="账户名称")
+    initial_cash: float = Field(100_000.0, gt=0)
+    processed_dir: str = Field(..., min_length=1)
+    buy_condition: str = Field(..., min_length=1)
+    sell_condition: str = ""
+    score_expression: str = Field(..., min_length=1)
+    top_n: int = Field(5, ge=1, le=500)
+    entry_offset: int = Field(1, ge=1, le=5)
+    min_hold_days: int = Field(0, ge=0, le=60)
+    max_hold_days: int = Field(15, ge=0, le=120)
+    buy_quantity_mode: str = "固定股数"
+    buy_shares: int = Field(200, ge=1)
+    buy_lot_size: int = Field(100, ge=1)
+    min_buy_amount: float = Field(10_000.0, ge=0)
+    buy_min_close: float = Field(0.0, ge=0)
+    buy_max_close: float = Field(150.0, ge=0)
+    price_primary: str = "东方财富"
+    price_fallback: str = "腾讯股票"
+    price_field: str = "开盘价"
+    skip_if_holding: bool = True
+    skip_if_pending_order: bool = True
+    strict_execution: bool = True
+    buy_fee_rate: float = Field(0.00003, ge=0)
+    sell_fee_rate: float = Field(0.00003, ge=0)
+    stamp_tax_sell: float = Field(0.0, ge=0)
+    slippage_bps: float = Field(3.0, ge=0)
+    min_commission: float = Field(0.0, ge=0)
+    ledger_path: str = ""
+    log_dir: str = "paper_trading/logs"
+
+
 class PaperTradingRunRequest(BaseModel):
     config_path: str = Field("", description="模拟账户中文 YAML 模板路径")
     config_dir: str = Field("configs/paper_accounts", description="模拟账户模板目录")

@@ -8,12 +8,54 @@ from pathlib import Path
 
 import pandas as pd
 
-from overnight_bt.app import daily_plan_api, export_backtest_api, run_backtest_api, run_signal_quality_api, run_single_stock_api
-from overnight_bt.models import BacktestRequest, DailyHolding, DailyPlanRequest, SignalQualityRequest, SingleStockBacktestRequest
+from overnight_bt.app import (
+    daily_plan_api,
+    export_backtest_api,
+    paper_template_api,
+    paper_template_delete_api,
+    paper_template_save_api,
+    run_backtest_api,
+    run_signal_quality_api,
+    run_single_stock_api,
+)
+from overnight_bt.models import (
+    BacktestRequest,
+    DailyHolding,
+    DailyPlanRequest,
+    PaperTemplateSaveRequest,
+    SignalQualityRequest,
+    SingleStockBacktestRequest,
+)
 from tests.helpers import make_processed_stock, write_processed_dir
 
 
 class ApiIntegrationTest(unittest.TestCase):
+    def test_paper_template_api_save_read_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            config_dir = base / "configs" / "paper_accounts"
+            processed_dir = base / "processed_qfq"
+            processed_dir.mkdir()
+            saved = paper_template_save_api(
+                PaperTemplateSaveRequest(
+                    config_dir=str(config_dir),
+                    file_name="api_editor.yaml",
+                    account_id="API账户",
+                    account_name="API模拟账户",
+                    processed_dir=str(processed_dir),
+                    buy_condition="m20>0",
+                    score_expression="m20",
+                    ledger_path=str(base / "paper_trading" / "accounts" / "api_editor.xlsx"),
+                    log_dir=str(base / "paper_trading" / "logs"),
+                )
+            )
+
+            config_path = saved["template"]["config_path"]
+            loaded = paper_template_api(config_path=config_path, config_dir=str(config_dir))
+            self.assertEqual(loaded["account_name"], "API模拟账户")
+            deleted = paper_template_delete_api(config_path=config_path, config_dir=str(config_dir))
+            self.assertIn("Excel 账本保留", deleted["message"])
+
     def test_api_run_and_export(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
