@@ -895,7 +895,7 @@ td {
 }
 
 .paper-template-page .brand-actions {
-  max-width: 620px;
+  max-width: 560px;
 }
 
 .paper-template-page .subtle,
@@ -983,7 +983,7 @@ td {
 }
 
 .paper-template-page .summary-strip {
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: 14px;
   padding: 13px 15px;
 }
@@ -994,7 +994,7 @@ td {
 }
 
 .paper-template-page .summary-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .paper-template-page .metric {
@@ -1002,7 +1002,7 @@ td {
   padding: 8px 0;
 }
 
-.paper-template-page .metric:nth-last-child(-n + 3) {
+.paper-template-page .metric:nth-last-child(-n + 6) {
   border-bottom: none;
 }
 
@@ -1031,24 +1031,24 @@ td {
 
 .paper-template-page .template-editor-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
 
 .paper-template-page .template-editor-grid label {
-  grid-column: span 3;
+  grid-column: auto;
   gap: 4px;
   min-width: 0;
   font-size: 0.74rem;
 }
 
 .paper-template-page .template-editor-grid .field-wide {
-  grid-column: span 6;
+  grid-column: span 2;
 }
 
 .paper-template-page .template-editor-grid .field-expression {
-  grid-column: span 4;
+  grid-column: auto;
 }
 
 .paper-template-page .template-editor-grid input,
@@ -1067,7 +1067,7 @@ td {
 
 .paper-template-page .template-editor-grid .check-field {
   display: flex;
-  grid-column: span 4;
+  grid-column: auto;
   align-items: center;
   gap: 7px;
   min-height: 30px;
@@ -1462,7 +1462,7 @@ tr:last-child td {
   }
 
   .paper-template-page .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .paper-template-page .compact-form > .field-wide,
@@ -1476,7 +1476,7 @@ tr:last-child td {
   .paper-template-page .template-editor-grid .field-wide,
   .paper-template-page .template-editor-grid .field-expression,
   .paper-template-page .template-editor-grid .check-field {
-    grid-column: span 6;
+    grid-column: auto;
   }
 }
 
