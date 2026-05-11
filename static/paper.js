@@ -252,8 +252,28 @@ function intValue(value, fallback = 0) {
   return Math.round(numberValue(value, fallback));
 }
 
+function chinaDateStamp(date = new Date()) {
+  if (typeof Intl !== "undefined" && typeof Intl.DateTimeFormat === "function") {
+    const formatter = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((part) => part.type === "year")?.value || "";
+    const month = parts.find((part) => part.type === "month")?.value || "";
+    const day = parts.find((part) => part.type === "day")?.value || "";
+    if (year && month && day) {
+      return `${year}${month}${day}`;
+    }
+  }
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(0, 10).replaceAll("-", "");
+}
+
 function defaultTemplateValues() {
-  const suffix = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const suffix = chinaDateStamp();
   return {
     file_name: `new_paper_account_${suffix}.yaml`,
     account_id: `新账户_${suffix}`,

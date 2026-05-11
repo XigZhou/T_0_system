@@ -54,6 +54,7 @@ const checks = [
   [context.formatValue(1234.567, "浮动盈亏"), "1,234.57 元"],
   [context.formatValue(10.123456, "当前价格"), "10.1235 元"],
   [context.formatValue(3, "持有天数"), "3"],
+  [context.chinaDateStamp(new Date("2026-05-10T20:30:00Z")), "20260511"],
 ];
 for (const [actual, expected] of checks) {
   if (actual !== expected) {
