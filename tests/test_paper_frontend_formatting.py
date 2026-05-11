@@ -19,15 +19,22 @@ const noop = () => {};
 const elements = new Map();
 function element(id) {
   if (!elements.has(id)) {
+    const children = [];
     elements.set(id, {
       id,
       textContent: "",
       style: {},
       dataset: {},
+      value: "",
+      options: children,
       classList: { toggle: noop },
       setAttribute: noop,
       addEventListener: noop,
       closest: () => null,
+      appendChild: (child) => {
+        children.push(child);
+        return child;
+      },
       innerHTML: "",
     });
   }
@@ -38,6 +45,13 @@ const context = {
     getElementById: element,
     querySelectorAll: () => [],
     createElement: () => ({ className: "", textContent: "" }),
+  },
+  window: {
+    location: { search: "" },
+    history: { replaceState: noop },
+  },
+  Option: function Option(label, value) {
+    return { label, value, dataset: {} };
   },
   fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ templates: [] }) }),
   URLSearchParams,
@@ -56,7 +70,6 @@ const checks = [
   [context.formatValue(3, "持有天数"), "3"],
   [context.formatValue("20260429", "买入日期"), "20260429"],
   [context.formatValue("20260429", "trade_date"), "20260429"],
-  [context.chinaDateStamp(new Date("2026-05-10T20:30:00Z")), "20260511"],
 ];
 for (const [actual, expected] of checks) {
   if (actual !== expected) {

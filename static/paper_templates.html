@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>账户模板管理</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="paper-template-page">
+    <div class="shell">
+      <aside class="controls compact-controls">
+        <div class="brand-block">
+          <div>
+            <p class="eyebrow">模板工作台</p>
+            <h1>账户模板管理</h1>
+          </div>
+          <div class="brand-actions">
+            <p class="subtle">模板管理只会修改 YAML 配置，不直接改 Excel 账本；删除模板时也只删除模板文件。</p>
+            <p class="subtle">
+              <a id="openPaperLink" href="/paper">返回多账户模拟</a>
+              · <a href="/">组合回测</a>
+              · <a href="/daily">每日收盘选股</a>
+              · <a href="/single">单股表格回测</a>
+            </p>
+          </div>
+        </div>
+
+        <form id="templatePickerForm" class="form-grid compact-form">
+          <label class="field-wide">
+            <span>模板目录</span>
+            <input id="configDir" type="text" value="configs/paper_accounts" />
+          </label>
+
+          <label class="field-dates">
+            <span>选择模板</span>
+            <select id="templateSelect"></select>
+          </label>
+
+          <label class="field-wide">
+            <span>模板路径</span>
+            <input id="configPath" type="text" placeholder="可手动填写单个 YAML 模板路径" />
+          </label>
+
+          <div class="actions template-page-actions">
+            <button id="reloadTemplatesBtn" type="button" class="secondary">刷新模板</button>
+            <button id="loadTemplateBtn" type="button" class="secondary">载入模板</button>
+            <button id="newTemplateBtn" type="button" class="secondary">新建模板</button>
+            <button id="saveTemplateBtn" type="button">保存模板</button>
+            <button id="saveAsTemplateBtn" type="button" class="secondary">另存为新模板</button>
+            <button id="deleteTemplateBtn" type="button" class="danger">删除模板</button>
+          </div>
+
+          <p id="templateStatus" class="status">正在读取模板。</p>
+        </form>
+      </aside>
+
+      <main class="workspace">
+        <section class="summary-strip">
+          <div class="summary-intro">
+            <p class="eyebrow">模板摘要</p>
+            <h2>当前模板信息</h2>
+            <p class="panel-note">通过上面的下拉框切换模板后，会自动载入当前 YAML 内容；保存时会检查模板名、账户名和账本路径冲突。</p>
+          </div>
+          <div id="templateSummaryGrid" class="summary-grid"></div>
+        </section>
+
+        <section class="panel compact-panel template-editor-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">模板字段</p>
+              <h3>编辑账户模板</h3>
+            </div>
+            <p class="panel-note">建议新策略使用新的模板文件名和新的账本路径，避免历史账本与新策略混在一起。</p>
+          </div>
+
+          <div class="template-editor-grid">
+            <label>
+              <span>模板文件名</span>
+              <input id="tplFileName" type="text" placeholder="例如 sector_l2_top500_v1.yaml" />
+            </label>
+            <label>
+              <span>账户编号</span>
+              <input id="tplAccountId" type="text" />
+            </label>
+            <label>
+              <span>账户名称</span>
+              <input id="tplAccountName" type="text" />
+            </label>
+            <label>
+              <span>初始资金</span>
+              <input id="tplInitialCash" type="number" min="1" step="1000" />
+            </label>
+            <label class="field-wide">
+              <span>处理后数据目录</span>
+              <input id="tplProcessedDir" type="text" />
+            </label>
+            <label>
+              <span>买入排名数量</span>
+              <input id="tplTopN" type="number" min="1" max="500" step="1" />
+            </label>
+            <label>
+              <span>买入偏移</span>
+              <input id="tplEntryOffset" type="number" min="1" max="5" step="1" />
+            </label>
+            <label>
+              <span>最短持有天数</span>
+              <input id="tplMinHoldDays" type="number" min="0" max="60" step="1" />
+            </label>
+            <label>
+              <span>最大持有天数</span>
+              <input id="tplMaxHoldDays" type="number" min="0" max="120" step="1" />
+            </label>
+            <label>
+              <span>买入方式</span>
+              <input id="tplBuyQuantityMode" type="text" value="固定股数" />
+            </label>
+            <label>
+              <span>基础股数</span>
+              <input id="tplBuyShares" type="number" min="1" step="100" />
+            </label>
+            <label>
+              <span>每手股数</span>
+              <input id="tplBuyLotSize" type="number" min="1" step="100" />
+            </label>
+            <label>
+              <span>最低买入金额</span>
+              <input id="tplMinBuyAmount" type="number" min="0" step="100" />
+            </label>
+            <label>
+              <span>最低收盘价</span>
+              <input id="tplBuyMinClose" type="number" min="0" step="0.01" />
+            </label>
+            <label>
+              <span>最高收盘价</span>
+              <input id="tplBuyMaxClose" type="number" min="0" step="0.01" />
+            </label>
+            <label>
+              <span>首选行情源</span>
+              <input id="tplPricePrimary" type="text" />
+            </label>
+            <label>
+              <span>备用行情源</span>
+              <input id="tplPriceFallback" type="text" />
+            </label>
+            <label>
+              <span>价格字段</span>
+              <select id="tplPriceField">
+                <option value="开盘价">开盘价</option>
+                <option value="收盘价">收盘价</option>
+              </select>
+            </label>
+            <label>
+              <span>买入费率</span>
+              <input id="tplBuyFeeRate" type="number" min="0" step="0.00001" />
+            </label>
+            <label>
+              <span>卖出费率</span>
+              <input id="tplSellFeeRate" type="number" min="0" step="0.00001" />
+            </label>
+            <label>
+              <span>印花税</span>
+              <input id="tplStampTaxSell" type="number" min="0" step="0.0001" />
+            </label>
+            <label>
+              <span>滑点 bps</span>
+              <input id="tplSlippageBps" type="number" min="0" step="0.1" />
+            </label>
+            <label>
+              <span>最低佣金</span>
+              <input id="tplMinCommission" type="number" min="0" step="0.01" />
+            </label>
+            <label class="field-wide">
+              <span>账本路径</span>
+              <input id="tplLedgerPath" type="text" />
+            </label>
+            <label>
+              <span>日志目录</span>
+              <input id="tplLogDir" type="text" />
+            </label>
+            <label class="field-expression">
+              <span>买入条件</span>
+              <textarea id="tplBuyCondition"></textarea>
+            </label>
+            <label class="field-expression">
+              <span>卖出条件</span>
+              <textarea id="tplSellCondition"></textarea>
+            </label>
+            <label class="field-expression">
+              <span>评分表达式</span>
+              <textarea id="tplScoreExpression"></textarea>
+            </label>
+            <label class="check-field">
+              <input id="tplSkipIfHolding" type="checkbox" />
+              <span>持仓时不重复买入</span>
+            </label>
+            <label class="check-field">
+              <input id="tplSkipIfPendingOrder" type="checkbox" />
+              <span>有待成交订单时不重复买入</span>
+            </label>
+            <label class="check-field">
+              <input id="tplStrictExecution" type="checkbox" />
+              <span>严格成交</span>
+            </label>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/paper_templates.js"></script>
+  </body>
+</html>

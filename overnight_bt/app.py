@@ -62,6 +62,11 @@ def paper_trading_page() -> str:
     return (STATIC_DIR / "paper.html").read_text(encoding="utf-8")
 
 
+@app.get("/paper/templates", response_class=HTMLResponse)
+def paper_template_manager_page() -> str:
+    return (STATIC_DIR / "paper_templates.html").read_text(encoding="utf-8")
+
+
 @app.get("/sector", response_class=HTMLResponse)
 def sector_research_page() -> str:
     return (STATIC_DIR / "sector.html").read_text(encoding="utf-8")

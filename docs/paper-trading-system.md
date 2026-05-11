@@ -15,6 +15,7 @@
 | 类型 | 路径 |
 | --- | --- |
 | 页面入口 | `/paper` |
+| 模板管理页面 | `/paper/templates` |
 | 模板目录 | `configs/paper_accounts/` |
 | 默认模板 | `configs/paper_accounts/momentum_top5_v1.yaml` |
 | 账本目录 | `paper_trading/accounts/` |
@@ -25,7 +26,7 @@
 
 打开 `/paper` 时，页面会自动读取所选模板对应的 Excel 账本，并展示待执行订单、成交流水、当前持仓、每日资产和运行日志。如果需要手动刷新，可以点击“读取账本”。该动作是只读操作，不会生成订单或执行成交；读取成功后页面会自动切到“运行日志”页签，并在摘要区展示最后一条日志。
 
-页面还提供“模板管理”编辑区，可以载入当前 YAML、新建模板、覆盖保存当前模板、另存为新模板和删除模板。模板编辑只写 `configs/paper_accounts/` 下的 YAML 文件，不直接修改 Excel 账本；删除模板也只删除 YAML，账本保留不动。保存时后端会检查模板文件名、账户编号、账户名称和账本路径冲突，新模板或另存为不能复用已经存在的账本文件，避免旧历史记录和新策略设置混在一起。
+模板编辑已经独立到 `/paper/templates` 页面。`/paper` 只保留模板选择、账本读取、订单生成、成交执行和持仓估值，避免交易页和模板字段编辑混在一起。模板管理页仍然支持载入当前 YAML、新建模板、覆盖保存当前模板、另存为新模板和删除模板。模板编辑只写 `configs/paper_accounts/` 下的 YAML 文件，不直接修改 Excel 账本；删除模板也只删除 YAML，账本保留不动。保存时后端会检查模板文件名、账户编号、账户名称和账本路径冲突，新模板或另存为不能复用已经存在的账本文件，避免旧历史记录和新策略设置混在一起。
 
 ## 3. 中文 YAML 模板
 
@@ -78,7 +79,7 @@
 
 ### 前端模板编辑
 
-`/paper` 的模板管理区把 YAML 字段展开成表单：
+`/paper/templates` 会先显示模板目录、模板下拉框和模板路径。选择下拉框中的模板后，页面会自动载入当前 YAML 内容，再把字段展开成表单：
 
 - 基础信息：模板文件名、账户编号、账户名称、初始资金、处理后数据目录。
 - 策略条件：买入条件、卖出条件、评分表达式、买入排名数量、买入偏移、最短/最大持有天数。
@@ -89,7 +90,7 @@
 
 保存与删除规则：
 
-- `保存模板`：覆盖当前 `模板路径` 指向的 YAML，后端要求 `config_path` 与目标文件一致。
+- `保存模板`：覆盖当前 `模板路径` 指向的 YAML；如果当前是“新建模板”状态、没有 `config_path`，前端会自动按“另存为新模板”处理。
 - `另存为新模板`：创建新的 YAML，后端拒绝已有模板文件名、已有账户编号、已有账户名称、已有账本路径。
 - 新模板的账本路径如果文件已经存在，也会拒绝保存；这是为了防止新策略接着旧账本运行。
 - `删除模板`：只删除 YAML 文件，不删除 `paper_trading/accounts/*.xlsx` 账本。需要清理账本时应单独人工确认。
@@ -250,7 +251,7 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - 旧的 `/` 组合回测不变。
 - 旧的 `/daily` 每日收盘选股不变。
 - 旧的 `/single` 单股回测不变。
-- 新系统只新增 `/paper`、`/api/paper/templates`、`/api/paper/run`、`overnight_bt/paper_trading.py` 和 `scripts/run_paper_trading.py`。
+- 新系统新增 `/paper`、`/paper/templates`、`/api/paper/templates`、`/api/paper/template`、`/api/paper/ledger`、`/api/paper/run`、`overnight_bt/paper_trading.py` 和 `scripts/run_paper_trading.py`。
 - 新系统复用已有条件表达式、评分表达式和处理后数据读取能力，避免重复实现指标逻辑。
 
 ## 9. 当前本地测试结果

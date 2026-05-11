@@ -861,6 +861,229 @@ td {
   min-width: 860px;
 }
 
+.paper-template-page {
+  --shadow: 0 10px 24px rgba(33, 24, 17, 0.06);
+  font-size: 14px;
+}
+
+.paper-template-page .shell {
+  max-width: 1260px;
+  gap: 12px;
+  padding: 14px;
+  overflow-x: hidden;
+}
+
+.paper-template-page .controls,
+.paper-template-page .summary-strip,
+.paper-template-page .panel {
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.paper-template-page .compact-controls {
+  padding: 12px 14px;
+}
+
+.paper-template-page .compact-controls .brand-block {
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 9px;
+}
+
+.paper-template-page .compact-controls .brand-block h1 {
+  font-size: clamp(1.25rem, 1.8vw, 1.55rem);
+}
+
+.paper-template-page .brand-actions {
+  max-width: 620px;
+}
+
+.paper-template-page .subtle,
+.paper-template-page .panel-note,
+.paper-template-page .status {
+  font-size: 0.78rem;
+  line-height: 1.38;
+}
+
+.paper-template-page .eyebrow {
+  margin-bottom: 4px;
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
+}
+
+.paper-template-page .compact-form {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.paper-template-page .compact-form > .field-wide {
+  grid-column: span 4;
+}
+
+.paper-template-page .compact-form > .field-dates {
+  grid-column: span 4;
+}
+
+.paper-template-page .compact-form > .actions {
+  grid-column: span 4;
+}
+
+.paper-template-page .compact-form > .status {
+  grid-column: 1 / -1;
+}
+
+.paper-template-page .compact-form label {
+  gap: 4px;
+  font-size: 0.76rem;
+}
+
+.paper-template-page .compact-form input,
+.paper-template-page .compact-form select {
+  min-height: 32px;
+  border-radius: 10px;
+  padding: 6px 9px;
+  font-size: 0.82rem;
+}
+
+.paper-template-page .actions,
+.paper-template-page .summary-grid {
+  gap: 8px;
+}
+
+.paper-template-page .template-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  margin-top: 0;
+}
+
+.paper-template-page button,
+.paper-template-page .button-link {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 0.8rem;
+}
+
+.paper-template-page #saveTemplateBtn {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(172, 79, 42, 0.16);
+}
+
+.paper-template-page .danger {
+  border: 1px solid rgba(138, 47, 19, 0.28);
+  background: rgba(138, 47, 19, 0.1);
+  color: #8a2f13;
+}
+
+.paper-template-page .workspace {
+  gap: 12px;
+  min-width: 0;
+}
+
+.paper-template-page .summary-strip {
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+  padding: 13px 15px;
+}
+
+.paper-template-page .summary-intro h2,
+.paper-template-page .panel-head h3 {
+  font-size: 1.02rem;
+}
+
+.paper-template-page .summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.paper-template-page .metric {
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.paper-template-page .metric:nth-last-child(-n + 3) {
+  border-bottom: none;
+}
+
+.paper-template-page .metric-label {
+  margin-bottom: 3px;
+  font-size: 0.68rem;
+}
+
+.paper-template-page .metric-value {
+  overflow: hidden;
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-template-page .compact-panel {
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.paper-template-page .panel-head {
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.paper-template-page .template-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.paper-template-page .template-editor-grid label {
+  grid-column: span 3;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.74rem;
+}
+
+.paper-template-page .template-editor-grid .field-wide {
+  grid-column: span 6;
+}
+
+.paper-template-page .template-editor-grid .field-expression {
+  grid-column: span 4;
+}
+
+.paper-template-page .template-editor-grid input,
+.paper-template-page .template-editor-grid textarea,
+.paper-template-page .template-editor-grid select {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.paper-template-page .template-editor-grid textarea {
+  min-height: 82px;
+  max-height: 140px;
+}
+
+.paper-template-page .template-editor-grid .check-field {
+  display: flex;
+  grid-column: span 4;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.paper-template-page .template-editor-grid .check-field input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .sector-page {
   --shadow: 0 12px 26px rgba(33, 24, 17, 0.07);
   font-size: 14px;
@@ -1233,6 +1456,28 @@ tr:last-child td {
   .paper-page .compact-form > .status {
     grid-column: 1 / -1;
   }
+
+  .paper-template-page .summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-template-page .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .paper-template-page .compact-form > .field-wide,
+  .paper-template-page .compact-form > .field-dates,
+  .paper-template-page .compact-form > .actions,
+  .paper-template-page .compact-form > .status {
+    grid-column: 1 / -1;
+  }
+
+  .paper-template-page .template-editor-grid label,
+  .paper-template-page .template-editor-grid .field-wide,
+  .paper-template-page .template-editor-grid .field-expression,
+  .paper-template-page .template-editor-grid .check-field {
+    grid-column: span 6;
+  }
 }
 
 @media (min-width: 1121px) {
@@ -1327,5 +1572,37 @@ tr:last-child td {
   .paper-page .compact-panel .table-wrap,
   .paper-page .tab-panel .table-wrap {
     height: 300px;
+  }
+
+  .paper-template-page .shell {
+    padding: 10px;
+  }
+
+  .paper-template-page .compact-controls .brand-block {
+    display: grid;
+    align-items: start;
+  }
+
+  .paper-template-page .brand-actions {
+    text-align: left;
+  }
+
+  .paper-template-page .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-template-page .template-page-actions {
+    justify-content: stretch;
+  }
+
+  .paper-template-page .template-page-actions button {
+    flex: 1 1 100%;
+  }
+
+  .paper-template-page .template-editor-grid label,
+  .paper-template-page .template-editor-grid .field-wide,
+  .paper-template-page .template-editor-grid .field-expression,
+  .paper-template-page .template-editor-grid .check-field {
+    grid-column: 1 / -1;
   }
 }

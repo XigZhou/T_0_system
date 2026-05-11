@@ -13,7 +13,9 @@ from overnight_bt.app import (
     export_backtest_api,
     paper_template_api,
     paper_template_delete_api,
+    paper_template_manager_page,
     paper_template_save_api,
+    paper_trading_page,
     run_backtest_api,
     run_signal_quality_api,
     run_single_stock_api,
@@ -30,6 +32,13 @@ from tests.helpers import make_processed_stock, write_processed_dir
 
 
 class ApiIntegrationTest(unittest.TestCase):
+    def test_paper_pages_render_expected_entry_points(self) -> None:
+        paper_html = paper_trading_page()
+        template_html = paper_template_manager_page()
+        self.assertIn("/paper/templates", paper_html)
+        self.assertIn("/static/paper_templates.js", template_html)
+        self.assertIn("账户模板管理", template_html)
+
     def test_paper_template_api_save_read_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
