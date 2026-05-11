@@ -83,6 +83,16 @@ const MONEY_FIELDS = new Set([
   "total_equity",
 ]);
 const PRICE_FIELDS = new Set(["信号收盘价", "成交价格", "买入价格", "当前价格"]);
+const DATE_FIELDS = new Set([
+  "信号日期",
+  "交易日期",
+  "买入日期",
+  "最后估值日期",
+  "计划执行日期",
+  "日期",
+  "signal_date",
+  "trade_date",
+]);
 const INTEGER_FIELDS = new Set([
   "planned_buy_count",
   "planned_sell_count",
@@ -184,9 +194,23 @@ function toFiniteNumber(value) {
   return null;
 }
 
+function isDateTextField(fieldName = "", value = null) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const text = value.trim();
+  if (!/^\d{8}$/.test(text)) {
+    return false;
+  }
+  return DATE_FIELDS.has(fieldName) || fieldName.endsWith("_date") || fieldName.includes("日期");
+}
+
 function formatValue(value, fieldName = "") {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
+  }
+  if (isDateTextField(fieldName, value)) {
+    return String(value).trim();
   }
   const num = toFiniteNumber(value);
   if (num !== null) {
