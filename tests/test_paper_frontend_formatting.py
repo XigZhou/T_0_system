@@ -89,6 +89,128 @@ for (const [actual, expected] of checks) {
             self.skipTest(f"node is not executable: {exc}")
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
+    def test_paper_template_copy_creates_new_draft(self) -> None:
+        if shutil.which("node") is None:
+            self.skipTest("node is not available")
+        repo_root = Path(__file__).resolve().parents[1]
+        script = """
+const fs = require("fs");
+const vm = require("vm");
+const code = fs.readFileSync("static/paper_templates.js", "utf8");
+const noop = () => {};
+const elements = new Map();
+const handlers = new Map();
+const checkboxIds = new Set(["tplSkipIfHolding", "tplSkipIfPendingOrder", "tplStrictExecution"]);
+function element(id) {
+  if (!elements.has(id)) {
+    const options = [];
+    elements.set(id, {
+      id,
+      type: checkboxIds.has(id) ? "checkbox" : "text",
+      textContent: "",
+      style: {},
+      value: "",
+      checked: false,
+      disabled: false,
+      href: "",
+      options,
+      innerHTML: "",
+      appendChild: (child) => {
+        options.push(child);
+        return child;
+      },
+      addEventListener: (eventName, handler) => {
+        handlers.set(`${id}:${eventName}`, handler);
+      },
+    });
+  }
+  return elements.get(id);
+}
+const context = {
+  document: { getElementById: element },
+  window: {
+    location: { pathname: "/paper/templates", search: "" },
+    history: { replaceState: noop },
+  },
+  Option: function Option(label, value) {
+    return { label, value, dataset: {} };
+  },
+  fetch: () => new Promise(() => {}),
+  URLSearchParams,
+  Intl,
+  Date,
+  Number,
+  String,
+  Boolean,
+  Math,
+  RegExp,
+  console,
+};
+vm.createContext(context);
+vm.runInContext(code, context);
+context.populateTemplateEditor({
+  file_name: "sector_l2_top500_v1.yaml",
+  account_id: "sector_l2_top500_v1",
+  account_name: "L2 Top500 模拟账户",
+  initial_cash: 100000,
+  processed_dir: "data_bundle/theme_tradeable_top500_4y/processed_qfq",
+  buy_condition: "m20>0",
+  sell_condition: "",
+  score_expression: "m20",
+  top_n: 5,
+  entry_offset: 1,
+  min_hold_days: 0,
+  max_hold_days: 15,
+  buy_quantity_mode: "固定股数",
+  buy_shares: 200,
+  buy_lot_size: 100,
+  min_buy_amount: 10000,
+  buy_min_close: 0,
+  buy_max_close: 150,
+  price_primary: "东方财富",
+  price_fallback: "腾讯股票",
+  price_field: "开盘价",
+  buy_fee_rate: 0.00003,
+  sell_fee_rate: 0.00003,
+  stamp_tax_sell: 0,
+  slippage_bps: 3,
+  min_commission: 0,
+  ledger_path: "paper_trading/accounts/sector_l2_top500_v1.xlsx",
+  log_dir: "paper_trading/logs",
+  skip_if_holding: true,
+  skip_if_pending_order: true,
+  strict_execution: true,
+});
+element("configPath").value = "configs/paper_accounts/sector_l2_top500_v1.yaml";
+handlers.get("copyTemplateBtn:click")();
+const copiedFile = element("tplFileName").value;
+const copiedAccount = element("tplAccountId").value;
+const copiedLedger = element("tplLedgerPath").value;
+const checks = [
+  [element("configPath").value, ""],
+  [copiedFile.startsWith("sector_l2_top500_v1_"), true],
+  [copiedFile.endsWith("_copy.yaml"), true],
+  [copiedAccount.startsWith("sector_l2_top500_v1_"), true],
+  [copiedLedger.startsWith("paper_trading/accounts/sector_l2_top500_v1_"), true],
+  [copiedLedger.endsWith("_copy.xlsx"), true],
+  [element("tplAccountName").value.startsWith("L2 Top500 模拟账户_副本_"), true],
+  [element("templateStatus").textContent.includes("已复制当前模板为新草稿"), true],
+];
+for (const [actual, expected] of checks) {
+  if (actual !== expected) {
+    throw new Error(`${actual} !== ${expected}`);
+  }
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

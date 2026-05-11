@@ -4,6 +4,7 @@ const configPathInput = document.getElementById("configPath");
 const reloadTemplatesBtn = document.getElementById("reloadTemplatesBtn");
 const loadTemplateBtn = document.getElementById("loadTemplateBtn");
 const newTemplateBtn = document.getElementById("newTemplateBtn");
+const copyTemplateBtn = document.getElementById("copyTemplateBtn");
 const saveTemplateBtn = document.getElementById("saveTemplateBtn");
 const saveAsTemplateBtn = document.getElementById("saveAsTemplateBtn");
 const deleteTemplateBtn = document.getElementById("deleteTemplateBtn");
@@ -91,6 +92,39 @@ function chinaDateStamp(date = new Date()) {
   return local.toISOString().slice(0, 10).replaceAll("-", "");
 }
 
+function chinaDateTimeStamp(date = new Date()) {
+  if (typeof Intl !== "undefined" && typeof Intl.DateTimeFormat === "function") {
+    const formatter = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const value = (type) => parts.find((part) => part.type === type)?.value || "";
+    const stamp = `${value("year")}${value("month")}${value("day")}${value("hour")}${value("minute")}${value("second")}`;
+    if (/^\d{14}$/.test(stamp)) {
+      return stamp;
+    }
+  }
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(0, 19).replaceAll("-", "").replaceAll(":", "").replace("T", "");
+}
+
+function sanitizeTemplatePart(value, fallback = "template") {
+  const text = String(value || fallback)
+    .trim()
+    .replace(/\.(ya?ml)$/i, "")
+    .replace(/[\\/:*?"<>|\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return text || fallback;
+}
+
 function defaultTemplateValues() {
   const suffix = chinaDateStamp();
   return {
@@ -125,6 +159,23 @@ function defaultTemplateValues() {
     skip_if_holding: true,
     skip_if_pending_order: true,
     strict_execution: true,
+    ledger_exists: false,
+  };
+}
+
+function buildCopiedTemplateValues(source = {}) {
+  const stamp = chinaDateTimeStamp();
+  const suffix = `${stamp}_copy`;
+  const baseAccountId = sanitizeTemplatePart(source.account_id || source.file_name || "paper_account", "paper_account");
+  const baseFileName = sanitizeTemplatePart(source.file_name || baseAccountId, baseAccountId);
+  const nextAccountId = `${baseAccountId}_${suffix}`;
+  const sourceName = String(source.account_name || source.account_id || "模拟账户").trim();
+  return {
+    ...source,
+    file_name: `${baseFileName}_${suffix}.yaml`,
+    account_id: nextAccountId,
+    account_name: `${sourceName}_副本_${stamp}`,
+    ledger_path: `paper_trading/accounts/${nextAccountId}.xlsx`,
     ledger_exists: false,
   };
 }
@@ -218,7 +269,7 @@ function collectTemplatePayload(overwriteExisting) {
 }
 
 function setTemplateButtonsDisabled(disabled) {
-  [reloadTemplatesBtn, loadTemplateBtn, newTemplateBtn, saveTemplateBtn, saveAsTemplateBtn, deleteTemplateBtn].forEach((button) => {
+  [reloadTemplatesBtn, loadTemplateBtn, newTemplateBtn, copyTemplateBtn, saveTemplateBtn, saveAsTemplateBtn, deleteTemplateBtn].forEach((button) => {
     button.disabled = disabled;
   });
 }
@@ -369,6 +420,15 @@ newTemplateBtn.addEventListener("click", () => {
   populateTemplateEditor();
   syncNavigationState();
   setTemplateStatus("已初始化新模板。保存前请确认账户编号、文件名和账本路径不会与旧模板冲突。");
+});
+
+copyTemplateBtn.addEventListener("click", () => {
+  const source = collectTemplatePayload(Boolean(configPathInput.value.trim()));
+  templateSelect.value = "";
+  configPathInput.value = "";
+  populateTemplateEditor(buildCopiedTemplateValues(source));
+  syncNavigationState();
+  setTemplateStatus("已复制当前模板为新草稿。可以小改配置后点击保存模板；保存前不会写入 YAML，也不会修改 Excel 账本。");
 });
 
 saveTemplateBtn.addEventListener("click", () => saveTemplate(true));
