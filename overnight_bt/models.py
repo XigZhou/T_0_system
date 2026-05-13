@@ -182,6 +182,24 @@ class PaperTradingRunResponse(BaseModel):
     diagnostics: dict
 
 
+class StockPoolTemplateResponse(BaseModel):
+    templates: list[dict]
+
+
+class StockPoolTemplateSaveRequest(BaseModel):
+    username: str = Field("505888", description="模板所属用户；未接入登录前默认 505888")
+    original_template_name: str = Field("", description="当前模板名称；覆盖或改名保存时使用")
+    template_name: str = Field(..., min_length=1, description="股票池模板名称")
+    description: str = ""
+    is_active: bool = True
+    stock_text: str = Field(..., min_length=1, description="用户手工输入的股票代码列表")
+    overwrite_existing: bool = False
+
+
+class StockPoolValidateRequest(BaseModel):
+    stock_text: str = Field("", description="用户手工输入的股票代码列表")
+
+
 class SingleStockBacktestRequest(BaseModel):
     processed_dir: str = Field("", description="Processed data directory shared with portfolio backtest")
     symbol: str = Field("", description="Stock code or stock name in processed_dir")

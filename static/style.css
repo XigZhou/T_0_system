@@ -971,6 +971,12 @@ td {
   box-shadow: 0 8px 16px rgba(172, 79, 42, 0.16);
 }
 
+.paper-template-page #savePoolBtn {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(172, 79, 42, 0.16);
+}
+
 .paper-template-page .danger {
   border: 1px solid rgba(138, 47, 19, 0.28);
   background: rgba(138, 47, 19, 0.1);
@@ -1082,6 +1088,79 @@ td {
   min-height: auto;
   margin: 0;
   accent-color: var(--accent);
+}
+
+.stock-pool-page .stock-pool-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.stock-pool-page .stock-pool-editor-grid label {
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.74rem;
+}
+
+.stock-pool-page .stock-pool-editor-grid .field-wide {
+  grid-column: span 2;
+}
+
+.stock-pool-page .stock-pool-editor-grid .field-expression {
+  grid-column: 1 / -1;
+}
+
+.stock-pool-page .stock-pool-editor-grid input,
+.stock-pool-page .stock-pool-editor-grid textarea {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.stock-pool-page .stock-pool-editor-grid textarea {
+  min-height: 180px;
+  max-height: 320px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  line-height: 1.45;
+}
+
+.stock-pool-page .stock-pool-editor-grid .check-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.stock-pool-page .stock-pool-editor-grid .check-field input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.stock-pool-page .stock-pool-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.stock-pool-page .stock-pool-inline-actions button {
+  flex: 0 1 auto;
+}
+
+.stock-pool-page .stock-pool-table-wrap {
+  height: min(42vh, 380px);
+}
+
+.stock-pool-page table {
+  min-width: 720px;
 }
 
 .sector-page {
@@ -1475,7 +1554,11 @@ tr:last-child td {
   .paper-template-page .template-editor-grid label,
   .paper-template-page .template-editor-grid .field-wide,
   .paper-template-page .template-editor-grid .field-expression,
-  .paper-template-page .template-editor-grid .check-field {
+  .paper-template-page .template-editor-grid .check-field,
+  .stock-pool-page .stock-pool-editor-grid label,
+  .stock-pool-page .stock-pool-editor-grid .field-wide,
+  .stock-pool-page .stock-pool-editor-grid .field-expression,
+  .stock-pool-page .stock-pool-editor-grid .check-field {
     grid-column: auto;
   }
 }
@@ -1602,7 +1685,11 @@ tr:last-child td {
   .paper-template-page .template-editor-grid label,
   .paper-template-page .template-editor-grid .field-wide,
   .paper-template-page .template-editor-grid .field-expression,
-  .paper-template-page .template-editor-grid .check-field {
+  .paper-template-page .template-editor-grid .check-field,
+  .stock-pool-page .stock-pool-editor-grid label,
+  .stock-pool-page .stock-pool-editor-grid .field-wide,
+  .stock-pool-page .stock-pool-editor-grid .field-expression,
+  .stock-pool-page .stock-pool-editor-grid .check-field {
     grid-column: 1 / -1;
   }
 }

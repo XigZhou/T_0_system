@@ -22,6 +22,7 @@ tmp_smoke_processed/
 paper_trading/
 logs/
 *.log
+data_store/
 
 # Large local data and generated research outputs
 data_bundle/

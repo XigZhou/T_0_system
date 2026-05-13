@@ -211,6 +211,101 @@ for (const [actual, expected] of checks) {
         )
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
+    def test_stock_pool_js_copy_and_validation_preview(self) -> None:
+        if shutil.which("node") is None:
+            self.skipTest("node is not available")
+        repo_root = Path(__file__).resolve().parents[1]
+        script = """
+const fs = require("fs");
+const vm = require("vm");
+const code = fs.readFileSync("static/stock_pools.js", "utf8");
+const elements = new Map();
+const handlers = new Map();
+function element(id) {
+  if (!elements.has(id)) {
+    const options = [];
+    elements.set(id, {
+      id,
+      type: id === "poolIsActive" ? "checkbox" : "text",
+      textContent: "",
+      style: {},
+      value: id === "poolUsername" ? "505888" : "",
+      checked: false,
+      disabled: false,
+      options,
+      innerHTML: "",
+      appendChild: (child) => {
+        options.push(child);
+        return child;
+      },
+      addEventListener: (eventName, handler) => {
+        handlers.set(`${id}:${eventName}`, handler);
+      },
+    });
+  }
+  return elements.get(id);
+}
+const responses = [];
+const context = {
+  document: { getElementById: element },
+  window: { confirm: () => true },
+  Option: function Option(label, value) {
+    return { label, value, dataset: {} };
+  },
+  fetch: (url) => {
+    responses.push(url);
+    return new Promise(() => {});
+  },
+  URLSearchParams,
+  Intl,
+  Date,
+  Number,
+  String,
+  Boolean,
+  Math,
+  console,
+};
+vm.createContext(context);
+vm.runInContext(code, context);
+context.populatePoolEditor({
+  username: "505888",
+  template_name: "L2_中等市值主题股层",
+  original_template_name: "L2_中等市值主题股层",
+  description: "测试模板",
+  is_active: true,
+  stock_count: 2,
+  stock_text: "300750\\n600941",
+  stocks: [
+    { symbol: "300750", ts_code: "300750.SZ", stock_name: "宁德时代", latest_trade_date: "" },
+    { symbol: "600941", ts_code: "600941.SH", stock_name: "中国移动", latest_trade_date: "" },
+  ],
+});
+handlers.get("copyPoolBtn:click")();
+if (!element("poolTemplateName").value.startsWith("L2_中等市值主题股层_副本_")) {
+  throw new Error("copy name not generated");
+}
+if (element("poolOriginalTemplateName").value !== "") {
+  throw new Error("copy should clear original template name");
+}
+if (!element("poolStatus").textContent.includes("已复制为新股票池草稿")) {
+  throw new Error("copy status missing");
+}
+context.renderStockRows([
+  { symbol: "300750", ts_code: "300750.SZ", stock_name: "宁德时代", latest_trade_date: "20260508" },
+]);
+if (!element("poolStockRows").innerHTML.includes("宁德时代")) {
+  throw new Error("stock rows not rendered");
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

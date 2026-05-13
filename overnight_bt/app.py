@@ -21,6 +21,9 @@ from .models import (
     SignalQualityResponse,
     SingleStockBacktestRequest,
     SingleStockBacktestResponse,
+    StockPoolTemplateResponse,
+    StockPoolTemplateSaveRequest,
+    StockPoolValidateRequest,
 )
 from .paper_trading import (
     delete_paper_account_template,
@@ -33,6 +36,16 @@ from .paper_trading import (
 from .signal_quality import run_signal_quality
 from .sector_dashboard import build_sector_dashboard_payload
 from .single_stock import run_single_stock_backtest
+from .stock_pool_templates import (
+    DEFAULT_USERNAME,
+    delete_stock_pool_template,
+    ensure_default_stock_pool_templates,
+    list_stock_pool_templates,
+    read_stock_pool_template,
+    save_stock_pool_template,
+    seed_default_stock_pool_templates,
+    validate_stock_pool_symbols,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -65,6 +78,12 @@ def paper_trading_page() -> str:
 @app.get("/paper/templates", response_class=HTMLResponse)
 def paper_template_manager_page() -> str:
     return (STATIC_DIR / "paper_templates.html").read_text(encoding="utf-8")
+
+
+@app.get("/stock-pools", response_class=HTMLResponse)
+def stock_pool_template_page() -> str:
+    ensure_default_stock_pool_templates()
+    return (STATIC_DIR / "stock_pools.html").read_text(encoding="utf-8")
 
 
 @app.get("/sector", response_class=HTMLResponse)
@@ -167,6 +186,70 @@ def paper_template_delete_api(config_path: str, config_dir: str = "configs/paper
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/stock-pools/templates", response_model=StockPoolTemplateResponse)
+def stock_pool_templates_api(username: str = DEFAULT_USERNAME):
+    try:
+        ensure_default_stock_pool_templates(username=username)
+        return {"templates": list_stock_pool_templates(username=username)}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/stock-pools/template")
+def stock_pool_template_api(template_name: str, username: str = DEFAULT_USERNAME):
+    try:
+        ensure_default_stock_pool_templates(username=username)
+        return read_stock_pool_template(template_name=template_name, username=username)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/stock-pools/template")
+def stock_pool_template_save_api(req: StockPoolTemplateSaveRequest):
+    try:
+        return save_stock_pool_template(req)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete("/api/stock-pools/template")
+def stock_pool_template_delete_api(template_name: str, username: str = DEFAULT_USERNAME):
+    try:
+        return delete_stock_pool_template(template_name=template_name, username=username)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/stock-pools/template/validate")
+def stock_pool_template_validate_api(req: StockPoolValidateRequest):
+    try:
+        return validate_stock_pool_symbols(req.stock_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/stock-pools/templates/seed")
+def stock_pool_template_seed_api(username: str = DEFAULT_USERNAME):
+    try:
+        return seed_default_stock_pool_templates(username=username)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

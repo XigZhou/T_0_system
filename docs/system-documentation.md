@@ -1370,7 +1370,81 @@ http://127.0.0.1:8083/
 
 详细说明见 `docs/paper-trading-system.md`。
 
-## 12. 单股回测模块
+## 12. 股票池模板管理模块
+
+### 功能
+
+- 提供类似账户模板管理的股票池模板页面，用于手工维护一组股票代码列表。
+- 支持新建、复制、载入、保存、删除、校验股票列表和初始化基础模板。
+- 模板按 `username + template_name` 唯一保存；当前默认用户为 `505888`。
+- 第一阶段只保存模板和股票列表到 SQLite，不抓取行情、不计算指标，也不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+
+### 入口
+
+- 页面：`/stock-pools`
+- SQLite：`data_store/stock_pool_templates.sqlite`
+- API：`GET /api/stock-pools/templates`
+- API：`GET /api/stock-pools/template`
+- API：`POST /api/stock-pools/template`
+- API：`DELETE /api/stock-pools/template`
+- API：`POST /api/stock-pools/template/validate`
+- API：`POST /api/stock-pools/templates/seed`
+
+### 页面输入项
+
+| 输入项 | 说明 |
+| --- | --- |
+| 用户 | 当前模板所属用户，默认 `505888` |
+| 选择模板 | 当前用户已有模板下拉框 |
+| 模板名称 | 同一用户下唯一 |
+| 原模板名称 | 只读字段，用于覆盖保存或改名保存 |
+| 参与后续每日更新 | 第一阶段只保存标记；第三阶段定时更新会使用 |
+| 模板说明 | 用户自定义说明 |
+| 手工股票列表 | 股票代码列表，支持换行、空格、逗号和分号分隔 |
+
+### 基础模板
+
+初始化基础模板会尽量写入以下模板：
+
+| 模板名称 | 来源 |
+| --- | --- |
+| `L0_最大市值主题股层` | `stock_pool_layer_constituents.csv` 中的 `layer=L0` |
+| `L1_偏大市值主题股层` | `stock_pool_layer_constituents.csv` 中的 `layer=L1` |
+| `L2_中等市值主题股层` | `stock_pool_layer_constituents.csv` 中的 `layer=L2` |
+| `L3_偏小市值主题股层` | `stock_pool_layer_constituents.csv` 中的 `layer=L3` |
+| `L4_最小市值主题股层` | `stock_pool_layer_constituents.csv` 中的 `layer=L4` |
+| `当前多账户模拟股票池` | `data_bundle/processed_qfq_theme_focus_top100/*.csv` |
+
+如果来源文件缺失，系统会跳过对应模板；用户仍可手工创建模板。
+
+### 输出结果
+
+| 输出 | 说明 |
+| --- | --- |
+| 模板摘要 | 展示模板名称、用户、股票数、是否启用、更新时间和数据库路径 |
+| 股票列表预览 | 展示序号、股票代码、Tushare 代码、股票名称和最新数据日期 |
+| 校验结果 | 展示有效股票数、重复项数量和格式错误项数量 |
+| SQLite 表 | `users`、`stock_pool_templates`、`stock_pool_template_stocks`、`stock_basic` 等 |
+
+### 保存和删除规则
+
+- 保存前会解析股票代码，格式错误时拒绝保存。
+- 重复股票只保留首次出现顺序。
+- 新建模板不能与当前用户已有模板重名。
+- 覆盖保存只能写回当前模板，避免误覆盖其他模板。
+- 删除模板只删除模板和模板股票关系，不删除 `stock_basic`，也不删除第二阶段可能写入的 `stock_daily_features`。
+
+### 异常处理
+
+- 模板名称为空时返回 400。
+- 股票列表为空或包含格式错误项时返回 400。
+- 读取或删除不存在的模板时返回 404。
+- SQLite 运行时数据库位于 `data_store/`，该目录已加入 `.gitignore`，不会被提交到 Git。
+- 第一阶段不会触发行情采集；如果页面“最新数据日期”为空，表示当前 SQLite 尚未写入该股票日线数据，不代表股票代码不可用。
+
+详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段方案见 `docs/stock-pool-template-system-plan.md`。
+
+## 13. 单股回测模块
 
 ### 功能
 
@@ -1455,7 +1529,7 @@ http://127.0.0.1:8083/
 
 说明：大盘指标同时放在买入和卖出条件里；买入时要求沪深300二十日动量 `hs300_m20>0.02`，卖出时当个股 `m20<0.08` 且沪深300 `hs300_m20<0.02` 才触发退出，减少弱市买入和强市中过早卖出的情况。
 
-## 13. 回测导出模块
+## 14. 回测导出模块
 
 ### 功能
 
@@ -1486,7 +1560,7 @@ http://127.0.0.1:8083/
 
 - 与回测接口相同；若回测失败则不会生成 ZIP
 
-## 14. 特征分层扫描模块
+## 15. 特征分层扫描模块
 
 ### 功能
 
@@ -1520,7 +1594,7 @@ python scripts/run_overnight_feature_scan.py --processed-dir data_bundle/process
 - 数据目录不存在时抛出 `FileNotFoundError`
 - 样本过滤后为空时抛出 `ValueError`
 
-## 15. 参数探索模块
+## 16. 参数探索模块
 
 ### 功能
 
@@ -1561,7 +1635,7 @@ python scripts/run_overnight_research.py --processed-dir data_bundle/processed_q
 - `exit_offset` 不在 `2~5` 范围时会抛出 `ValueError`
 - 预设名不存在时会抛出 `ValueError`
 
-## 16. 买入条件网格测试模块
+## 17. 买入条件网格测试模块
 
 ### 功能
 
@@ -1618,7 +1692,7 @@ python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_q
 - 输出目录不可写时会抛出文件系统异常
 - 数据目录错误时抛出 `FileNotFoundError`
 
-## 17. 卖出指标网格测试模块
+## 18. 卖出指标网格测试模块
 
 ### 功能
 
@@ -1663,7 +1737,7 @@ python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_
 - `holding_return`、`best_return_since_entry`、`drawdown_from_peak` 等字段由回测引擎在持仓期动态计算
 - `sell_grid_advanced_v2_micro` 用于围绕当前最佳浮盈回撤退出做更细的参数微调
 
-## 18. 信号中位收益优化扫描模块
+## 19. 信号中位收益优化扫描模块
 
 ### 功能
 
@@ -1706,7 +1780,7 @@ python scripts/run_signal_median_scan.py --processed-dir data_bundle/processed_q
 - 如果最佳中位收益仍小于 0，说明当前动量候选池的普通样本仍偏弱，需要继续收紧买入过滤或调整评分表达式
 - 如果中位收益转正但样本数明显下降，需要再回到实盘账户回测验证资金利用率和可执行性
 
-## 19. 交付校验模块
+## 20. 交付校验模块
 
 ### 功能
 
@@ -1733,7 +1807,7 @@ python scripts/verify_delivery.py
 
 - 若缺文件或 README 缺少关键章节，脚本返回非 0 退出码
 
-## 20. 推荐交付流程
+## 21. 推荐交付流程
 
 1. 更新或同步数据
 2. 重新构建 `processed_qfq/`

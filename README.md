@@ -17,6 +17,7 @@
 - 独立板块主题研究系统
 - 每日收盘选股与持仓卖出提醒页面
 - API 导出交易流水
+- 股票池模板管理页面
 - 特征分层扫描
 - 训练期/验证期参数探索
 
@@ -167,6 +168,44 @@ python scripts/build_theme_tradeable_universe.py \
 - `sector_research/data/processed/theme_tradeable_universe/current_top100_layer_compare.csv`
 
 说明文档见 `docs/theme-tradeable-universe-data-dictionary.md`。这个步骤只拉 Tushare 最新基础信息和最新 `daily_basic`，不拉四年日线，也不会修改当前模拟账户正在使用的 Top100、板块增强或轮动增强目录。
+
+### 4.2 股票池模板管理
+
+股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段只保存模板和股票列表，不抓取行情、不计算指标，也不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+
+页面入口：
+
+```text
+http://127.0.0.1:8083/stock-pools
+```
+
+运行时数据库：
+
+```text
+data_store/stock_pool_templates.sqlite
+```
+
+基础模板：
+
+- `L0_最大市值主题股层`
+- `L1_偏大市值主题股层`
+- `L2_中等市值主题股层`
+- `L3_偏小市值主题股层`
+- `L4_最小市值主题股层`
+- `当前多账户模拟股票池`
+
+基础模板来源分别为 `research_runs/20260509_top500_stock_pool_layer_grid_account/stock_pool_layer_constituents.csv` 和 `data_bundle/processed_qfq_theme_focus_top100/*.csv`。如果来源文件缺失，系统会跳过对应模板；用户仍可手工新建模板。
+
+常用 API：
+
+- `GET /api/stock-pools/templates?username=505888`
+- `GET /api/stock-pools/template?username=505888&template_name=模板名`
+- `POST /api/stock-pools/template`
+- `DELETE /api/stock-pools/template`
+- `POST /api/stock-pools/template/validate`
+- `POST /api/stock-pools/templates/seed?username=505888`
+
+详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
 
 ### 5. 生成行业强度指标
 
@@ -743,6 +782,7 @@ curl http://127.0.0.1:8083/health
 ### 前端页面
 
 - 入口：`/`
+- 股票池模板管理：`/stock-pools`
 - 页面布局：顶部紧凑输入区，`组合结果` 固定在结果区上方；明细结果放在页签中切换查看
 - 回测模式：
 - `信号质量回测`：默认模式，不使用初始资金、每笔目标资金和现金不足约束，但会按单股虚拟持仓去重，适合先判断条件本身是否有效
@@ -886,6 +926,24 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 脚本会先判断当天是否为 A 股交易日；非交易日自动跳过。`execute` 用于开盘后执行所有账户已有的待成交订单，`after-close` 用于在数据更新完成后更新估值并生成下一交易日订单。
 
 详细字段和账本解释见 `docs/paper-trading-system.md`。
+
+### 股票池模板管理页面
+
+- 入口：`/stock-pools`
+- 默认用户：`505888`
+- 用途：维护用户手工股票列表模板，作为后续批量回测、每日收盘选股、多账户模拟交易、单股回测和板块研究统一股票池输入的基础。
+- 当前阶段：只写入 `data_store/stock_pool_templates.sqlite`，不拉取行情、不计算指标、不改动旧模块输入。
+- 页面按钮：
+  - `刷新模板`：重新读取当前用户模板列表。
+  - `载入模板`：把下拉框选中的模板载入编辑区。
+  - `新建模板`：初始化空白模板草稿。
+  - `复制模板`：把当前模板复制成未落盘的新草稿，便于改名后保存。
+  - `保存模板`：保存模板名称、说明、启用状态和手工股票列表。
+  - `删除模板`：只删除模板和模板股票关系，不删除 SQLite 中后续可能存在的日线事实数据。
+  - `校验股票列表`：检查有效股票、重复股票和格式错误项。
+  - `初始化基础模板`：从 Top500 L0-L4 分层结果和当前多账户模拟 Top100 目录生成基础模板。
+- 手工股票列表支持 `300750`、`600941.SH` 等格式；系统保存 6 位股票代码和 Tushare 风格代码。
+- 模板名称在同一用户下唯一；保存时会检查名称冲突。
 
 ### API
 
@@ -1322,6 +1380,8 @@ python scripts/run_signal_median_scan.py --processed-dir data_bundle/processed_q
 - 板块轮动匹配稳定性结果：[sector-rotation-match-stability-result-20260505.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-stability-result-20260505.md)
 - 板块效应选股条件数据说明：[sector-effect-grid-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-data-dictionary.md)
 - 板块效应选股条件结果：[sector-effect-grid-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-result-20260504.md)
+- 股票池模板系统规划：[stock-pool-template-system-plan.md](/D:/量化/Momentum/T_0_system/docs/stock-pool-template-system-plan.md)
+- 股票池模板数据说明：[stock-pool-template-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/stock-pool-template-data-dictionary.md)
 
 ## 交付前校验
 

@@ -19,6 +19,10 @@ from overnight_bt.app import (
     run_backtest_api,
     run_signal_quality_api,
     run_single_stock_api,
+    stock_pool_template_delete_api,
+    stock_pool_template_page,
+    stock_pool_template_save_api,
+    stock_pool_template_validate_api,
 )
 from overnight_bt.models import (
     BacktestRequest,
@@ -27,6 +31,8 @@ from overnight_bt.models import (
     PaperTemplateSaveRequest,
     SignalQualityRequest,
     SingleStockBacktestRequest,
+    StockPoolTemplateSaveRequest,
+    StockPoolValidateRequest,
 )
 from tests.helpers import make_processed_stock, write_processed_dir
 
@@ -38,6 +44,29 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertIn("/paper/templates", paper_html)
         self.assertIn("/static/paper_templates.js", template_html)
         self.assertIn("账户模板管理", template_html)
+
+    def test_stock_pool_page_and_validation_api(self) -> None:
+        html = stock_pool_template_page()
+        self.assertIn("/static/stock_pools.js", html)
+        self.assertIn("股票池模板管理", html)
+
+        validation = stock_pool_template_validate_api(StockPoolValidateRequest(stock_text="300750 300750 xxx 600941"))
+        self.assertEqual(validation["valid_count"], 2)
+        self.assertEqual(validation["duplicate_symbols"], ["300750"])
+        self.assertEqual(validation["invalid_items"], ["xxx"])
+
+    def test_stock_pool_template_api_save_delete(self) -> None:
+        saved = stock_pool_template_save_api(
+            StockPoolTemplateSaveRequest(
+                username="api_test_user",
+                template_name="API股票池",
+                description="接口测试",
+                stock_text="300750\n600941",
+            )
+        )
+        self.assertEqual(saved["template"]["stock_count"], 2)
+        deleted = stock_pool_template_delete_api(template_name="API股票池", username="api_test_user")
+        self.assertIn("日线数据保留", deleted["message"])
 
     def test_paper_template_api_save_read_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

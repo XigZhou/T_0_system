@@ -1,6 +1,33 @@
 # 股票池模板系统规划设计稿
 
-本文档用于规划一个独立的股票池模板系统。当前阶段只做设计确认，不改动每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有输入方式。
+本文档用于规划一个独立的股票池模板系统。当前第一阶段已经实现“模板 + 手工股票列表 + SQLite 基础表 + 前端管理页面”，仍不改动每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有输入方式。
+
+## 0. 第一阶段实现状态
+
+截至 2026-05-13，第一阶段已完成并保留以下边界：
+
+- 已实现 SQLite 建库和基础表迁移，数据库路径为 `data_store/stock_pool_templates.sqlite`。
+- 已实现模板列表、读取、保存、删除、股票列表校验和基础模板初始化 API。
+- 已实现 `/stock-pools` 前端页面，支持新建、复制、载入、保存、删除、校验和初始化基础模板。
+- 已实现默认用户 `505888`。
+- 已实现基础模板：`L0_最大市值主题股层` 到 `L4_最小市值主题股层`，以及 `当前多账户模拟股票池`。
+- 已新增数据说明文档 `docs/stock-pool-template-data-dictionary.md`，并更新 `README.md` 和 `docs/system-documentation.md`。
+- 第一阶段不会抓取行情，不会计算指标，不会触发定时任务，也不会改变任何旧模块的 CSV 输入。
+
+本阶段新增或修改的核心文件：
+
+| 文件 | 说明 |
+| --- | --- |
+| `overnight_bt/stock_pool_templates.py` | SQLite 初始化、模板 CRUD、股票列表解析、基础模板初始化 |
+| `overnight_bt/app.py` | `/stock-pools` 页面和 `/api/stock-pools/*` API |
+| `overnight_bt/models.py` | 股票池模板请求与响应模型 |
+| `static/stock_pools.html` | 股票池模板管理页面 |
+| `static/stock_pools.js` | 前端交互逻辑 |
+| `static/style.css` | 股票池页面紧凑工作台样式 |
+| `tests/test_stock_pool_templates.py` | SQLite 和模板逻辑单测 |
+| `tests/test_api_integration.py` | 页面和 API 集成测试 |
+| `tests/test_paper_frontend_formatting.py` | 前端 JS 行为测试 |
+| `docs/stock-pool-template-data-dictionary.md` | 第一阶段数据说明 |
 
 ## 1. 目标与边界
 

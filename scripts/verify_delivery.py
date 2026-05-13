@@ -25,17 +25,22 @@ PROJECT_EXTRA_PATHS = (
     Path("docs/sector-rotation-diagnosis-data-dictionary.md"),
     Path("docs/sector-rotation-grid-data-dictionary.md"),
     Path("docs/stock-pool-layer-grid-data-dictionary.md"),
+    Path("docs/stock-pool-template-data-dictionary.md"),
+    Path("docs/stock-pool-template-system-plan.md"),
     Path("docs/after-close-pipeline.md"),
     Path("static/index.html"),
     Path("static/single.html"),
     Path("static/sector.html"),
+    Path("static/stock_pools.html"),
     Path("static/app.js"),
     Path("static/single.js"),
     Path("static/sector.js"),
+    Path("static/stock_pools.js"),
     Path("static/style.css"),
     Path("overnight_bt/app.py"),
     Path("overnight_bt/single_stock.py"),
     Path("overnight_bt/sector_dashboard.py"),
+    Path("overnight_bt/stock_pool_templates.py"),
     Path("scripts/run_after_close_pipeline.sh"),
 )
 PROJECT_README_PHRASES = (
@@ -49,6 +54,8 @@ PROJECT_README_PHRASES = (
     "scripts/run_sector_rotation_diagnosis.py",
     "scripts/run_sector_rotation_grid.py",
     "scripts/run_stock_pool_layer_grid.py",
+    "/stock-pools",
+    "stock_pool_templates.sqlite",
 )
 
 
