@@ -296,6 +296,12 @@ python scripts/init_stock_pool_feature_store.py --source all --start-date 202201
 # 日常更新当前 admin 活跃模板涉及股票
 python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
 
+# 日常自动更新：由收盘后统一调度第 8 步调用
+scripts/run_after_close_pipeline.sh 20260514
+
+# 股票池很多时，可在统一调度中连续跑多批并在批次之间暂停
+STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECONDS=60 scripts/run_after_close_pipeline.sh 20260514
+
 # 大批量任务分批运行，batch-index 从 0 开始
 python scripts/init_stock_pool_feature_store.py \
   --source all \
@@ -332,16 +338,32 @@ python scripts/run_stock_pool_template_update.py \
 - 日线与指标表：`stock_daily_features`，主键为 `symbol + trade_date`。
 - 任务表：`stock_pool_update_jobs`、`stock_pool_update_job_items`。
 - 运行日志：`logs/stock_pool_template_update/*_<job_id>.log`、`<job_id>_items.csv`、`<job_id>_summary.json`。
+- 统一调度日志：`logs/after_close_pipeline/YYYYMMDD.log` 和 `logs/after_close_pipeline/latest_success.txt`。
+
+统一调度开关：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `RUN_STOCK_POOL_TEMPLATE_UPDATE` | `1` | 是否在收盘后统一调度中运行股票池共享行情更新 |
+| `RUN_STOCK_POOL_UPDATE_REQUIRED` | `0` | 更新失败时是否中止后续模拟账户；当前模拟账户仍用 CSV，默认不中止 |
+| `STOCK_POOL_USERNAME` | `admin` | 当前默认用户；登录系统接入后由登录用户名替代 |
+| `STOCK_POOL_START_DATE` | `20220101` | 新股票首次补数起始日期 |
+| `STOCK_POOL_BATCH_SIZE` | 空 | 每批处理股票数，适合模板股票很多时限流 |
+| `STOCK_POOL_BATCH_COUNT` | `1` | 包装脚本连续运行的批次数，配合 `STOCK_POOL_BATCH_SIZE` 使用 |
+| `STOCK_POOL_BATCH_SLEEP_SECONDS` | `60` | 多批次模式下批次之间的暂停秒数 |
+| `STOCK_POOL_RETRY_ATTEMPTS` | `3` | 单只股票失败重试次数 |
+| `STOCK_POOL_RETRY_SLEEP_SECONDS` | `5` | 单只股票失败重试等待秒数 |
+| `STOCK_POOL_SLEEP_SECONDS` | `0.5` | 单只股票处理后的等待秒数，降低 Tushare 压力 |
 
 异常处理：
 
 - 默认只补缺失，库内已更新到截止交易日的股票不会重复采集。
-- 单只股票 Tushare 临时失败时，脚本按 `retry_attempts` 自动重试；最终失败会写入任务明细。
+- 单只股票 Tushare 临时失败时，脚本按 `retry_attempts` 自动重试；最终失败会写入任务明细，并让 `scripts/run_stock_pool_template_update.py` 返回非 0。
 - 某批中途断开时，查看 `_items.csv` 最后一只成功股票，用 `--resume-after-symbol` 继续。
 - 如果只想补失败股票，可用 `--source symbols --stock-text "300750 688981" --retry-attempts 3`。
 - 删除模板只删除模板关系，不删除 `stock_daily_features`，因为同一股票可能被多个模板复用。
 
-字段定义见 `docs/stock-pool-template-data-dictionary.md`，规划设计见 `docs/stock-pool-template-system-plan.md`。
+字段定义见 `docs/stock-pool-template-data-dictionary.md`，规划设计见 `docs/stock-pool-template-system-plan.md`，统一调度细节见 `docs/after-close-pipeline.md`。
 
 ### 板块参数网格探索
 

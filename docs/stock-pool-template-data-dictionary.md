@@ -261,13 +261,19 @@ python scripts/run_stock_pool_template_update.py \
 bash scripts/run_stock_pool_template_update.sh 20260514
 ```
 
-建议 cron 时间放在 Tushare 当日日线、涨跌停、停牌数据稳定后，例如交易日 20:30：
+正式自动任务已接入收盘后统一调度第 8 步，不建议再单独配置一个股票池 cron，避免和板块增强、模拟账户收盘任务出现日期错位。统一入口：
 
-```cron
-30 20 * * 1-5 /home/ubuntu/T_0_system/scripts/run_stock_pool_template_update.sh >> /home/ubuntu/T_0_system/logs/stock_pool_template_update/cron.log 2>&1
+```bash
+scripts/run_after_close_pipeline.sh 20260514
 ```
 
-包装脚本支持通过环境变量透传批次和重试参数：`STOCK_POOL_BATCH_SIZE`、`STOCK_POOL_BATCH_INDEX`、`STOCK_POOL_OFFSET`、`STOCK_POOL_RESUME_AFTER_SYMBOL`、`STOCK_POOL_RETRY_ATTEMPTS`、`STOCK_POOL_RETRY_SLEEP_SECONDS`、`STOCK_POOL_MAX_SYMBOLS`、`STOCK_POOL_INCLUDE_UP_TO_DATE=1`。
+如果股票池较大，可让统一调度在第 8 步连续跑多个批次，并在批次之间暂停：
+
+```bash
+STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECONDS=60 scripts/run_after_close_pipeline.sh 20260514
+```
+
+包装脚本支持通过环境变量透传批次和重试参数：`STOCK_POOL_BATCH_SIZE`、`STOCK_POOL_BATCH_INDEX`、`STOCK_POOL_BATCH_COUNT`、`STOCK_POOL_BATCH_SLEEP_SECONDS`、`STOCK_POOL_OFFSET`、`STOCK_POOL_RESUME_AFTER_SYMBOL`、`STOCK_POOL_RETRY_ATTEMPTS`、`STOCK_POOL_RETRY_SLEEP_SECONDS`、`STOCK_POOL_SLEEP_SECONDS`、`STOCK_POOL_MAX_SYMBOLS`、`STOCK_POOL_INCLUDE_UP_TO_DATE=1`。当前 CSV 模拟账户尚未依赖 SQLite，统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`；如果以后把 SQLite 作为强依赖，可设为 `1`。
 
 ### 7.4 日志和补救方式
 
@@ -309,4 +315,4 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 - 模板保存、改名、删除时实时更新 SQLite。
 - `/stock-pools` 页面和模板列表 API 会在当前用户没有模板时尝试初始化基础模板。
 - 第二阶段已提供手动刷新、初始化脚本和每日更新脚本。
-- 第三阶段会把 `scripts/run_stock_pool_template_update.sh` 接入统一收盘后调度或 crontab。
+- 第三阶段已把 `scripts/run_stock_pool_template_update.sh` 接入 `scripts/run_after_close_pipeline.sh` 统一收盘后调度。默认 `RUN_STOCK_POOL_TEMPLATE_UPDATE=1`；当前 CSV 模拟账户尚未依赖 SQLite，默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，失败只记录警告并继续模拟账户收盘任务。

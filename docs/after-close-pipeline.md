@@ -1,6 +1,6 @@
 # 收盘后统一调度任务说明
 
-本文档说明腾讯云上如何用一个定时任务统一调度股票数据、独立板块研究、板块字段合并、板块轮动字段合并和模拟账户收盘任务。
+本文档说明腾讯云上如何用一个定时任务统一调度股票数据、独立板块研究、板块字段合并、板块轮动字段合并、股票池模板共享行情更新和模拟账户收盘任务。
 
 ## 1. 目标
 
@@ -10,7 +10,7 @@
 scripts/run_after_close_pipeline.sh YYYYMMDD
 ```
 
-该脚本按固定顺序串行运行，前一步失败就停止，避免股票数据、板块数据和模拟交易订单之间出现日期不一致。
+该脚本按固定顺序串行运行，关键依赖失败就停止，避免股票数据、板块数据、股票池共享行情库和模拟交易订单之间出现日期不一致。股票池模板共享行情库当前尚未作为模拟账户的输入，默认失败只记录警告；如果要把它作为强依赖，可设置 `RUN_STOCK_POOL_UPDATE_REQUIRED=1`。
 
 ## 2. 推荐运行时间
 
@@ -29,7 +29,8 @@ scripts/run_after_close_pipeline.sh YYYYMMDD
 | 5 | `scripts/build_sector_research_features.py --overwrite` | 清理旧 CSV 后生成 `data_bundle/processed_qfq_theme_focus_top100_sector` |
 | 6 | `scripts/run_sector_rotation_diagnosis.py` | 用当天 `theme_strength_daily.csv` 生成 `research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv` |
 | 7 | `scripts/build_sector_rotation_features.py --overwrite` | 清理旧 CSV 后生成 `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` |
-| 8 | `scripts/run_paper_trading_cron.sh after-close` | 校验股票池一致后，收盘估值并生成 T+1 待执行订单 |
+| 8 | `scripts/run_stock_pool_template_update.sh` | 更新当前活跃股票池模板涉及股票的 SQLite 共享日线与指标库，默认只补缺失 |
+| 9 | `scripts/run_paper_trading_cron.sh after-close` | 校验股票池一致后，收盘估值并生成 T+1 待执行订单 |
 
 ## 4. 关键目录
 
@@ -43,6 +44,16 @@ scripts/run_after_close_pipeline.sh YYYYMMDD
 | `ROTATION_DAILY_PATH` | `research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv` | 轮动增强目录使用的日频主线状态文件 |
 | `ROTATION_OUTPUT_DIR` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | 合并板块轮动字段后的增强目录 |
 | `BUILD_ROTATION_FEATURES` | `1` | 是否在统一调度中生成轮动诊断和轮动增强目录 |
+| `RUN_STOCK_POOL_TEMPLATE_UPDATE` | `1` | 是否在统一调度中更新股票池模板共享行情库 |
+| `RUN_STOCK_POOL_UPDATE_REQUIRED` | `0` | 股票池共享行情更新失败时是否中止后续模拟账户；当前 CSV 模拟账户尚未依赖 SQLite，默认不中止 |
+| `STOCK_POOL_USERNAME` | `admin` | 股票池模板默认用户名；登录系统接入前固定为 `admin` |
+| `STOCK_POOL_START_DATE` | `20220101` | 股票池共享行情库补数起始日期 |
+| `STOCK_POOL_BATCH_SIZE` | 空 | 每批处理股票数；空表示不切批，传给 `run_stock_pool_template_update.sh` |
+| `STOCK_POOL_BATCH_COUNT` | `1` | 在统一调度中连续运行的批次数，配合 `STOCK_POOL_BATCH_SIZE` 使用 |
+| `STOCK_POOL_BATCH_SLEEP_SECONDS` | `60` | 多批次模式下批次之间的暂停秒数 |
+| `STOCK_POOL_RETRY_ATTEMPTS` | `3` | 单只股票失败重试次数，传给股票池更新脚本 |
+| `STOCK_POOL_RETRY_SLEEP_SECONDS` | `5` | 单只股票失败后的基础等待秒数 |
+| `STOCK_POOL_SLEEP_SECONDS` | `0.5` | 单只股票成功处理后的等待秒数，用于降低 Tushare 调用压力 |
 | `PAPER_CONFIG_DIR` | `configs/paper_accounts` | 模拟账户 YAML 模板目录 |
 
 运行产物和日志位于：
@@ -50,7 +61,9 @@ scripts/run_after_close_pipeline.sh YYYYMMDD
 ```text
 logs/after_close_pipeline/
 logs/top100_daily_update/
+logs/stock_pool_template_update/
 logs/paper_trading_cron/
+data_store/stock_pool_templates.sqlite
 sector_research/data/
 sector_research/reports/
 data_bundle/processed_qfq_theme_focus_top100_sector/
@@ -80,6 +93,24 @@ scripts/run_after_close_pipeline.sh --check-only 20260430
 
 ```bash
 RUN_PAPER_AFTER_CLOSE=0 scripts/run_after_close_pipeline.sh 20260430
+```
+
+跳过股票池模板共享行情更新：
+
+```bash
+RUN_STOCK_POOL_TEMPLATE_UPDATE=0 scripts/run_after_close_pipeline.sh 20260430
+```
+
+把股票池模板共享行情更新设为强依赖，失败即中止：
+
+```bash
+RUN_STOCK_POOL_UPDATE_REQUIRED=1 scripts/run_after_close_pipeline.sh 20260430
+```
+
+模板股票很多时，在统一调度中连续跑多批并在批次之间暂停：
+
+```bash
+STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECONDS=60 scripts/run_after_close_pipeline.sh 20260430
 ```
 
 只重建板块增强目录、不生成轮动增强目录：
@@ -116,11 +147,14 @@ crontab -e
 - 如果 AKShare 板块数据没有更新到任务日期，脚本停止，不生成订单。
 - 如果板块增强目录缺少 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`，脚本停止。
 - 如果轮动增强目录缺少 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_matches_rotation_top_cluster`，脚本停止。
+- 如果股票池模板共享行情更新失败，默认写入 `logs/stock_pool_template_update/` 和 `stock_pool_update_jobs` 后继续运行模拟账户；设置 `RUN_STOCK_POOL_UPDATE_REQUIRED=1` 后会中止。
 - 如果 `data_bundle/processed_qfq_theme_focus_top100`、`data_bundle/processed_qfq_theme_focus_top100_sector`、`data_bundle/processed_qfq_theme_focus_top100_sector_rotation` 的股票代码集合不一致，脚本停止，不运行模拟账户。
-- 每次成功会写入 `logs/after_close_pipeline/latest_success.txt`。
+- 每次成功会写入 `logs/after_close_pipeline/latest_success.txt`，其中包含股票池更新开关、默认用户名和补数起始日期。
 
 ## 8. 与模拟账户的关系
 
 当前统一调度会生成两层增强目录：`data_bundle/processed_qfq_theme_focus_top100_sector` 和 `data_bundle/processed_qfq_theme_focus_top100_sector_rotation`。三套目录必须来自同一批 Top100 股票池：基础目录只含股票日线和行业字段，板块增强目录增加 `sector_*` 字段，轮动增强目录再增加 `rotation_*` 和 `stock_matches_rotation_*` 字段。
 
 模拟账户模板可以分别引用这三套目录做对照。这样账户之间的差异来自买入条件、评分表达式和板块/轮动字段，而不是来自股票池不同。统一调度会在运行模拟账户前检查三套目录股票代码集合完全一致。
+
+股票池模板共享行情库当前是面向后续数据库化输入的基础设施，写入 `data_store/stock_pool_templates.sqlite`，不覆盖上述 CSV 目录，也不会改变现有模拟账户订单生成逻辑。等每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究逐步切换到股票池模板输入后，再把 `RUN_STOCK_POOL_UPDATE_REQUIRED` 默认改为 `1` 更合适。

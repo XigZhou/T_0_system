@@ -18,6 +18,30 @@ ROTATION_OUTPUT_DIR="${ROTATION_OUTPUT_DIR:-data_bundle/processed_qfq_theme_focu
 BUILD_ROTATION_FEATURES="${BUILD_ROTATION_FEATURES:-1}"
 PAPER_CONFIG_DIR="${PAPER_CONFIG_DIR:-configs/paper_accounts}"
 RUN_PAPER_AFTER_CLOSE="${RUN_PAPER_AFTER_CLOSE:-1}"
+RUN_STOCK_POOL_TEMPLATE_UPDATE="${RUN_STOCK_POOL_TEMPLATE_UPDATE:-1}"
+RUN_STOCK_POOL_UPDATE_REQUIRED="${RUN_STOCK_POOL_UPDATE_REQUIRED:-0}"
+STOCK_POOL_USERNAME="${STOCK_POOL_USERNAME:-admin}"
+STOCK_POOL_START_DATE="${STOCK_POOL_START_DATE:-20220101}"
+STOCK_POOL_SLEEP_SECONDS="${STOCK_POOL_SLEEP_SECONDS:-0.5}"
+STOCK_POOL_RETRY_ATTEMPTS="${STOCK_POOL_RETRY_ATTEMPTS:-3}"
+STOCK_POOL_RETRY_SLEEP_SECONDS="${STOCK_POOL_RETRY_SLEEP_SECONDS:-5}"
+STOCK_POOL_BATCH_COUNT="${STOCK_POOL_BATCH_COUNT:-1}"
+STOCK_POOL_BATCH_SLEEP_SECONDS="${STOCK_POOL_BATCH_SLEEP_SECONDS:-60}"
+export STOCK_POOL_USERNAME STOCK_POOL_START_DATE STOCK_POOL_SLEEP_SECONDS STOCK_POOL_RETRY_ATTEMPTS STOCK_POOL_RETRY_SLEEP_SECONDS STOCK_POOL_BATCH_COUNT STOCK_POOL_BATCH_SLEEP_SECONDS
+
+STOCK_POOL_OPTIONAL_ENV_VARS=(
+  STOCK_POOL_BATCH_SIZE
+  STOCK_POOL_BATCH_INDEX
+  STOCK_POOL_OFFSET
+  STOCK_POOL_RESUME_AFTER_SYMBOL
+  STOCK_POOL_MAX_SYMBOLS
+  STOCK_POOL_INCLUDE_UP_TO_DATE
+)
+for optional_env in "${STOCK_POOL_OPTIONAL_ENV_VARS[@]}"; do
+  if [[ -n "${!optional_env:-}" ]]; then
+    export "${optional_env}"
+  fi
+done
 
 CHECK_ONLY=0
 if [[ "${1:-}" == "--check-only" ]]; then
@@ -224,30 +248,32 @@ if [[ "${CHECK_ONLY}" == "1" ]]; then
   log "检查模式：依赖文件存在，交易日判断通过，不执行重任务。"
   [[ -x "scripts/run_daily_top100_update.sh" ]] || fail "缺少 scripts/run_daily_top100_update.sh 执行权限"
   [[ -x "scripts/run_paper_trading_cron.sh" ]] || fail "缺少 scripts/run_paper_trading_cron.sh 执行权限"
+  [[ -x "scripts/run_stock_pool_template_update.sh" ]] || fail "缺少 scripts/run_stock_pool_template_update.sh 执行权限"
   [[ -f "scripts/run_sector_research.py" ]] || fail "缺少 scripts/run_sector_research.py"
   [[ -f "scripts/build_sector_research_features.py" ]] || fail "缺少 scripts/build_sector_research_features.py"
   [[ -f "scripts/run_sector_rotation_diagnosis.py" ]] || fail "missing scripts/run_sector_rotation_diagnosis.py"
   [[ -f "scripts/build_sector_rotation_features.py" ]] || fail "missing scripts/build_sector_rotation_features.py"
+  [[ -f "scripts/run_stock_pool_template_update.py" ]] || fail "缺少 scripts/run_stock_pool_template_update.py"
   exit 0
 fi
 
-log "1/8 更新股票主数据和主题前100目录"
+log "1/9 更新股票主数据和主题前100目录"
 scripts/run_daily_top100_update.sh "${RUN_DATE}"
 
-log "2/8 校验主题前100目录"
+log "2/9 校验主题前100目录"
 validate_processed_dir "${TOP100_DIR}" 100
 
-log "3/8 更新独立板块研究"
+log "3/9 更新独立板块研究"
 python scripts/run_sector_research.py \
   --start-date "${SECTOR_START_DATE}" \
   --end-date "${RUN_DATE}" \
   --processed-dir "${SECTOR_PROCESSED_DIR}" \
   --report-dir "${SECTOR_REPORT_DIR}"
 
-log "4/8 校验板块研究结果"
+log "4/9 校验板块研究结果"
 validate_sector_research
 
-log "5/8 生成带板块字段的增强 processed 目录"
+log "5/9 生成带板块字段的增强 processed 目录"
 SECTOR_OUTPUT_ABS="$(assert_under_project "${SECTOR_OUTPUT_DIR}")"
 EXPECTED_OUTPUT_ABS="$(assert_under_project "data_bundle/processed_qfq_theme_focus_top100_sector")"
 if [[ "${SECTOR_OUTPUT_ABS}" != "${EXPECTED_OUTPUT_ABS}" ]]; then
@@ -267,7 +293,7 @@ validate_processed_dir \
   sector_strongest_theme_rank_pct
 
 if [[ "${BUILD_ROTATION_FEATURES}" == "1" ]]; then
-  log "6/8 build daily sector rotation diagnosis"
+  log "6/9 生成每日板块轮动诊断"
   assert_under_project "${ROTATION_REPORT_DIR}" >/dev/null
   python scripts/run_sector_rotation_diagnosis.py \
     --theme-strength-path "${SECTOR_PROCESSED_DIR}/theme_strength_daily.csv" \
@@ -278,7 +304,7 @@ if [[ "${BUILD_ROTATION_FEATURES}" == "1" ]]; then
     --out-dir "${ROTATION_REPORT_DIR}" \
     --cases ""
 
-  log "7/8 build sector rotation enhanced processed dir"
+  log "7/9 生成带板块轮动字段的增强 processed 目录"
   python scripts/build_sector_rotation_features.py \
     --sector-processed-dir "${SECTOR_OUTPUT_DIR}" \
     --rotation-daily-path "${ROTATION_DAILY_PATH}" \
@@ -299,14 +325,26 @@ if [[ "${BUILD_ROTATION_FEATURES}" == "1" ]]; then
     "rotation=${ROTATION_OUTPUT_DIR}"
   PROCESSED_CHECK_TARGET="${ROTATION_OUTPUT_DIR}"
 else
-  log "6/8 skip rotation enhanced processed dir: BUILD_ROTATION_FEATURES=${BUILD_ROTATION_FEATURES}"
+  log "6/9 跳过板块轮动诊断和增强目录：BUILD_ROTATION_FEATURES=${BUILD_ROTATION_FEATURES}"
   validate_same_stock_pool \
     "top100=${TOP100_DIR}" \
     "sector=${SECTOR_OUTPUT_DIR}"
   PROCESSED_CHECK_TARGET="${SECTOR_OUTPUT_DIR}"
 fi
 
-log "8/8 run paper accounts after-close"
+log "8/9 更新股票池模板共享行情库"
+if [[ "${RUN_STOCK_POOL_TEMPLATE_UPDATE}" == "1" ]]; then
+  if ! scripts/run_stock_pool_template_update.sh "${RUN_DATE}"; then
+    if [[ "${RUN_STOCK_POOL_UPDATE_REQUIRED}" == "1" ]]; then
+      fail "股票池模板共享行情更新失败，按 RUN_STOCK_POOL_UPDATE_REQUIRED=1 中止后续任务。"
+    fi
+    log "警告：股票池模板共享行情更新失败，但 RUN_STOCK_POOL_UPDATE_REQUIRED=${RUN_STOCK_POOL_UPDATE_REQUIRED}，继续执行模拟账户收盘任务。"
+  fi
+else
+  log "RUN_STOCK_POOL_TEMPLATE_UPDATE=${RUN_STOCK_POOL_TEMPLATE_UPDATE}, skip stock pool template update."
+fi
+
+log "9/9 运行模拟账户 after-close"
 if [[ "${RUN_PAPER_AFTER_CLOSE}" == "1" ]]; then
   CONFIG_DIR="${PAPER_CONFIG_DIR}" PROCESSED_CHECK_DIR="${PROCESSED_CHECK_TARGET}" scripts/run_paper_trading_cron.sh after-close "${RUN_DATE}"
 else
@@ -324,6 +362,10 @@ SUCCESS_FILE="${LOG_DIR}/latest_success.txt"
   echo "rotation_daily_path=${ROTATION_DAILY_PATH}"
   echo "rotation_output_dir=${ROTATION_OUTPUT_DIR}"
   echo "paper_config_dir=${PAPER_CONFIG_DIR}"
+  echo "run_stock_pool_template_update=${RUN_STOCK_POOL_TEMPLATE_UPDATE}"
+  echo "run_stock_pool_update_required=${RUN_STOCK_POOL_UPDATE_REQUIRED}"
+  echo "stock_pool_username=${STOCK_POOL_USERNAME}"
+  echo "stock_pool_start_date=${STOCK_POOL_START_DATE}"
   echo "log_file=${LOG_FILE}"
 } > "${SUCCESS_FILE}"
 

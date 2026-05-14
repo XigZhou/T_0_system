@@ -60,6 +60,8 @@ def main() -> None:
     )
     summary = run_stock_pool_feature_update(config)
     print(json.dumps({k: v for k, v in summary.items() if k != "items"}, ensure_ascii=False, indent=2))
+    if str(summary.get("status", "")).strip().lower() != "success":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

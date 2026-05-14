@@ -218,6 +218,12 @@ python scripts/init_stock_pool_feature_store.py --source all --start-date 202201
 # 只更新当前 admin 活跃模板涉及股票
 python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
 
+# 日常自动更新：由收盘后统一调度第 8 步调用，建议只保留这一条夜间 cron
+scripts/run_after_close_pipeline.sh 20260514
+
+# 股票池很多时，统一调度可连续跑多批并在批次之间暂停
+STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECONDS=60 scripts/run_after_close_pipeline.sh 20260514
+
 # 小样本验证，避免一次性消耗太多 Tushare 调用
 python scripts/run_stock_pool_template_update.py --source active_templates --max-symbols 3 --sleep-seconds 0.2
 
@@ -228,7 +234,9 @@ python scripts/init_stock_pool_feature_store.py --source all --start-date 202201
 python scripts/run_stock_pool_template_update.py --source active_templates --resume-after-symbol 300750 --max-symbols 100 --retry-attempts 3
 ```
 
-每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。默认只补库内未更新到截止交易日的股票；已更新股票会在任务前置过滤阶段跳过，避免重复消耗 Tushare。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码" --retry-attempts 3` 单独补跑。
+每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。统一调度本身写入 `logs/after_close_pipeline/YYYYMMDD.log`。默认只补库内未更新到截止交易日的股票；已更新股票会在任务前置过滤阶段跳过，避免重复消耗 Tushare。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码" --retry-attempts 3` 单独补跑。
+
+当前股票池 SQLite 还没有作为模拟账户的正式输入，所以统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，股票池更新失败只记录警告并继续模拟账户收盘任务。后续把每日选股、模拟交易、批量回测等模块切到股票池模板输入后，可改为 `RUN_STOCK_POOL_UPDATE_REQUIRED=1`。
 
 批处理参数说明：
 
@@ -237,6 +245,7 @@ python scripts/run_stock_pool_template_update.py --source active_templates --res
 - `--resume-after-symbol`：从某只股票之后继续，适合中途断线后人工续跑。
 - `--retry-attempts` / `--retry-sleep-seconds`：单只股票的 Tushare 输入拉取失败后自动重试。
 - `--include-up-to-date`：包含已更新到截止日的股票；默认不建议打开，除非需要强制核对任务明细。
+- `STOCK_POOL_BATCH_COUNT` / `STOCK_POOL_BATCH_SLEEP_SECONDS`：包装脚本专用；在一个统一调度任务内连续跑多个 batch，并在批次间暂停，减少 Tushare 压力。
 
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
 
