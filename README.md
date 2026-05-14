@@ -220,9 +220,23 @@ python scripts/run_stock_pool_template_update.py --source active_templates --use
 
 # 小样本验证，避免一次性消耗太多 Tushare 调用
 python scripts/run_stock_pool_template_update.py --source active_templates --max-symbols 3 --sleep-seconds 0.2
+
+# 分批初始化或补数：按完整股票列表顺序切批，batch-index 从 0 开始
+python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101 --batch-size 200 --batch-index 0 --retry-attempts 3 --retry-sleep-seconds 5
+
+# 断点续跑：从指定股票之后继续；常用于某批中途断开后的人工补跑
+python scripts/run_stock_pool_template_update.py --source active_templates --resume-after-symbol 300750 --max-symbols 100 --retry-attempts 3
 ```
 
-每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码"` 单独补跑。
+每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。默认只补库内未更新到截止交易日的股票；已更新股票会在任务前置过滤阶段跳过，避免重复消耗 Tushare。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码" --retry-attempts 3` 单独补跑。
+
+批处理参数说明：
+
+- `--batch-size` / `--batch-index`：按完整解析股票列表切批，适合 2000 到 3000 只股票的初始化或夜间更新限流。
+- `--offset`：直接从第 N 只开始，填写后优先于 `batch-index` 计算起点。
+- `--resume-after-symbol`：从某只股票之后继续，适合中途断线后人工续跑。
+- `--retry-attempts` / `--retry-sleep-seconds`：单只股票的 Tushare 输入拉取失败后自动重试。
+- `--include-up-to-date`：包含已更新到截止日的股票；默认不建议打开，除非需要强制核对任务明细。
 
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
 

@@ -28,26 +28,51 @@ from overnight_bt.stock_pool_templates import (
 
 class FakeStockPoolDataSource:
     dates = ["20240102", "20240103", "20240104", "20240105", "20240108"]
+    stock_rows = [
+        {
+            "ts_code": "000001.SZ",
+            "symbol": "000001",
+            "name": "平安银行",
+            "industry": "银行",
+            "market": "主板",
+            "list_date": "19910403",
+        },
+        {
+            "ts_code": "000002.SZ",
+            "symbol": "000002",
+            "name": "万科A",
+            "industry": "房地产",
+            "market": "主板",
+            "list_date": "19910129",
+        },
+        {
+            "ts_code": "300750.SZ",
+            "symbol": "300750",
+            "name": "宁德时代",
+            "industry": "电气设备",
+            "market": "创业板",
+            "list_date": "20180611",
+        },
+    ]
+
+    def __init__(self, fail_daily_once: set[str] | None = None) -> None:
+        self.fail_daily_once = set(fail_daily_once or set())
+        self.daily_calls: list[str] = []
+        self.daily_attempts: dict[str, int] = {}
 
     def latest_trade_date(self, end_date: str) -> str:
         return "20240108"
 
     def load_stock_basic(self) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {
-                    "ts_code": "300750.SZ",
-                    "symbol": "300750",
-                    "name": "宁德时代",
-                    "industry": "电气设备",
-                    "market": "创业板",
-                    "list_date": "20180611",
-                }
-            ]
-        )
+        return pd.DataFrame(self.stock_rows)
 
     def load_daily_basic_snapshot(self, trade_date: str) -> pd.DataFrame:
-        return pd.DataFrame([{"ts_code": "300750.SZ", "total_mv": 1000000.0, "turnover_rate_f": 1.5}])
+        return pd.DataFrame(
+            [
+                {"ts_code": row["ts_code"], "total_mv": 1000000.0, "turnover_rate_f": 1.5}
+                for row in self.stock_rows
+            ]
+        )
 
     def load_trade_calendar(self, start_date: str, end_date: str) -> pd.DataFrame:
         return pd.DataFrame({"trade_date": self.dates, "is_open": ["1"] * len(self.dates)})
@@ -61,6 +86,10 @@ class FakeStockPoolDataSource:
         return pd.DataFrame(rows)
 
     def load_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        self.daily_calls.append(ts_code)
+        self.daily_attempts[ts_code] = self.daily_attempts.get(ts_code, 0) + 1
+        if ts_code in self.fail_daily_once and self.daily_attempts[ts_code] == 1:
+            raise RuntimeError(f"模拟 daily 首次失败：{ts_code}")
         return pd.DataFrame(
             {
                 "ts_code": [ts_code] * len(self.dates),
@@ -237,6 +266,168 @@ class StockPoolTemplateTest(unittest.TestCase):
             self.assertEqual(detail["status"], "success")
             self.assertEqual(detail["items"][0]["status"], "success")
             self.assertEqual(detail["items"][0]["rows_written"], 5)
+
+    def test_feature_store_update_supports_batch_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="批次测试池",
+                    description="第二阶段批次测试",
+                    stock_text="000001\n000002\n300750",
+                ),
+                db_path=db_path,
+            )
+            source = FakeStockPoolDataSource()
+            summary = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="批次测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    batch_size=1,
+                    batch_index=1,
+                ),
+                data_source=source,
+            )
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["resolved_stock_count"], 3)
+            self.assertEqual(summary["due_stock_count"], 3)
+            self.assertEqual(summary["stock_count"], 1)
+            self.assertEqual(summary["batch_start"], 1)
+            self.assertEqual(source.daily_calls, ["000002.SZ"])
+
+            detail = read_stock_pool_update_job(summary["job_id"], db_path=db_path)
+            self.assertEqual(detail["stock_count"], 1)
+            self.assertEqual(detail["items"][0]["symbol"], "000002")
+
+    def test_feature_store_update_skips_up_to_date_before_batching(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="只补缺失测试池",
+                    description="第二阶段只补缺失测试",
+                    stock_text="000001\n000002\n300750",
+                ),
+                db_path=db_path,
+            )
+            first_source = FakeStockPoolDataSource()
+            first = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="只补缺失测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                ),
+                data_source=first_source,
+            )
+            self.assertEqual(first["stock_count"], 3)
+            self.assertEqual(len(first_source.daily_calls), 3)
+
+            second_source = FakeStockPoolDataSource()
+            second = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="只补缺失测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                ),
+                data_source=second_source,
+            )
+            self.assertEqual(second["status"], "success")
+            self.assertEqual(second["stock_count"], 0)
+            self.assertEqual(second["prefilter_skipped_count"], 3)
+            self.assertEqual(second["due_stock_count"], 0)
+            self.assertEqual(second_source.daily_calls, [])
+
+    def test_feature_store_update_retries_single_stock_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="重试测试池",
+                    description="第二阶段重试测试",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+            source = FakeStockPoolDataSource(fail_daily_once={"300750.SZ"})
+            summary = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="重试测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    retry_attempts=2,
+                    retry_sleep_seconds=0.0,
+                ),
+                data_source=source,
+            )
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["retry_attempts"], 2)
+            self.assertEqual(source.daily_attempts["300750.SZ"], 2)
+            self.assertEqual(summary["items"][0]["status"], "success")
+
+    def test_feature_store_update_resume_after_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="续跑测试池",
+                    description="第二阶段续跑测试",
+                    stock_text="000001\n000002\n300750",
+                ),
+                db_path=db_path,
+            )
+            source = FakeStockPoolDataSource()
+            summary = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="续跑测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    resume_after_symbol="000001",
+                    max_symbols=1,
+                ),
+                data_source=source,
+            )
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["resume_skipped_count"], 1)
+            self.assertEqual(source.daily_calls, ["000002.SZ"])
 
 
 if __name__ == "__main__":

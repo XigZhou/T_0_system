@@ -32,12 +32,24 @@ cd "${PROJECT_DIR}"
 [[ -f "${VENV_ACTIVATE}" ]] || fail "虚拟环境不存在：${VENV_ACTIVATE}"
 source "${VENV_ACTIVATE}"
 
+EXTRA_ARGS=()
+[[ -n "${STOCK_POOL_BATCH_SIZE:-}" ]] && EXTRA_ARGS+=(--batch-size "${STOCK_POOL_BATCH_SIZE}")
+[[ -n "${STOCK_POOL_BATCH_INDEX:-}" ]] && EXTRA_ARGS+=(--batch-index "${STOCK_POOL_BATCH_INDEX}")
+[[ -n "${STOCK_POOL_OFFSET:-}" ]] && EXTRA_ARGS+=(--offset "${STOCK_POOL_OFFSET}")
+[[ -n "${STOCK_POOL_RESUME_AFTER_SYMBOL:-}" ]] && EXTRA_ARGS+=(--resume-after-symbol "${STOCK_POOL_RESUME_AFTER_SYMBOL}")
+[[ -n "${STOCK_POOL_RETRY_ATTEMPTS:-}" ]] && EXTRA_ARGS+=(--retry-attempts "${STOCK_POOL_RETRY_ATTEMPTS}")
+[[ -n "${STOCK_POOL_RETRY_SLEEP_SECONDS:-}" ]] && EXTRA_ARGS+=(--retry-sleep-seconds "${STOCK_POOL_RETRY_SLEEP_SECONDS}")
+[[ -n "${STOCK_POOL_MAX_SYMBOLS:-}" ]] && EXTRA_ARGS+=(--max-symbols "${STOCK_POOL_MAX_SYMBOLS}")
+if [[ "${STOCK_POOL_INCLUDE_UP_TO_DATE:-0}" == "1" || "${STOCK_POOL_INCLUDE_UP_TO_DATE:-}" == "true" ]]; then
+  EXTRA_ARGS+=(--include-up-to-date)
+fi
+
 python scripts/run_stock_pool_template_update.py \
   --source active_templates \
   --username "${STOCK_POOL_USERNAME:-admin}" \
   --start-date "${STOCK_POOL_START_DATE:-20220101}" \
   --end-date "${RUN_DATE}" \
   --sleep-seconds "${STOCK_POOL_SLEEP_SECONDS:-0.2}" \
-  ${STOCK_POOL_MAX_SYMBOLS:+--max-symbols "${STOCK_POOL_MAX_SYMBOLS}"}
+  "${EXTRA_ARGS[@]}"
 
 log "股票池模板共享行情更新完成。"

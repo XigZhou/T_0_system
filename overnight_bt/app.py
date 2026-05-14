@@ -276,6 +276,13 @@ def stock_pool_template_refresh_api(req: StockPoolRefreshRequest):
             force_full_rebuild=req.force_full_rebuild,
             max_symbols=req.max_symbols,
             sleep_seconds=req.sleep_seconds,
+            batch_size=req.batch_size,
+            batch_index=req.batch_index,
+            offset=req.offset,
+            resume_after_symbol=req.resume_after_symbol,
+            retry_attempts=req.retry_attempts,
+            retry_sleep_seconds=req.retry_sleep_seconds,
+            only_missing=req.only_missing,
         )
         return run_stock_pool_feature_update(config)
     except FileNotFoundError as exc:

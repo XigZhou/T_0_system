@@ -22,6 +22,13 @@ def main() -> None:
     parser.add_argument("--end-date", default="")
     parser.add_argument("--db-path", default="")
     parser.add_argument("--log-dir", default="logs/stock_pool_template_update")
+    parser.add_argument("--batch-size", type=int, default=0, help="每批处理股票数，0 表示不按批次切分")
+    parser.add_argument("--batch-index", type=int, default=0, help="批次序号，从 0 开始；batch-size>0 时生效")
+    parser.add_argument("--offset", type=int, default=0, help="从待处理列表的第 N 只开始；填写后优先于 batch-index 计算起点")
+    parser.add_argument("--resume-after-symbol", default="", help="断点续跑：从指定股票代码之后继续")
+    parser.add_argument("--retry-attempts", type=int, default=1, help="单只股票失败重试次数，至少 1")
+    parser.add_argument("--retry-sleep-seconds", type=float, default=2.0, help="失败重试基础等待秒数，第 N 次按 N 倍等待")
+    parser.add_argument("--include-up-to-date", action="store_true", help="包含已更新到截止日的股票；默认只补缺失")
     parser.add_argument("--max-symbols", type=int, default=0)
     parser.add_argument("--sleep-seconds", type=float, default=0.2)
     parser.add_argument("--force-full-rebuild", action="store_true")
@@ -42,6 +49,13 @@ def main() -> None:
         log_dir=Path(args.log_dir),
         max_symbols=args.max_symbols,
         sleep_seconds=args.sleep_seconds,
+        batch_size=args.batch_size,
+        batch_index=args.batch_index,
+        offset=args.offset,
+        resume_after_symbol=args.resume_after_symbol,
+        retry_attempts=args.retry_attempts,
+        retry_sleep_seconds=args.retry_sleep_seconds,
+        only_missing=not args.include_up_to_date,
         force_full_rebuild=args.force_full_rebuild,
     )
     summary = run_stock_pool_feature_update(config)

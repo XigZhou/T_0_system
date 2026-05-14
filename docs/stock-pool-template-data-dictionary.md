@@ -219,6 +219,42 @@ python scripts/run_stock_pool_template_update.py --source template --template-na
 python scripts/run_stock_pool_template_update.py --source active_templates --max-symbols 3 --sleep-seconds 0.2
 ```
 
+分批初始化或补数，适合 2000 到 3000 只股票的大批量任务：
+
+```bash
+python scripts/init_stock_pool_feature_store.py \
+  --source all \
+  --start-date 20220101 \
+  --batch-size 200 \
+  --batch-index 0 \
+  --retry-attempts 3 \
+  --retry-sleep-seconds 5
+```
+
+断点续跑，适合某批中途断开后从最后完成股票之后继续：
+
+```bash
+python scripts/run_stock_pool_template_update.py \
+  --source active_templates \
+  --resume-after-symbol 300750 \
+  --max-symbols 100 \
+  --retry-attempts 3
+```
+
+核心参数定义：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--batch-size` | `0` | 每批处理股票数；`0` 表示不切批 |
+| `--batch-index` | `0` | 批次序号，从 `0` 开始；批次窗口基于完整解析股票列表计算，避免前一批已入库后后一批错位 |
+| `--offset` | `0` | 从待处理窗口第 N 只开始；填写后优先于 `batch-index` 计算起点 |
+| `--resume-after-symbol` | 空 | 从指定股票代码之后继续处理，例如 `300750` 或 `300750.SZ` |
+| `--retry-attempts` | `1` | 单只股票拉取 `daily/adj_factor/stk_limit/suspend_d` 失败后的尝试次数 |
+| `--retry-sleep-seconds` | `2.0` | 每次失败后的基础等待秒数，第 N 次按 N 倍等待 |
+| `--include-up-to-date` | 关闭 | 默认只补库内未更新到截止交易日的股票；打开后会把已最新股票放入本批并记录为 skipped |
+| `--force-full-rebuild` | 关闭 | 强制从起始日重算并 upsert，不执行只补缺失过滤 |
+| `--max-symbols` | `0` | 在当前批次窗口内再限制前 N 只，主要用于冒烟验证或临时限流 |
+
 定时任务包装脚本：
 
 ```bash
@@ -230,6 +266,8 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 ```cron
 30 20 * * 1-5 /home/ubuntu/T_0_system/scripts/run_stock_pool_template_update.sh >> /home/ubuntu/T_0_system/logs/stock_pool_template_update/cron.log 2>&1
 ```
+
+包装脚本支持通过环境变量透传批次和重试参数：`STOCK_POOL_BATCH_SIZE`、`STOCK_POOL_BATCH_INDEX`、`STOCK_POOL_OFFSET`、`STOCK_POOL_RESUME_AFTER_SYMBOL`、`STOCK_POOL_RETRY_ATTEMPTS`、`STOCK_POOL_RETRY_SLEEP_SECONDS`、`STOCK_POOL_MAX_SYMBOLS`、`STOCK_POOL_INCLUDE_UP_TO_DATE=1`。
 
 ### 7.4 日志和补救方式
 
@@ -243,12 +281,27 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 | `logs/stock_pool_template_update/<job_id>_items.csv` | 任务明细 CSV | 交付或人工复核 |
 | `logs/stock_pool_template_update/<job_id>_summary.json` | 任务摘要 JSON | 自动化读取和归档 |
 
+`summary.json` 新增以下批处理字段，便于判断任务跑到哪里：
+
+| 字段 | 说明 |
+| --- | --- |
+| `resolved_stock_count` | 本次来源解析并去重后的股票总数 |
+| `due_stock_count` | 库内未更新到本次截止交易日的股票数 |
+| `prefilter_skipped_count` | 已更新到截止交易日、在只补缺失模式下跳过的股票数 |
+| `selected_stock_count` | 本次批次窗口内实际需要执行采集的股票数 |
+| `batch_size/batch_index/offset` | 本次批次窗口参数 |
+| `batch_start/batch_end` | 本次窗口在解析股票列表中的半开区间 `[start, end)` |
+| `resume_after_symbol/resume_skipped_count` | 断点续跑股票和实际跳过数量 |
+| `retry_attempts/retry_sleep_seconds` | 单只股票失败重试配置 |
+| `only_missing` | 是否启用只补缺失过滤 |
+
 补救规则：
 
 - 如果某些股票失败，先用 `GET /api/stock-pools/jobs/{job_id}` 或明细 CSV 找到失败股票和错误信息。
-- 若是 Tushare 临时失败，可用 `--source symbols --stock-text "300750 688981"` 单独补跑失败股票。
+- 若是 Tushare 临时失败，可用 `--source symbols --stock-text "300750 688981" --retry-attempts 3` 单独补跑失败股票。
+- 若某一批中途断开，优先看 `_items.csv` 最后一只成功股票，再用 `--resume-after-symbol` 从其后一只继续。
 - 若是指标边界或基础信息问题，可加 `--force-full-rebuild` 从起始日全量重算并 upsert。
-- 已经完整更新到最新交易日的股票会被标记为 `skipped`，不会重复采集。
+- 默认只补缺失，已经完整更新到最新交易日的股票不会重复采集；如需在明细中显式记录 skipped，可加 `--include-up-to-date`。
 - 删除模板不会删除 `stock_daily_features`，因为同一股票可能仍被其他模板复用。
 
 ## 8. 更新时间

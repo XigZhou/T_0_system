@@ -46,6 +46,13 @@ class StockPoolFeatureUpdateConfig:
     force_full_rebuild: bool = False
     max_symbols: int = 0
     sleep_seconds: float = 0.2
+    batch_size: int = 0
+    batch_index: int = 0
+    offset: int = 0
+    resume_after_symbol: str = ""
+    retry_attempts: int = 1
+    retry_sleep_seconds: float = 2.0
+    only_missing: bool = True
 
 
 @dataclass
@@ -77,6 +84,20 @@ class StockPoolSyncSummary:
     item_csv: str
     summary_json: str
     message: str
+    resolved_stock_count: int = 0
+    due_stock_count: int = 0
+    prefilter_skipped_count: int = 0
+    selected_stock_count: int = 0
+    resume_skipped_count: int = 0
+    batch_start: int = 0
+    batch_end: int = 0
+    batch_size: int = 0
+    batch_index: int = 0
+    offset: int = 0
+    resume_after_symbol: str = ""
+    retry_attempts: int = 1
+    retry_sleep_seconds: float = 0.0
+    only_missing: bool = True
     items: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -97,6 +118,20 @@ class StockPoolSyncSummary:
             "item_csv": self.item_csv,
             "summary_json": self.summary_json,
             "message": self.message,
+            "resolved_stock_count": self.resolved_stock_count,
+            "due_stock_count": self.due_stock_count,
+            "prefilter_skipped_count": self.prefilter_skipped_count,
+            "selected_stock_count": self.selected_stock_count,
+            "resume_skipped_count": self.resume_skipped_count,
+            "batch_start": self.batch_start,
+            "batch_end": self.batch_end,
+            "batch_size": self.batch_size,
+            "batch_index": self.batch_index,
+            "offset": self.offset,
+            "resume_after_symbol": self.resume_after_symbol,
+            "retry_attempts": self.retry_attempts,
+            "retry_sleep_seconds": self.retry_sleep_seconds,
+            "only_missing": self.only_missing,
             "items": self.items,
         }
 
@@ -343,9 +378,6 @@ def _resolve_symbol_rows(
         deduped.setdefault(symbol, item)
     resolved = list(deduped.values())
     resolved.sort(key=lambda item: item["symbol"])
-    if config.max_symbols and config.max_symbols > 0:
-        logger.info("只处理前 %s 只股票，用于测试或分批补数", config.max_symbols)
-        resolved = resolved[: config.max_symbols]
     return resolved
 
 
@@ -442,6 +474,159 @@ def _latest_dates(conn: sqlite3.Connection) -> dict[str, str]:
     return {str(row["symbol"]): str(row["latest_trade_date"] or "") for row in rows}
 
 
+def _positive_int(value: Any, default: int = 0) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return default
+    return max(number, 0)
+
+
+def _positive_float(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value or 0.0)
+    except (TypeError, ValueError):
+        return default
+    return max(number, 0.0)
+
+
+def _filter_due_symbol_rows(
+    symbol_rows: list[dict[str, Any]],
+    latest_map: dict[str, str],
+    end_date: str,
+    config: StockPoolFeatureUpdateConfig,
+    logger: logging.Logger,
+) -> tuple[list[dict[str, Any]], int]:
+    if config.force_full_rebuild or not config.only_missing:
+        return list(symbol_rows), 0
+    due_rows: list[dict[str, Any]] = []
+    skipped_count = 0
+    for row in symbol_rows:
+        symbol = str(row.get("symbol") or "").strip().zfill(6)
+        latest = latest_map.get(symbol, "")
+        if latest and latest >= end_date:
+            skipped_count += 1
+            continue
+        due_rows.append(row)
+    if skipped_count:
+        logger.info("只补缺失模式：%s 只股票已更新到 %s 或之后，任务前置跳过", skipped_count, end_date)
+    return due_rows, skipped_count
+
+
+def _apply_batch_window(
+    symbol_rows: list[dict[str, Any]],
+    config: StockPoolFeatureUpdateConfig,
+    logger: logging.Logger,
+) -> tuple[list[dict[str, Any]], dict[str, int | str]]:
+    rows = list(symbol_rows)
+    resume_after_symbol = str(config.resume_after_symbol or "").strip()
+    if resume_after_symbol:
+        resume_after_symbol = resume_after_symbol.split(".", 1)[0].zfill(6)
+    resume_skipped = 0
+    if resume_after_symbol:
+        next_rows: list[dict[str, Any]] = []
+        found = False
+        for row in rows:
+            symbol = str(row.get("symbol") or "").strip().zfill(6)
+            if found:
+                next_rows.append(row)
+                continue
+            resume_skipped += 1
+            if symbol == resume_after_symbol:
+                found = True
+        if found:
+            rows = next_rows
+            logger.info("断点续跑：跳过到 %s 之后，实际跳过 %s 只", resume_after_symbol, resume_skipped)
+        else:
+            logger.warning("断点续跑股票 %s 不在待处理列表内，本批次为空", resume_after_symbol)
+            resume_skipped = len(symbol_rows)
+            rows = []
+    batch_size = _positive_int(config.batch_size)
+    batch_index = _positive_int(config.batch_index)
+    offset = _positive_int(config.offset)
+    if batch_size > 0:
+        start = offset if offset > 0 else batch_index * batch_size
+        end = start + batch_size
+        selected = rows[start:end]
+        logger.info("批次窗口：batch_size=%s batch_index=%s offset=%s，选择 [%s, %s) 共 %s 只", batch_size, batch_index, offset, start, end, len(selected))
+    else:
+        start = offset
+        selected = rows[offset:] if offset > 0 else rows
+        end = start + len(selected)
+        if offset > 0:
+            logger.info("偏移窗口：offset=%s，选择 %s 只", offset, len(selected))
+    max_symbols = _positive_int(config.max_symbols)
+    if max_symbols > 0 and len(selected) > max_symbols:
+        logger.info("max_symbols=%s，仅保留当前窗口前 %s 只用于测试或限流", max_symbols, max_symbols)
+        selected = selected[:max_symbols]
+        end = start + len(selected)
+    meta: dict[str, int | str] = {
+        "resume_skipped_count": resume_skipped,
+        "batch_start": start,
+        "batch_end": end,
+        "batch_size": batch_size,
+        "batch_index": batch_index,
+        "offset": offset,
+        "resume_after_symbol": resume_after_symbol,
+    }
+    return selected, meta
+
+
+def _call_with_retry(
+    label: str,
+    func: Any,
+    logger: logging.Logger,
+    retry_attempts: int,
+    retry_sleep_seconds: float,
+) -> Any:
+    attempts = max(1, _positive_int(retry_attempts, default=1))
+    sleep_seconds = _positive_float(retry_sleep_seconds)
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return func()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt >= attempts:
+                break
+            wait_seconds = sleep_seconds * attempt
+            logger.warning("%s 第 %s/%s 次失败：%s；%.2f 秒后重试", label, attempt, attempts, exc, wait_seconds)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"{label} 调用失败")
+
+
+def _load_symbol_inputs_with_retry(
+    data_source: Any,
+    ts_code: str,
+    start_date: str,
+    end_date: str,
+    logger: logging.Logger,
+    retry_attempts: int,
+    retry_sleep_seconds: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def load_all() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        raw_df = data_source.load_daily(ts_code, start_date, end_date)
+        if raw_df is None or raw_df.empty:
+            raise RuntimeError(f"daily 返回空数据：{ts_code}")
+        adj_df = data_source.load_adj_factor(ts_code, start_date, end_date)
+        if adj_df is None or adj_df.empty:
+            raise RuntimeError(f"adj_factor 返回空数据：{ts_code}")
+        limit_df = data_source.load_stk_limit(ts_code, start_date, end_date)
+        suspend_df = data_source.load_suspend_d(ts_code, start_date, end_date)
+        return raw_df, adj_df, limit_df, suspend_df
+
+    return _call_with_retry(
+        f"{ts_code} 行情输入",
+        load_all,
+        logger,
+        retry_attempts=retry_attempts,
+        retry_sleep_seconds=retry_sleep_seconds,
+    )
+
+
 def _create_job(
     conn: sqlite3.Connection,
     config: StockPoolFeatureUpdateConfig,
@@ -514,6 +699,49 @@ def _write_runtime_outputs(log_dir: Path, job_id: str, summary: dict[str, Any], 
     return item_csv, summary_json
 
 
+def _empty_summary(
+    config: StockPoolFeatureUpdateConfig,
+    job_id: str,
+    log_file: Path,
+    start_date: str,
+    end_date: str,
+    message: str,
+    counts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    counts = counts or {}
+    summary_base = {
+        "job_id": job_id,
+        "job_type": config.job_type,
+        "source": config.source,
+        "username": str(config.username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME,
+        "template_name": str(config.template_name or "").strip(),
+        "status": "success",
+        "start_date": start_date,
+        "end_date": end_date,
+        "stock_count": 0,
+        "success_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "log_file": str(log_file),
+        "message": message,
+        "resolved_stock_count": int(counts.get("resolved_stock_count", 0) or 0),
+        "due_stock_count": int(counts.get("due_stock_count", 0) or 0),
+        "prefilter_skipped_count": int(counts.get("prefilter_skipped_count", 0) or 0),
+        "selected_stock_count": 0,
+        "resume_skipped_count": int(counts.get("resume_skipped_count", 0) or 0),
+        "batch_start": int(counts.get("batch_start", 0) or 0),
+        "batch_end": int(counts.get("batch_end", 0) or 0),
+        "batch_size": int(counts.get("batch_size", 0) or 0),
+        "batch_index": int(counts.get("batch_index", 0) or 0),
+        "offset": int(counts.get("offset", 0) or 0),
+        "resume_after_symbol": str(counts.get("resume_after_symbol", "") or ""),
+        "retry_attempts": max(1, _positive_int(config.retry_attempts, default=1)),
+        "retry_sleep_seconds": _positive_float(config.retry_sleep_seconds),
+        "only_missing": bool(config.only_missing),
+    }
+    return summary_base
+
+
 def run_stock_pool_feature_update(
     config: StockPoolFeatureUpdateConfig,
     data_source: Any | None = None,
@@ -529,6 +757,12 @@ def run_stock_pool_feature_update(
     start_date = _normalize_date(config.start_date, default="20220101")
     as_of = _normalize_date(config.end_date, default=_today_text())
     config.start_date = start_date
+    config.retry_attempts = max(1, _positive_int(config.retry_attempts, default=1))
+    config.retry_sleep_seconds = _positive_float(config.retry_sleep_seconds)
+    config.batch_size = _positive_int(config.batch_size)
+    config.batch_index = _positive_int(config.batch_index)
+    config.offset = _positive_int(config.offset)
+    config.max_symbols = _positive_int(config.max_symbols)
     if data_source is None:
         data_source = TushareStockPoolDataSource(config.env_path)
     end_date = data_source.latest_trade_date(as_of) if hasattr(data_source, "latest_trade_date") else as_of
@@ -536,37 +770,84 @@ def run_stock_pool_feature_update(
 
     items: list[StockPoolSyncItem] = []
     logger.info(
-        "股票池数据任务启动：job_id=%s source=%s job_type=%s start=%s end=%s db=%s",
+        "股票池数据任务启动：job_id=%s source=%s job_type=%s start=%s end=%s db=%s only_missing=%s batch_size=%s batch_index=%s offset=%s resume_after=%s retry=%s",
         job_id,
         config.source,
         config.job_type,
         start_date,
         end_date,
         db_path,
+        config.only_missing,
+        config.batch_size,
+        config.batch_index,
+        config.offset,
+        config.resume_after_symbol or "",
+        config.retry_attempts,
     )
 
+    counts: dict[str, Any] = {}
     with _connect(db_path) as conn:
-        symbol_rows = _resolve_symbol_rows(conn, config, data_source, logger)
-        _create_job(conn, config, job_id, len(symbol_rows), end_date)
-        if not symbol_rows:
+        resolved_rows = _resolve_symbol_rows(conn, config, data_source, logger)
+        counts["resolved_stock_count"] = len(resolved_rows)
+        if not resolved_rows:
+            _create_job(conn, config, job_id, 0, end_date)
             message = "没有需要处理的股票；请先保存股票池模板或指定股票代码。"
             _finish_job(conn, job_id, "success", 0, 0, message)
-            summary_base = {
-                "job_id": job_id,
-                "status": "success",
-                "message": message,
-                "stock_count": 0,
-                "success_count": 0,
-                "failed_count": 0,
-                "skipped_count": 0,
-                "log_file": str(log_file),
-            }
+            summary_base = _empty_summary(config, job_id, log_file, start_date, end_date, message, counts)
             item_csv, summary_json = _write_runtime_outputs(log_dir, job_id, summary_base, [])
             summary_base.update({"item_csv": str(item_csv), "summary_json": str(summary_json), "items": []})
+            summary_json.write_text(json.dumps(summary_base, ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(message)
             return summary_base
 
-        logger.info("本次去重后股票数：%s", len(symbol_rows))
+        logger.info("本次解析去重后股票数：%s", len(resolved_rows))
+        latest_map = _latest_dates(conn)
+        due_rows, prefilter_skipped_count = _filter_due_symbol_rows(
+            resolved_rows,
+            latest_map=latest_map,
+            end_date=end_date,
+            config=config,
+            logger=logger,
+        )
+        window_rows, batch_meta = _apply_batch_window(resolved_rows, config, logger)
+        if config.only_missing and not config.force_full_rebuild:
+            selected_rows = [
+                row for row in window_rows
+                if not latest_map.get(str(row.get("symbol") or "").strip().zfill(6), "")
+                or latest_map.get(str(row.get("symbol") or "").strip().zfill(6), "") < end_date
+            ]
+            skipped_in_window = len(window_rows) - len(selected_rows)
+            if skipped_in_window:
+                logger.info("当前批次内 %s 只股票已更新到 %s 或之后，跳过采集", skipped_in_window, end_date)
+        else:
+            selected_rows = window_rows
+        counts.update(batch_meta)
+        counts["due_stock_count"] = len(due_rows)
+        counts["prefilter_skipped_count"] = prefilter_skipped_count
+        counts["selected_stock_count"] = len(selected_rows)
+
+        _create_job(conn, config, job_id, len(selected_rows), end_date)
+        if not selected_rows:
+            if prefilter_skipped_count and config.only_missing and not config.force_full_rebuild:
+                message = f"解析 {len(resolved_rows)} 只股票，均已更新到 {end_date} 或不在当前批次，无需补数。"
+            else:
+                message = "当前筛选、断点或批次窗口下没有需要处理的股票。"
+            _finish_job(conn, job_id, "success", 0, 0, message)
+            summary_base = _empty_summary(config, job_id, log_file, start_date, end_date, message, counts)
+            item_csv, summary_json = _write_runtime_outputs(log_dir, job_id, summary_base, [])
+            summary_base.update({"item_csv": str(item_csv), "summary_json": str(summary_json), "items": []})
+            summary_json.write_text(json.dumps(summary_base, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info(message)
+            return summary_base
+
+        logger.info(
+            "本次执行股票数：%s；解析数=%s，待补数=%s，前置跳过=%s",
+            len(selected_rows),
+            len(resolved_rows),
+            len(due_rows),
+            prefilter_skipped_count,
+        )
+
         try:
             stock_basic_frame = data_source.load_stock_basic()
             stock_basic_rows = _rows_from_stock_basic_frame(stock_basic_frame)
@@ -574,18 +855,16 @@ def run_stock_pool_feature_update(
             stock_basic_map = _build_stock_basic_map(stock_basic_frame)
         except Exception as exc:  # noqa: BLE001
             logger.warning("读取 stock_basic 失败，将使用模板内基础信息继续：%s", exc)
-            stock_basic_map = {row["symbol"]: row for row in symbol_rows}
-
+            stock_basic_map = {row["symbol"]: row for row in resolved_rows}
         daily_basic_map = _build_daily_basic_map(data_source.load_daily_basic_snapshot(end_date))
         trade_calendar = data_source.load_trade_calendar(start_date, end_date)
         market_context = data_source.load_market_context(start_date, end_date)
-        latest_map = _latest_dates(conn)
 
-        for index, symbol_row in enumerate(symbol_rows, start=1):
+        for index, symbol_row in enumerate(selected_rows, start=1):
             symbol = str(symbol_row["symbol"]).zfill(6)
             ts_code = str(symbol_row.get("ts_code") or _symbol_to_ts_code(symbol)).strip()
             latest = latest_map.get(symbol, "")
-            logger.info("[%s/%s] 处理 %s %s，库内最新=%s", index, len(symbol_rows), symbol, ts_code, latest or "无")
+            logger.info("[%s/%s] 处理 %s %s，库内最新=%s", index, len(selected_rows), symbol, ts_code, latest or "无")
             if latest and latest >= end_date and not config.force_full_rebuild:
                 item = StockPoolSyncItem(
                     symbol=symbol,
@@ -602,14 +881,15 @@ def run_stock_pool_feature_update(
                 continue
 
             try:
-                raw_df = data_source.load_daily(ts_code, start_date, end_date)
-                if raw_df is None or raw_df.empty:
-                    raise RuntimeError(f"daily 返回空数据：{ts_code}")
-                adj_df = data_source.load_adj_factor(ts_code, start_date, end_date)
-                if adj_df is None or adj_df.empty:
-                    raise RuntimeError(f"adj_factor 返回空数据：{ts_code}")
-                limit_df = data_source.load_stk_limit(ts_code, start_date, end_date)
-                suspend_df = data_source.load_suspend_d(ts_code, start_date, end_date)
+                raw_df, adj_df, limit_df, suspend_df = _load_symbol_inputs_with_retry(
+                    data_source=data_source,
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                    logger=logger,
+                    retry_attempts=config.retry_attempts,
+                    retry_sleep_seconds=config.retry_sleep_seconds,
+                )
                 frame = build_processed_frame(
                     raw_df=raw_df,
                     adj_df=adj_df,
@@ -654,9 +934,12 @@ def run_stock_pool_feature_update(
         item_dicts = [item.__dict__ for item in items]
         failed_count = sum(1 for item in items if item.status == "failed")
         skipped_count = sum(1 for item in items if item.status == "skipped")
-        success_count = len(items) - failed_count
+        success_count = sum(1 for item in items if item.status in {"success", "skipped"})
         status = "success" if failed_count == 0 else "failed"
-        message = f"处理 {len(items)} 只股票，成功/跳过 {success_count} 只，失败 {failed_count} 只，跳过 {skipped_count} 只。"
+        message = (
+            f"解析 {len(resolved_rows)} 只股票，待补 {len(due_rows)} 只，执行 {len(items)} 只，"
+            f"成功/跳过 {success_count} 只，失败 {failed_count} 只，前置跳过 {prefilter_skipped_count} 只。"
+        )
         _finish_job(conn, job_id, status, success_count, failed_count, message)
 
     summary_obj = StockPoolSyncSummary(
@@ -676,6 +959,20 @@ def run_stock_pool_feature_update(
         item_csv="",
         summary_json="",
         message=message,
+        resolved_stock_count=len(resolved_rows),
+        due_stock_count=len(due_rows),
+        prefilter_skipped_count=prefilter_skipped_count,
+        selected_stock_count=len(selected_rows),
+        resume_skipped_count=int(counts.get("resume_skipped_count", 0) or 0),
+        batch_start=int(counts.get("batch_start", 0) or 0),
+        batch_end=int(counts.get("batch_end", 0) or 0),
+        batch_size=config.batch_size,
+        batch_index=config.batch_index,
+        offset=config.offset,
+        resume_after_symbol=str(counts.get("resume_after_symbol", "") or ""),
+        retry_attempts=config.retry_attempts,
+        retry_sleep_seconds=config.retry_sleep_seconds,
+        only_missing=bool(config.only_missing),
         items=item_dicts,
     )
     summary = summary_obj.to_dict()

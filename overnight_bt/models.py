@@ -211,8 +211,15 @@ class StockPoolRefreshRequest(BaseModel):
     start_date: str = Field("20220101", description="数据起始日期 YYYYMMDD")
     end_date: str = Field("", description="数据截止日期 YYYYMMDD；为空时取最新交易日")
     force_full_rebuild: bool = Field(False, description="是否强制全量重算并 upsert")
-    max_symbols: int = Field(0, ge=0, le=10000, description="测试或分批运行时限制股票数，0 表示不限")
+    max_symbols: int = Field(0, ge=0, le=10000, description="测试或限流时限制本批股票数，0 表示不限")
     sleep_seconds: float = Field(0.2, ge=0, le=10, description="每只股票之间的 Tushare 调用间隔")
+    batch_size: int = Field(0, ge=0, le=10000, description="每批处理股票数，0 表示不按批次切分")
+    batch_index: int = Field(0, ge=0, le=10000, description="批次序号，从 0 开始；batch_size>0 时生效")
+    offset: int = Field(0, ge=0, le=100000, description="从待处理列表第 N 只开始；填写后优先于 batch_index")
+    resume_after_symbol: str = Field("", description="断点续跑：从指定股票代码之后继续")
+    retry_attempts: int = Field(1, ge=1, le=10, description="单只股票失败重试次数")
+    retry_sleep_seconds: float = Field(2.0, ge=0, le=300, description="失败重试基础等待秒数")
+    only_missing: bool = Field(True, description="是否只处理库内未更新到截止日的股票")
 
 
 class SingleStockBacktestRequest(BaseModel):

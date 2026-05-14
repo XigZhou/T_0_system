@@ -264,6 +264,85 @@ python scripts/build_theme_tradeable_universe.py \
 
 详细字段见 `docs/theme-tradeable-universe-data-dictionary.md`。该步骤不拉四年日线，不改模拟账户目录，可作为后续 Top500/Top1000 补数据和 L0-L4 回测的前置检查。
 
+### 股票池模板与共享行情库
+
+用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。当前阶段仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的 CSV 输入。
+
+页面入口：
+
+```text
+/stock-pools
+```
+
+主要 API：
+
+| 入口 | 用途 |
+| --- | --- |
+| `GET /api/stock-pools/templates?username=admin` | 查看模板列表 |
+| `GET /api/stock-pools/template?username=admin&template_name=模板名` | 读取模板和股票列表 |
+| `POST /api/stock-pools/template` | 新建、复制后保存或覆盖模板 |
+| `DELETE /api/stock-pools/template` | 删除模板关系，不删除日线事实数据 |
+| `POST /api/stock-pools/template/validate` | 校验手工股票列表 |
+| `POST /api/stock-pools/template/refresh` | 手动触发行情与指标入库 |
+| `GET /api/stock-pools/jobs?limit=50` | 查看最近更新任务 |
+| `GET /api/stock-pools/jobs/{job_id}` | 查看任务明细 |
+
+数据入库入口：
+
+```bash
+# 全市场或模板股票初始化
+python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
+
+# 日常更新当前 admin 活跃模板涉及股票
+python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
+
+# 大批量任务分批运行，batch-index 从 0 开始
+python scripts/init_stock_pool_feature_store.py \
+  --source all \
+  --start-date 20220101 \
+  --batch-size 200 \
+  --batch-index 0 \
+  --retry-attempts 3 \
+  --retry-sleep-seconds 5
+
+# 中途断开后从某只股票之后续跑
+python scripts/run_stock_pool_template_update.py \
+  --source active_templates \
+  --resume-after-symbol 300750 \
+  --max-symbols 100 \
+  --retry-attempts 3
+```
+
+关键输入参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--source` | `active_templates`、`template`、`symbols`、`all`；分别代表活跃模板、单模板、手工股票和全市场初始化 |
+| `--start-date` / `--end-date` | 数据起止日期，`end-date` 为空时使用最新开市日 |
+| `--batch-size` / `--batch-index` | 按完整解析股票列表切批，避免前一批入库后后一批错位 |
+| `--offset` | 直接从第 N 只开始，优先于 `batch-index` 计算起点 |
+| `--resume-after-symbol` | 从指定股票之后继续，用于人工断点续跑 |
+| `--retry-attempts` / `--retry-sleep-seconds` | 单只股票拉取失败后的重试次数和等待时间 |
+| `--include-up-to-date` | 默认不打开；打开后会把已最新股票放入本批并记录为 skipped |
+| `--force-full-rebuild` | 强制从起始日重算并 upsert |
+
+输出结果：
+
+- SQLite：`data_store/stock_pool_templates.sqlite`。
+- 日线与指标表：`stock_daily_features`，主键为 `symbol + trade_date`。
+- 任务表：`stock_pool_update_jobs`、`stock_pool_update_job_items`。
+- 运行日志：`logs/stock_pool_template_update/*_<job_id>.log`、`<job_id>_items.csv`、`<job_id>_summary.json`。
+
+异常处理：
+
+- 默认只补缺失，库内已更新到截止交易日的股票不会重复采集。
+- 单只股票 Tushare 临时失败时，脚本按 `retry_attempts` 自动重试；最终失败会写入任务明细。
+- 某批中途断开时，查看 `_items.csv` 最后一只成功股票，用 `--resume-after-symbol` 继续。
+- 如果只想补失败股票，可用 `--source symbols --stock-text "300750 688981" --retry-attempts 3`。
+- 删除模板只删除模板关系，不删除 `stock_daily_features`，因为同一股票可能被多个模板复用。
+
+字段定义见 `docs/stock-pool-template-data-dictionary.md`，规划设计见 `docs/stock-pool-template-system-plan.md`。
+
 ### 板块参数网格探索
 
 用途：把板块增强参数作为研究变量，统一比较基准动量、板块硬过滤和只评分加权三类策略，帮助决定是否把某组板块条件接入回测系统或模拟账户。

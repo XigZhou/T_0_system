@@ -26,7 +26,8 @@
 - 新增 CLI：`scripts/init_stock_pool_feature_store.py`、`scripts/run_stock_pool_template_update.py`、`scripts/run_stock_pool_template_update.sh`。
 - 新增 API：`POST /api/stock-pools/template/refresh`、`GET /api/stock-pools/jobs`、`GET /api/stock-pools/jobs/{job_id}`。
 - 每次任务都会写入 `stock_pool_update_jobs` 和 `stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出 `.log`、`_items.csv`、`_summary.json`。
-- 单测已用假数据源验证“模板股票 -> 日线/复权/交易日历/大盘环境 -> 指标 -> SQLite -> 任务日志”的完整链路。
+- 数据更新已支持 `--batch-size/--batch-index/--offset` 分批、`--resume-after-symbol` 断点续跑、`--retry-attempts/--retry-sleep-seconds` 单股失败重试，以及默认只补库内缺失数据。
+- 单测已用假数据源验证“模板股票 -> 日线/复权/交易日历/大盘环境 -> 指标 -> SQLite -> 任务日志”的完整链路，并覆盖分批、只补缺失、断点续跑和重试行为。
 - 保存模板本身仍只保存模板和股票关系；行情采集通过手动刷新、初始化脚本或后续定时任务触发，避免前端保存请求被长时间阻塞。
 
 本阶段新增或修改的核心文件：
