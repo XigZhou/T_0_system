@@ -191,7 +191,7 @@ class StockPoolTemplateSaveRequest(BaseModel):
     original_template_name: str = Field("", description="当前模板名称；覆盖或改名保存时使用")
     template_name: str = Field(..., min_length=1, description="股票池模板名称")
     description: str = ""
-    is_active: bool = True
+    is_active: bool = Field(True, description="第一阶段固定为 True；所有模板默认参与后续每日更新")
     stock_text: str = Field(..., min_length=1, description="用户手工输入的股票代码列表")
     overwrite_existing: bool = False
 

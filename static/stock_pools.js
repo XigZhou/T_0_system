@@ -1,4 +1,5 @@
-const poolUsernameInput = document.getElementById("poolUsername");
+const DEFAULT_STOCK_POOL_USERNAME = "admin";
+const poolCurrentUser = document.getElementById("poolCurrentUser");
 const poolTemplateSelect = document.getElementById("poolTemplateSelect");
 const reloadPoolsBtn = document.getElementById("reloadPoolsBtn");
 const loadPoolBtn = document.getElementById("loadPoolBtn");
@@ -13,7 +14,6 @@ const poolSummaryGrid = document.getElementById("poolSummaryGrid");
 const poolTemplateNameInput = document.getElementById("poolTemplateName");
 const poolOriginalTemplateNameInput = document.getElementById("poolOriginalTemplateName");
 const poolDescriptionInput = document.getElementById("poolDescription");
-const poolIsActiveInput = document.getElementById("poolIsActive");
 const poolStockTextInput = document.getElementById("poolStockText");
 const poolValidationNote = document.getElementById("poolValidationNote");
 const poolStockRows = document.getElementById("poolStockRows");
@@ -57,7 +57,7 @@ function chinaDateTimeStamp(date = new Date()) {
 
 function defaultPoolValues() {
   return {
-    username: poolUsernameInput.value.trim() || "505888",
+    username: DEFAULT_STOCK_POOL_USERNAME,
     template_name: `新股票池_${chinaDateTimeStamp()}`,
     original_template_name: "",
     description: "",
@@ -112,13 +112,14 @@ function renderStockRows(stocks = []) {
 
 function populatePoolEditor(data = {}) {
   const merged = { ...defaultPoolValues(), ...data };
-  poolUsernameInput.value = merged.username || "505888";
+  if (poolCurrentUser) {
+    poolCurrentUser.textContent = merged.username || DEFAULT_STOCK_POOL_USERNAME;
+  }
   poolTemplateNameInput.value = merged.template_name || "";
   poolOriginalTemplateNameInput.value = Object.prototype.hasOwnProperty.call(data, "original_template_name")
     ? data.original_template_name || ""
     : merged.template_name || "";
   poolDescriptionInput.value = merged.description || "";
-  poolIsActiveInput.checked = Boolean(merged.is_active);
   poolStockTextInput.value = merged.stock_text || "";
   renderPoolSummary(merged);
   renderStockRows(merged.stocks || []);
@@ -126,11 +127,11 @@ function populatePoolEditor(data = {}) {
 
 function collectPoolPayload() {
   return {
-    username: poolUsernameInput.value.trim() || "505888",
+    username: DEFAULT_STOCK_POOL_USERNAME,
     original_template_name: poolOriginalTemplateNameInput.value.trim(),
     template_name: poolTemplateNameInput.value.trim(),
     description: poolDescriptionInput.value.trim(),
-    is_active: poolIsActiveInput.checked,
+    is_active: true,
     stock_text: poolStockTextInput.value.trim(),
     overwrite_existing: Boolean(poolOriginalTemplateNameInput.value.trim()),
   };
@@ -152,7 +153,7 @@ async function fetchJson(url, options = {}) {
 }
 
 function usernameQuery() {
-  return encodeURIComponent(poolUsernameInput.value.trim() || "505888");
+  return encodeURIComponent(DEFAULT_STOCK_POOL_USERNAME);
 }
 
 async function loadPoolTemplates() {
@@ -200,6 +201,8 @@ async function validatePoolStockText() {
   poolValidationNote.textContent = `有效 ${data.valid_count} 只；重复 ${data.duplicate_count} 项；格式错误 ${data.invalid_count} 项。`;
   if (data.invalid_count > 0) {
     setPoolStatus(`股票列表存在格式错误：${data.invalid_items.join("、")}`, true);
+  } else if (data.duplicate_count > 0) {
+    setPoolStatus(`股票列表校验通过，有效 ${data.valid_count} 只；重复项 ${data.duplicate_symbols.join("、")} 已自动忽略，只保留首次出现。`);
   } else {
     setPoolStatus(`股票列表校验通过，有效 ${data.valid_count} 只。`);
   }
@@ -322,9 +325,6 @@ seedPoolsBtn.addEventListener("click", async () => {
   }
 });
 
-poolUsernameInput.addEventListener("change", () => {
-  loadPoolTemplates().catch((error) => setPoolStatus(`读取模板失败：${error.message}`, true));
-});
 
 populatePoolEditor();
 loadPoolTemplates().catch((error) => setPoolStatus(`读取模板失败：${error.message}`, true));

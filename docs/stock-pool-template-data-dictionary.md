@@ -10,7 +10,7 @@
 - API：`POST /api/stock-pools/template`
 - 输入方式：用户手工粘贴股票代码列表，支持一行一个、空格、逗号、中文逗号、分号、中文分号分隔。
 - 支持格式：`300750`、`600941.SH`、`688981.SH`、`430047.BJ`。系统统一保存 6 位 `symbol` 和 Tushare 风格 `ts_code`。
-- 默认用户：`505888`。后续接入登录系统后，`username` 将来自登录态。
+- 默认用户：`admin`。后续接入登录系统后，`username` 将来自登录态。
 
 ### 1.2 基础模板初始化来源
 
@@ -28,6 +28,8 @@
 | 项目 | 路径 | 说明 |
 | --- | --- | --- |
 | SQLite 数据库 | `data_store/stock_pool_templates.sqlite` | 运行时数据库，已加入 `.gitignore`，不提交到 Git |
+
+> 当前未接入登录系统，系统固定使用 `admin` 作为模板所属用户。登录系统接入后，前端应从登录态自动带入用户名，不在页面上提供手工输入。所有模板默认参与后续每日更新，第一阶段不提供“不参与更新”选项。校验和保存时，重复股票会自动去重，只保留首次出现的顺序；股票名称会从 SQLite `stock_basic`、Top500 分层文件、当前 Top100 处理后 CSV 和已有股票池快照中尽量回填。
 | 前端页面 | `static/stock_pools.html` | 股票池模板管理页面 |
 | 前端逻辑 | `static/stock_pools.js` | 模板列表、载入、复制、保存、删除和校验 |
 | 后端模块 | `overnight_bt/stock_pool_templates.py` | SQLite 初始化、模板 CRUD、股票列表解析和基础模板初始化 |
@@ -52,7 +54,7 @@
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `username` | TEXT | 用户名，当前默认 `505888` |
+| `username` | TEXT | 用户名，当前默认 `admin` |
 | `password_hash` | TEXT | 后续登录系统预留字段，第一阶段为空 |
 | `display_name` | TEXT | 展示名，默认同用户名 |
 | `created_at` | TEXT | 创建时间，格式 `YYYY-MM-DD HH:MM:SS` |
@@ -148,7 +150,7 @@
 ### 7.1 页面使用
 
 1. 启动 FastAPI 服务后打开 `/stock-pools`。
-2. 选择用户，当前默认 `505888`。
+2. 选择用户，当前默认 `admin`。
 3. 选择已有模板并点击“载入模板”，或点击“新建模板”。
 4. 在“手工股票列表”中粘贴股票代码。
 5. 点击“校验股票列表”，确认有效、重复和错误项。
@@ -160,18 +162,18 @@
 
 | API | 方法 | 说明 |
 | --- | --- | --- |
-| `/api/stock-pools/templates?username=505888` | GET | 模板列表 |
-| `/api/stock-pools/template?username=505888&template_name=模板名` | GET | 读取单个模板 |
+| `/api/stock-pools/templates?username=admin` | GET | 模板列表 |
+| `/api/stock-pools/template?username=admin&template_name=模板名` | GET | 读取单个模板 |
 | `/api/stock-pools/template` | POST | 保存模板 |
 | `/api/stock-pools/template` | DELETE | 删除模板 |
 | `/api/stock-pools/template/validate` | POST | 校验手工股票列表 |
-| `/api/stock-pools/templates/seed?username=505888` | POST | 手动初始化基础模板 |
+| `/api/stock-pools/templates/seed?username=admin` | POST | 手动初始化基础模板 |
 
 保存模板请求示例：
 
 ```json
 {
-  "username": "505888",
+  "username": "admin",
   "original_template_name": "",
   "template_name": "我的AI股票池",
   "description": "用户手工维护的 AI 方向股票列表",

@@ -1090,6 +1090,26 @@ td {
   accent-color: var(--accent);
 }
 
+.stock-pool-page .readonly-field {
+  display: grid;
+  gap: 3px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.28);
+  font-size: 0.74rem;
+}
+
+.stock-pool-page .readonly-field strong {
+  font-size: 0.86rem;
+}
+
+.stock-pool-page .readonly-field small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
 .stock-pool-page .stock-pool-editor-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

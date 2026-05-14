@@ -26,10 +26,11 @@
         </div>
 
         <form id="stockPoolPickerForm" class="form-grid compact-form">
-          <label>
-            <span>用户</span>
-            <input id="poolUsername" type="text" value="505888" />
-          </label>
+          <div class="readonly-field stock-pool-current-user">
+            <span>当前用户</span>
+            <strong id="poolCurrentUser">admin</strong>
+            <small>登录系统接入后自动获取</small>
+          </div>
 
           <label class="field-wide">
             <span>选择模板</span>
@@ -65,7 +66,7 @@
               <p class="eyebrow">模板字段</p>
               <h3>编辑股票池模板</h3>
             </div>
-            <p class="panel-note">股票列表支持一行一个、空格、逗号或分号分隔；自动去重并保留首次出现顺序。</p>
+            <p class="panel-note">股票列表支持一行一个、空格、逗号或分号分隔；重复股票自动忽略，只保留首次出现顺序。</p>
           </div>
 
           <div class="stock-pool-editor-grid">
@@ -76,10 +77,6 @@
             <label>
               <span>原模板名称</span>
               <input id="poolOriginalTemplateName" type="text" readonly />
-            </label>
-            <label class="check-field">
-              <input id="poolIsActive" type="checkbox" />
-              <span>参与后续每日更新</span>
             </label>
             <label class="field-wide">
               <span>模板说明</span>

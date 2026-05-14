@@ -198,14 +198,16 @@ data_store/stock_pool_templates.sqlite
 
 常用 API：
 
-- `GET /api/stock-pools/templates?username=505888`
-- `GET /api/stock-pools/template?username=505888&template_name=模板名`
+- `GET /api/stock-pools/templates?username=admin`
+- `GET /api/stock-pools/template?username=admin&template_name=模板名`
 - `POST /api/stock-pools/template`
 - `DELETE /api/stock-pools/template`
 - `POST /api/stock-pools/template/validate`
-- `POST /api/stock-pools/templates/seed?username=505888`
+- `POST /api/stock-pools/templates/seed?username=admin`
 
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
+
+说明：当前未接入登录系统，前端不再提供用户名输入，保存时自动使用 `admin`。所有模板默认参与后续每日更新，第一阶段页面不提供关闭开关。校验股票列表时，系统会尽量从 SQLite `stock_basic`、Top500 分层文件、当前 Top100 处理后 CSV 和已有股票池快照回填股票名称。如果同一只股票重复输入，后端只保留首次出现的顺序，SQLite 主键 `username + template_name + symbol` 不会重复写入，对后续更新任务和模板读取没有额外影响。
 
 ### 5. 生成行业强度指标
 
@@ -930,7 +932,7 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 ### 股票池模板管理页面
 
 - 入口：`/stock-pools`
-- 默认用户：`505888`
+- 默认用户：`admin`
 - 用途：维护用户手工股票列表模板，作为后续批量回测、每日收盘选股、多账户模拟交易、单股回测和板块研究统一股票池输入的基础。
 - 当前阶段：只写入 `data_store/stock_pool_templates.sqlite`，不拉取行情、不计算指标、不改动旧模块输入。
 - 页面按钮：

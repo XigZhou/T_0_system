@@ -226,10 +226,10 @@ function element(id) {
     const options = [];
     elements.set(id, {
       id,
-      type: id === "poolIsActive" ? "checkbox" : "text",
+      type: "text",
       textContent: "",
       style: {},
-      value: id === "poolUsername" ? "505888" : "",
+      value: "",
       checked: false,
       disabled: false,
       options,
@@ -268,7 +268,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(code, context);
 context.populatePoolEditor({
-  username: "505888",
+  username: "admin",
   template_name: "L2_中等市值主题股层",
   original_template_name: "L2_中等市值主题股层",
   description: "测试模板",
@@ -286,6 +286,9 @@ if (!element("poolTemplateName").value.startsWith("L2_中等市值主题股层_�
 }
 if (element("poolOriginalTemplateName").value !== "") {
   throw new Error("copy should clear original template name");
+}
+if (context.collectPoolPayload().username !== "admin") {
+  throw new Error("default username should be admin");
 }
 if (!element("poolStatus").textContent.includes("已复制为新股票池草稿")) {
   throw new Error("copy status missing");

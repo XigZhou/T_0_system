@@ -12,7 +12,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = PROJECT_ROOT / "data_store" / "stock_pool_templates.sqlite"
-DEFAULT_USERNAME = "505888"
+DEFAULT_USERNAME = "admin"
 TOP500_LAYER_CONSTITUENTS = PROJECT_ROOT / "research_runs" / "20260509_top500_stock_pool_layer_grid_account" / "stock_pool_layer_constituents.csv"
 DEFAULT_PAPER_PROCESSED_DIR = PROJECT_ROOT / "data_bundle" / "processed_qfq_theme_focus_top100"
 
@@ -320,6 +320,89 @@ def parse_stock_list(text: str) -> StockParseResult:
     return StockParseResult(valid_stocks=valid, duplicate_symbols=duplicates, invalid_items=invalid)
 
 
+STOCK_NAME_LOOKUP_FILES = (
+    PROJECT_ROOT / "data_bundle" / "theme_tradeable_top500_4y" / "universe_snapshot_top500.csv",
+    PROJECT_ROOT / "data_bundle" / "universe_snapshot_theme_focus_top100.csv",
+    PROJECT_ROOT / "data_bundle" / "universe_snapshot_theme_focus.csv",
+    PROJECT_ROOT / "data_bundle" / "universe_snapshot.csv",
+    PROJECT_ROOT / "sector_research" / "data" / "processed" / "stock_theme_exposure.csv",
+    PROJECT_ROOT / "sector_research" / "data" / "processed" / "theme_tradeable_universe" / "theme_tradeable_universe_snapshot.csv",
+)
+
+
+def _normalize_stock_symbol(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    match = SYMBOL_PATTERN.search(text)
+    return match.group(1) if match else ""
+
+
+def _row_symbol(row: dict[str, Any]) -> str:
+    for key in ("symbol", "stock_code", "code", "ts_code", "????"):
+        symbol = _normalize_stock_symbol(row.get(key))
+        if symbol:
+            return symbol
+    return ""
+
+
+def _row_stock_name(row: dict[str, Any]) -> str:
+    for key in ("stock_name", "name", "stockName", "sec_name", "????", "??"):
+        value = str(row.get(key) or "").strip()
+        if value and value.lower() != "nan":
+            return value
+    return ""
+
+
+def _merge_name(mapping: dict[str, str], symbol: str, name: str) -> None:
+    symbol = _normalize_stock_symbol(symbol)
+    name = str(name or "").strip()
+    if symbol and name and symbol not in mapping:
+        mapping[symbol] = name
+
+
+def _read_csv_name_lookup(path: Path) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    if not path.exists() or not path.is_file():
+        return mapping
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                symbol = _row_symbol(row)
+                name = _row_stock_name(row)
+                _merge_name(mapping, symbol, name)
+    except Exception:
+        return {}
+    return mapping
+
+
+def _load_stock_name_lookup(db_path: str | Path | None = None) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    try:
+        with _connect(db_path) as conn:
+            rows = conn.execute("SELECT symbol, name FROM stock_basic WHERE COALESCE(name, '') <> ''").fetchall()
+            for row in rows:
+                _merge_name(mapping, row["symbol"], row["name"])
+    except Exception:
+        pass
+    for rows in _read_layer_constituents().values():
+        for row in rows:
+            _merge_name(mapping, row.get("symbol", ""), row.get("stock_name", ""))
+    for row in _read_current_paper_symbols():
+        _merge_name(mapping, row.get("symbol", ""), row.get("stock_name", ""))
+    for path in STOCK_NAME_LOOKUP_FILES:
+        for symbol, name in _read_csv_name_lookup(path).items():
+            _merge_name(mapping, symbol, name)
+    return mapping
+
+
+def _enrich_stock_names(stocks: list[dict[str, Any]], db_path: str | Path | None = None) -> list[dict[str, Any]]:
+    lookup = _load_stock_name_lookup(db_path)
+    for stock in stocks:
+        if not str(stock.get("stock_name") or "").strip():
+            stock["stock_name"] = lookup.get(str(stock.get("symbol") or ""), "")
+    return stocks
+
+
 def _stock_text_from_rows(rows: list[dict[str, Any]]) -> str:
     return "\n".join(str(row["symbol"]) for row in rows)
 
@@ -384,7 +467,7 @@ def read_stock_pool_template(
             """,
             (username, name),
         ).fetchall()
-        stocks = [dict(item) for item in stock_rows]
+        stocks = _enrich_stock_names([dict(item) for item in stock_rows], db_path=db_path)
         latest = conn.execute(
             """
             SELECT s.symbol, MAX(f.trade_date) AS latest_trade_date
@@ -405,8 +488,9 @@ def read_stock_pool_template(
         return data
 
 
-def validate_stock_pool_symbols(stock_text: str) -> dict[str, Any]:
+def validate_stock_pool_symbols(stock_text: str, db_path: str | Path | None = None) -> dict[str, Any]:
     parsed = parse_stock_list(stock_text)
+    _enrich_stock_names(parsed.valid_stocks, db_path=db_path)
     return {
         "valid_stocks": parsed.valid_stocks,
         "valid_count": len(parsed.valid_stocks),
@@ -425,9 +509,10 @@ def save_stock_pool_template(req: Any, db_path: str | Path | None = None) -> dic
     if not name:
         raise ValueError("模板名称不能为空")
     description = str(getattr(req, "description", "") or "").strip()
-    is_active = bool(getattr(req, "is_active", True))
+    is_active = True
     overwrite_existing = bool(getattr(req, "overwrite_existing", False))
     parsed = parse_stock_list(str(getattr(req, "stock_text", "") or ""))
+    _enrich_stock_names(parsed.valid_stocks, db_path=db_path)
     if parsed.invalid_items:
         raise ValueError(f"股票列表包含无法识别的代码: {', '.join(parsed.invalid_items[:10])}")
     if not parsed.valid_stocks:
@@ -506,6 +591,7 @@ def save_stock_pool_template(req: Any, db_path: str | Path | None = None) -> dic
                 VALUES(?, ?, ?, ?)
                 ON CONFLICT(symbol) DO UPDATE SET
                     ts_code=excluded.ts_code,
+                    name=COALESCE(NULLIF(excluded.name, ''), stock_basic.name),
                     updated_at=excluded.updated_at
                 """,
                 (stock["symbol"], stock["ts_code"], stock.get("stock_name", ""), now),
