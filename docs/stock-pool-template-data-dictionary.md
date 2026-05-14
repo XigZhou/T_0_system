@@ -316,3 +316,4 @@ STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECOND
 - `/stock-pools` 页面和模板列表 API 会在当前用户没有模板时尝试初始化基础模板。
 - 第二阶段已提供手动刷新、初始化脚本和每日更新脚本。
 - 第三阶段已把 `scripts/run_stock_pool_template_update.sh` 接入 `scripts/run_after_close_pipeline.sh` 统一收盘后调度。默认 `RUN_STOCK_POOL_TEMPLATE_UPDATE=1`；当前 CSV 模拟账户尚未依赖 SQLite，默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，失败只记录警告并继续模拟账户收盘任务。
+- 批量验证记录见 `docs/stock-pool-template-batch-validation-20260514.md`。
