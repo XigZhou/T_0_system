@@ -187,7 +187,7 @@ class StockPoolTemplateResponse(BaseModel):
 
 
 class StockPoolTemplateSaveRequest(BaseModel):
-    username: str = Field("505888", description="模板所属用户；未接入登录前默认 505888")
+    username: str = Field("admin", description="模板所属用户；未接入登录前默认 admin")
     original_template_name: str = Field("", description="当前模板名称；覆盖或改名保存时使用")
     template_name: str = Field(..., min_length=1, description="股票池模板名称")
     description: str = ""
@@ -198,6 +198,21 @@ class StockPoolTemplateSaveRequest(BaseModel):
 
 class StockPoolValidateRequest(BaseModel):
     stock_text: str = Field("", description="用户手工输入的股票代码列表")
+
+
+class StockPoolRefreshRequest(BaseModel):
+    source: Literal["active_templates", "template", "symbols", "all"] = Field(
+        "template",
+        description="active_templates=当前用户全部活跃模板，template=单模板，symbols=手工股票，all=全市场初始化",
+    )
+    username: str = Field("admin", description="当前未接入登录系统，默认 admin")
+    template_name: str = Field("", description="source=template 时必填")
+    stock_text: str = Field("", description="source=symbols 时可填写手工股票列表")
+    start_date: str = Field("20220101", description="数据起始日期 YYYYMMDD")
+    end_date: str = Field("", description="数据截止日期 YYYYMMDD；为空时取最新交易日")
+    force_full_rebuild: bool = Field(False, description="是否强制全量重算并 upsert")
+    max_symbols: int = Field(0, ge=0, le=10000, description="测试或分批运行时限制股票数，0 表示不限")
+    sleep_seconds: float = Field(0.2, ge=0, le=10, description="每只股票之间的 Tushare 调用间隔")
 
 
 class SingleStockBacktestRequest(BaseModel):

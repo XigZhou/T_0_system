@@ -1,6 +1,6 @@
 # 股票池模板系统数据说明
 
-本文档说明第一阶段股票池模板系统的数据来源、SQLite 表结构、字段定义和使用方式。第一阶段只负责“模板 + 手工股票列表”的保存、读取、校验和删除，不抓取行情，不计算指标，也不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库，但仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
 
 ## 1. 数据来源
 
@@ -33,6 +33,10 @@
 | 前端页面 | `static/stock_pools.html` | 股票池模板管理页面 |
 | 前端逻辑 | `static/stock_pools.js` | 模板列表、载入、复制、保存、删除和校验 |
 | 后端模块 | `overnight_bt/stock_pool_templates.py` | SQLite 初始化、模板 CRUD、股票列表解析和基础模板初始化 |
+| 行情入库模块 | `overnight_bt/stock_pool_feature_store.py` | 股票范围去重、Tushare 拉取、指标计算、SQLite upsert、任务日志 |
+| 初始化脚本 | `scripts/init_stock_pool_feature_store.py` | 全市场或指定来源首次入库 |
+| 更新脚本 | `scripts/run_stock_pool_template_update.py` | 活跃模板、单模板或手工股票增量更新 |
+| 定时任务脚本 | `scripts/run_stock_pool_template_update.sh` | shell 包装、虚拟环境、锁、cron 日志 |
 
 ## 3. 数据粒度与主键
 
@@ -46,7 +50,7 @@
 | `stock_pool_update_jobs` | 每个数据更新任务一行 | `job_id` |
 | `stock_pool_update_job_items` | 每个任务内每只股票一行 | `PRIMARY KEY(job_id, symbol)` |
 
-第一阶段会创建所有表，但只写入用户、模板、模板股票关系和基础股票信息。`stock_daily_features`、`stock_pool_update_jobs`、`stock_pool_update_job_items` 是第二阶段和第三阶段预留表。
+第一阶段会创建所有表并写入用户、模板、模板股票关系和基础股票信息。第二阶段开始写入 `stock_daily_features`、`stock_pool_update_jobs`、`stock_pool_update_job_items`。
 
 ## 4. 表字段定义
 
@@ -99,7 +103,7 @@
 
 ### 4.5 `stock_daily_features`
 
-该表为第二阶段行情和指标入库预留，第一阶段不会写入行情。主要字段如下：
+该表为第二阶段行情和指标入库事实表，所有用户和模板共享同一份股票日线与指标。主要字段如下：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -138,12 +142,14 @@
 
 ## 6. 复权、停牌和行情处理
 
-第一阶段不抓取行情，因此不进行复权、停牌、涨跌停或成交约束计算。第二阶段实现行情入库时需要遵循当前回测系统口径：
+第二阶段抓取行情并计算指标，口径复用当前 `scripts/build_processed_data.py` 背后的 `build_processed_frame`：
 
 - 信号指标使用前复权价格。
 - 买入、卖出和估值使用未复权价格。
 - `symbol + trade_date` 作为日线唯一主键，避免同一股票被多个模板引用时重复存储。
-- 停牌、涨跌停和开盘不可成交约束需要与现有 `build_processed_data.py` 输出保持一致。
+- 停牌、涨跌停和开盘不可成交约束与现有 `build_processed_data.py` 输出保持一致。
+- 大盘环境来自 `DEFAULT_INDEXES`：上证指数 `000001.SH`、沪深300 `000300.SH`、创业板指 `399006.SZ`。
+- 指标窗口包含 `m120/m60/m30/m20/m10/m5`、`ma5/ma10/ma20`、收益率、量价、K 线结构、涨停距离、均线动量等当前批量回测需要的字段。
 
 ## 7. 使用方式
 
@@ -154,7 +160,7 @@
 3. 选择已有模板并点击“载入模板”，或点击“新建模板”。
 4. 在“手工股票列表”中粘贴股票代码。
 5. 点击“校验股票列表”，确认有效、重复和错误项。
-6. 点击“保存模板”。第一阶段保存后只写 SQLite 模板表，不会拉取行情。
+6. 点击“保存模板”。保存动作只写 SQLite 模板表，不直接拉取行情，避免大股票池保存超时；需要补行情时运行刷新 API 或 CLI。
 7. 如需基于已有模板稍作修改，点击“复制模板”，修改名称或股票列表后保存。
 8. 删除模板时只删除模板关系，不删除后续日线事实数据。
 
@@ -168,6 +174,9 @@
 | `/api/stock-pools/template` | DELETE | 删除模板 |
 | `/api/stock-pools/template/validate` | POST | 校验手工股票列表 |
 | `/api/stock-pools/templates/seed?username=admin` | POST | 手动初始化基础模板 |
+| `/api/stock-pools/template/refresh` | POST | 手动触发行情与指标入库任务 |
+| `/api/stock-pools/jobs?limit=50` | GET | 查看最近更新任务 |
+| `/api/stock-pools/jobs/{job_id}` | GET | 查看任务明细 |
 
 保存模板请求示例：
 
@@ -183,9 +192,68 @@
 }
 ```
 
+
+### 7.3 第二阶段 CLI 使用
+
+全市场首次初始化，默认从 `20220101` 到最新交易日：
+
+```bash
+python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
+```
+
+只初始化或刷新当前活跃模板涉及股票：
+
+```bash
+python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
+```
+
+刷新单个模板：
+
+```bash
+python scripts/run_stock_pool_template_update.py --source template --template-name L0_最大市值主题股层 --username admin --start-date 20220101
+```
+
+小样本验证，避免一次性消耗太多接口调用：
+
+```bash
+python scripts/run_stock_pool_template_update.py --source active_templates --max-symbols 3 --sleep-seconds 0.2
+```
+
+定时任务包装脚本：
+
+```bash
+bash scripts/run_stock_pool_template_update.sh 20260514
+```
+
+建议 cron 时间放在 Tushare 当日日线、涨跌停、停牌数据稳定后，例如交易日 20:30：
+
+```cron
+30 20 * * 1-5 /home/ubuntu/T_0_system/scripts/run_stock_pool_template_update.sh >> /home/ubuntu/T_0_system/logs/stock_pool_template_update/cron.log 2>&1
+```
+
+### 7.4 日志和补救方式
+
+每次入库任务会产生四类可追踪信息：
+
+| 位置 | 内容 | 用途 |
+| --- | --- | --- |
+| `stock_pool_update_jobs` | 任务级状态、股票数、成功数、失败数、起止日期 | 页面或 API 快速判断任务是否完成 |
+| `stock_pool_update_job_items` | 每只股票的状态、写入行数、失败原因 | 定位单只股票失败原因 |
+| `logs/stock_pool_template_update/*_<job_id>.log` | 逐步运行日志和异常堆栈 | 排查 Tushare、指标计算或数据库错误 |
+| `logs/stock_pool_template_update/<job_id>_items.csv` | 任务明细 CSV | 交付或人工复核 |
+| `logs/stock_pool_template_update/<job_id>_summary.json` | 任务摘要 JSON | 自动化读取和归档 |
+
+补救规则：
+
+- 如果某些股票失败，先用 `GET /api/stock-pools/jobs/{job_id}` 或明细 CSV 找到失败股票和错误信息。
+- 若是 Tushare 临时失败，可用 `--source symbols --stock-text "300750 688981"` 单独补跑失败股票。
+- 若是指标边界或基础信息问题，可加 `--force-full-rebuild` 从起始日全量重算并 upsert。
+- 已经完整更新到最新交易日的股票会被标记为 `skipped`，不会重复采集。
+- 删除模板不会删除 `stock_daily_features`，因为同一股票可能仍被其他模板复用。
+
 ## 8. 更新时间
 
 - 模板保存、改名、删除时实时更新 SQLite。
 - `/stock-pools` 页面和模板列表 API 会在当前用户没有模板时尝试初始化基础模板。
-- 第一阶段没有每日定时行情更新任务。
-- 第二阶段和第三阶段会增加首次行情采集、指标计算和每日晚间更新任务。
+- 第二阶段已提供手动刷新、初始化脚本和每日更新脚本。
+- 第三阶段会把 `scripts/run_stock_pool_template_update.sh` 接入统一收盘后调度或 crontab。

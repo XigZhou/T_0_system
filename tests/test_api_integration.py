@@ -23,6 +23,8 @@ from overnight_bt.app import (
     stock_pool_template_page,
     stock_pool_template_save_api,
     stock_pool_template_validate_api,
+    stock_pool_update_job_api,
+    stock_pool_update_jobs_api,
 )
 from overnight_bt.models import (
     BacktestRequest,
@@ -67,6 +69,13 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(saved["template"]["stock_count"], 2)
         deleted = stock_pool_template_delete_api(template_name="API股票池", username="api_test_user")
         self.assertIn("日线数据保留", deleted["message"])
+
+    def test_stock_pool_update_job_api_returns_existing_jobs(self) -> None:
+        jobs = stock_pool_update_jobs_api(limit=5)
+        self.assertIn("jobs", jobs)
+        if jobs["jobs"]:
+            detail = stock_pool_update_job_api(jobs["jobs"][0]["job_id"])
+            self.assertIn("items", detail)
 
     def test_paper_template_api_save_read_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

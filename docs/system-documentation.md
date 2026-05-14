@@ -1377,7 +1377,7 @@ http://127.0.0.1:8083/
 - 提供类似账户模板管理的股票池模板页面，用于手工维护一组股票代码列表。
 - 支持新建、复制、载入、保存、删除、校验股票列表和初始化基础模板。
 - 模板按 `username + template_name` 唯一保存；当前默认用户为 `admin`。
-- 第一阶段只保存模板和股票列表到 SQLite，不抓取行情、不计算指标，也不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+- 第一阶段保存模板和股票列表到 SQLite；第二阶段支持共享日线与指标入库、任务日志和补数脚本；当前仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
 
 ### 入口
 
@@ -1391,16 +1391,18 @@ http://127.0.0.1:8083/
 - API：`DELETE /api/stock-pools/template`
 - API：`POST /api/stock-pools/template/validate`
 - API：`POST /api/stock-pools/templates/seed`
+- API：`POST /api/stock-pools/template/refresh`
+- API：`GET /api/stock-pools/jobs`
+- API：`GET /api/stock-pools/jobs/{job_id}`
 
 ### 页面输入项
 
 | 输入项 | 说明 |
 | --- | --- |
-| 用户 | 当前模板所属用户，默认 `admin` |
+| 用户 | 当前模板所属用户，默认 `admin`；前端不提供手工输入，后续接入登录态自动带入 |
 | 选择模板 | 当前用户已有模板下拉框 |
 | 模板名称 | 同一用户下唯一 |
 | 原模板名称 | 只读字段，用于覆盖保存或改名保存 |
-| 参与后续每日更新 | 第一阶段只保存标记；第三阶段定时更新会使用 |
 | 模板说明 | 用户自定义说明 |
 | 手工股票列表 | 股票代码列表，支持换行、空格、逗号和分号分隔 |
 
@@ -1426,7 +1428,26 @@ http://127.0.0.1:8083/
 | 模板摘要 | 展示模板名称、用户、股票数、是否启用、更新时间和数据库路径 |
 | 股票列表预览 | 展示序号、股票代码、Tushare 代码、股票名称和最新数据日期 |
 | 校验结果 | 展示有效股票数、重复项数量和格式错误项数量 |
-| SQLite 表 | `users`、`stock_pool_templates`、`stock_pool_template_stocks`、`stock_basic` 等 |
+| SQLite 表 | `users`、`stock_pool_templates`、`stock_pool_template_stocks`、`stock_basic`、`stock_daily_features`、`stock_pool_update_jobs`、`stock_pool_update_job_items` 等 |
+| 任务日志 | `logs/stock_pool_template_update/*`，包含 `.log`、`_items.csv`、`_summary.json` |
+
+### 第二阶段数据入库命令
+
+```bash
+# 全市场初始化共享日线与指标库
+python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
+
+# 每日更新所有活跃模板涉及的唯一股票
+python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
+
+# 刷新某个模板
+python scripts/run_stock_pool_template_update.py --source template --template-name L0_最大市值主题股层 --username admin
+
+# 定时任务包装脚本
+bash scripts/run_stock_pool_template_update.sh 20260514
+```
+
+每次任务会记录：任务表 `stock_pool_update_jobs`、明细表 `stock_pool_update_job_items`、日志文件、明细 CSV 和 summary JSON。已完整更新的股票会标记为 `skipped`，不会重复采集；失败股票可用 `--source symbols --stock-text "300750"` 单独补跑。
 
 ### 保存和删除规则
 
@@ -1442,7 +1463,8 @@ http://127.0.0.1:8083/
 - 股票列表为空或包含格式错误项时返回 400。
 - 读取或删除不存在的模板时返回 404。
 - SQLite 运行时数据库位于 `data_store/`，该目录已加入 `.gitignore`，不会被提交到 Git。
-- 第一阶段不会触发行情采集；如果页面“最新数据日期”为空，表示当前 SQLite 尚未写入该股票日线数据，不代表股票代码不可用。
+- 保存模板不会在前端请求内阻塞式拉取行情；如果页面“最新数据日期”为空，表示当前 SQLite 尚未写入该股票日线数据，不代表股票代码不可用。
+- 行情补数失败时，先查 `GET /api/stock-pools/jobs/{job_id}` 或 `logs/stock_pool_template_update/<job_id>_items.csv`，再对失败股票单独补跑。
 
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段方案见 `docs/stock-pool-template-system-plan.md`。
 

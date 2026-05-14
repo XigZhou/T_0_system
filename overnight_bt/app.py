@@ -21,6 +21,7 @@ from .models import (
     SignalQualityResponse,
     SingleStockBacktestRequest,
     SingleStockBacktestResponse,
+    StockPoolRefreshRequest,
     StockPoolTemplateResponse,
     StockPoolTemplateSaveRequest,
     StockPoolValidateRequest,
@@ -36,6 +37,12 @@ from .paper_trading import (
 from .signal_quality import run_signal_quality
 from .sector_dashboard import build_sector_dashboard_payload
 from .single_stock import run_single_stock_backtest
+from .stock_pool_feature_store import (
+    StockPoolFeatureUpdateConfig,
+    list_stock_pool_update_jobs,
+    read_stock_pool_update_job,
+    run_stock_pool_feature_update,
+)
 from .stock_pool_templates import (
     DEFAULT_USERNAME,
     delete_stock_pool_template,
@@ -250,6 +257,51 @@ def stock_pool_template_validate_api(req: StockPoolValidateRequest):
 def stock_pool_template_seed_api(username: str = DEFAULT_USERNAME):
     try:
         return seed_default_stock_pool_templates(username=username)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/stock-pools/template/refresh")
+def stock_pool_template_refresh_api(req: StockPoolRefreshRequest):
+    try:
+        job_type = "initial_load" if req.source == "all" else "manual_refresh"
+        config = StockPoolFeatureUpdateConfig(
+            source=req.source,
+            job_type=job_type,
+            username=req.username or DEFAULT_USERNAME,
+            template_name=req.template_name,
+            stock_text=req.stock_text,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            force_full_rebuild=req.force_full_rebuild,
+            max_symbols=req.max_symbols,
+            sleep_seconds=req.sleep_seconds,
+        )
+        return run_stock_pool_feature_update(config)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/stock-pools/jobs")
+def stock_pool_update_jobs_api(limit: int = 50):
+    try:
+        return {"jobs": list_stock_pool_update_jobs(limit=limit)}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/stock-pools/jobs/{job_id}")
+def stock_pool_update_job_api(job_id: str):
+    try:
+        return read_stock_pool_update_job(job_id=job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

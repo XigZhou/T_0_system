@@ -171,7 +171,7 @@ python scripts/build_theme_tradeable_universe.py \
 
 ### 4.2 股票池模板管理
 
-股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段只保存模板和股票列表，不抓取行情、不计算指标，也不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段保存模板和股票列表；第二阶段已支持共享日线与指标入库、任务日志和补数脚本。当前仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
 
 页面入口：
 
@@ -204,6 +204,25 @@ data_store/stock_pool_templates.sqlite
 - `DELETE /api/stock-pools/template`
 - `POST /api/stock-pools/template/validate`
 - `POST /api/stock-pools/templates/seed?username=admin`
+- `POST /api/stock-pools/template/refresh`
+- `GET /api/stock-pools/jobs?limit=50`
+- `GET /api/stock-pools/jobs/{job_id}`
+
+
+第二阶段数据入库常用命令：
+
+```bash
+# 全市场首次初始化，默认从 20220101 到最新交易日
+python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
+
+# 只更新当前 admin 活跃模板涉及股票
+python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
+
+# 小样本验证，避免一次性消耗太多 Tushare 调用
+python scripts/run_stock_pool_template_update.py --source active_templates --max-symbols 3 --sleep-seconds 0.2
+```
+
+每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码"` 单独补跑。
 
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
 
@@ -934,18 +953,19 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - 入口：`/stock-pools`
 - 默认用户：`admin`
 - 用途：维护用户手工股票列表模板，作为后续批量回测、每日收盘选股、多账户模拟交易、单股回测和板块研究统一股票池输入的基础。
-- 当前阶段：只写入 `data_store/stock_pool_templates.sqlite`，不拉取行情、不计算指标、不改动旧模块输入。
+- 当前阶段：模板仍写入 `data_store/stock_pool_templates.sqlite`；第二阶段可把模板涉及股票的日线和指标写入 SQLite，但旧模块输入仍保持 CSV。
 - 页面按钮：
   - `刷新模板`：重新读取当前用户模板列表。
   - `载入模板`：把下拉框选中的模板载入编辑区。
   - `新建模板`：初始化空白模板草稿。
   - `复制模板`：把当前模板复制成未落盘的新草稿，便于改名后保存。
-  - `保存模板`：保存模板名称、说明、启用状态和手工股票列表。
+  - `保存模板`：保存模板名称、说明和手工股票列表；所有模板默认参与后续每日更新。
   - `删除模板`：只删除模板和模板股票关系，不删除 SQLite 中后续可能存在的日线事实数据。
   - `校验股票列表`：检查有效股票、重复股票和格式错误项。
   - `初始化基础模板`：从 Top500 L0-L4 分层结果和当前多账户模拟 Top100 目录生成基础模板。
 - 手工股票列表支持 `300750`、`600941.SH` 等格式；系统保存 6 位股票代码和 Tushare 风格代码。
 - 模板名称在同一用户下唯一；保存时会检查名称冲突。
+- 第二阶段入库脚本会写 `logs/stock_pool_template_update/`，失败时按 `job_id` 查看任务表和日志。
 
 ### API
 

@@ -600,7 +600,7 @@ def save_stock_pool_template(req: Any, db_path: str | Path | None = None) -> dic
     return {
         "template": data,
         "validation": validate_stock_pool_symbols(str(getattr(req, "stock_text", "") or "")),
-        "message": f"股票池模板已保存：{name}；第一阶段只保存模板和股票列表，尚未触发行情采集。",
+        "message": f"股票池模板已保存：{name}；第二阶段已支持行情与指标入库，请运行股票池数据更新任务补齐或刷新数据。",
     }
 
 

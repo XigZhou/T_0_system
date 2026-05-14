@@ -1,6 +1,6 @@
 # 股票池模板系统规划设计稿
 
-本文档用于规划一个独立的股票池模板系统。当前第一阶段已经实现“模板 + 手工股票列表 + SQLite 基础表 + 前端管理页面”，仍不改动每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有输入方式。
+本文档用于规划一个独立的股票池模板系统。当前第一阶段已经实现“模板 + 手工股票列表 + SQLite 基础表 + 前端管理页面”；第二阶段已经实现共享日线与指标入库、任务日志、任务表和 CLI/API 更新入口。现阶段仍不改动每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入方式。
 
 ## 0. 第一阶段实现状态
 
@@ -15,6 +15,19 @@
 - 已实现基础模板：`L0_最大市值主题股层` 到 `L4_最小市值主题股层`，以及 `当前多账户模拟股票池`。
 - 已新增数据说明文档 `docs/stock-pool-template-data-dictionary.md`，并更新 `README.md` 和 `docs/system-documentation.md`。
 - 第一阶段不会抓取行情，不会计算指标，不会触发定时任务，也不会改变任何旧模块的 CSV 输入。
+
+## 0.1 第二阶段实现状态
+
+截至 2026-05-14，第二阶段已完成“数据采集与指标入库”的基础闭环：
+
+- 新增 `overnight_bt/stock_pool_feature_store.py`，统一负责股票范围去重、Tushare 行情拉取、指标计算、SQLite upsert、日志输出和任务表记录。
+- 新增共享日线入库逻辑，所有用户和模板共用 `stock_daily_features`，主键为 `symbol + trade_date`，不会按模板重复存储行情。
+- 支持四类更新来源：`active_templates`、`template`、`symbols`、`all`。`all` 用于系统初始化全市场股票；其余用于模板或手工股票的补数和刷新。
+- 新增 CLI：`scripts/init_stock_pool_feature_store.py`、`scripts/run_stock_pool_template_update.py`、`scripts/run_stock_pool_template_update.sh`。
+- 新增 API：`POST /api/stock-pools/template/refresh`、`GET /api/stock-pools/jobs`、`GET /api/stock-pools/jobs/{job_id}`。
+- 每次任务都会写入 `stock_pool_update_jobs` 和 `stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出 `.log`、`_items.csv`、`_summary.json`。
+- 单测已用假数据源验证“模板股票 -> 日线/复权/交易日历/大盘环境 -> 指标 -> SQLite -> 任务日志”的完整链路。
+- 保存模板本身仍只保存模板和股票关系；行情采集通过手动刷新、初始化脚本或后续定时任务触发，避免前端保存请求被长时间阻塞。
 
 本阶段新增或修改的核心文件：
 
@@ -434,10 +447,13 @@ flowchart LR
 
 ### 第二阶段：数据采集与指标入库
 
-- 保存模板后自动触发新股票首次采集。
-- 实现从 `20220101` 至最新交易日的日线入库。
-- 复用当前批量回测指标计算口径。
-- 实现任务表和任务明细。
+状态：已完成基础版本。
+
+- 保存模板后不直接阻塞式采集，改为通过刷新 API 或 CLI 触发，避免大模板保存超时。
+- 已实现从 `20220101` 或指定起始日到最新交易日的共享日线入库。
+- 已复用当前批量回测 `build_processed_frame` 和 `compute_indicators` 口径。
+- 已实现任务表、任务明细、运行日志、明细 CSV 和 summary JSON。
+- 已提供 `--max-symbols` 和 `--sleep-seconds` 参数，便于小样本验证、分批补数和控制 Tushare 调用压力。
 
 ### 第三阶段：每日定时更新
 
