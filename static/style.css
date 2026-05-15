@@ -360,6 +360,41 @@ select:focus {
   transform: translateY(-1px);
 }
 
+.stock-pool-source {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.75fr) minmax(180px, 1.35fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stock-pool-source .readonly-field {
+  display: grid;
+  gap: 3px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.28);
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.stock-pool-source .readonly-field strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.stock-pool-source .readonly-field small {
+  font-size: 0.68rem;
+}
+
+.stock-pool-source button {
+  min-height: 34px;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+
 .actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 4px;
@@ -1639,7 +1674,8 @@ tr:last-child td {
   .two-col,
   .three-col,
   .actions,
-  .summary-grid {
+  .summary-grid,
+  .stock-pool-source {
     grid-template-columns: 1fr;
   }
 

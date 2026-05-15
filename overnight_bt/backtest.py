@@ -21,6 +21,7 @@ from .expressions import (
 from .models import BacktestRequest, PendingOrder, Position
 from .rotation_features import ROTATION_NUMERIC_COLUMNS
 from .sector_features import SECTOR_NUMERIC_COLUMNS, resolve_data_profile, sector_display_values, validate_sector_feature_set
+from .stock_pool_templates import DEFAULT_DB_PATH, DEFAULT_USERNAME, _connect, init_stock_pool_db
 from .utils import to_float
 
 
@@ -64,6 +65,55 @@ def _score_required_offset(score_expression: str) -> int:
     return max(matches, default=0)
 
 
+NUMERIC_PROCESSED_COLUMNS = {
+    "open", "high", "low", "close", "raw_open", "raw_high", "raw_low", "raw_close",
+    "qfq_open", "qfq_high", "qfq_low", "qfq_close", "adj_factor", "next_open",
+    "next_close", "r_on", "next_raw_open", "next_raw_close", "r_on_raw", "up_limit",
+    "down_limit", "vol", "vol5", "vol10", "amount", "amount5", "amount10", "pct_chg",
+    "ret1", "ret2", "ret3", "ma5", "ma10", "ma20", "bias_ma5", "bias_ma10",
+    "amp", "amp5", "close_to_up_limit", "high_to_up_limit", "close_pos_in_bar",
+    "body_pct", "upper_shadow_pct", "lower_shadow_pct", "vol_ratio_5", "ret_accel_3",
+    "vol_ratio_3", "amount_ratio_3", "body_pct_3avg", "close_to_up_limit_3max",
+    "vr", "listed_days", "total_mv_snapshot", "turnover_rate_snapshot",
+}
+BOOLEAN_PROCESSED_COLUMNS = [
+    "can_buy_t", "can_buy_open_t", "can_buy_open_t1", "can_sell_t", "can_sell_t1",
+    "is_suspended_t", "is_suspended_t1",
+]
+
+
+def _normalize_processed_frame(df: pd.DataFrame, source_name: str, start_date: str = "", end_date: str = "") -> pd.DataFrame:
+    _validate_processed_df(df, Path(source_name))
+    df = df.copy()
+    df["trade_date"] = df["trade_date"].astype(str).str.strip()
+    if start_date:
+        df = df[df["trade_date"] >= str(start_date).strip()].copy()
+    if end_date:
+        df = df[df["trade_date"] <= str(end_date).strip()].copy()
+    if df.empty:
+        return df
+    for col in df.columns:
+        if (
+            col in NUMERIC_PROCESSED_COLUMNS
+            or col in SECTOR_NUMERIC_COLUMNS
+            or col in ROTATION_NUMERIC_COLUMNS
+            or col.startswith(("avg5m", "avg10m", "high_", "low_", "sh_", "hs300_", "cyb_"))
+            or (col.startswith("m") and col[1:].isdigit())
+        ):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in BOOLEAN_PROCESSED_COLUMNS:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.lower().isin(["true", "1", "yes"])
+    return df
+
+
+def _loaded_symbol_from_frame(df: pd.DataFrame) -> LoadedSymbol:
+    symbol = str(df.iloc[0]["symbol"]).strip()
+    name = str(df.iloc[0]["name"]).strip()
+    clean = df.reset_index(drop=True)
+    return LoadedSymbol(symbol=symbol, name=name, df=clean, idx_by_date={d: i for i, d in enumerate(clean["trade_date"].astype(str).tolist())})
+
+
 def load_processed_folder(folder_path: str, start_date: str = "", end_date: str = "") -> tuple[list[LoadedSymbol], dict]:
     folder = _normalize_folder(folder_path)
     if not folder.exists() or not folder.is_dir():
@@ -81,111 +131,110 @@ def load_processed_folder(folder_path: str, start_date: str = "", end_date: str 
     loaded: list[LoadedSymbol] = []
     for file_path in files:
         df = pd.read_csv(file_path, dtype=str, encoding="utf-8-sig")
-        _validate_processed_df(df, file_path)
-        df["trade_date"] = df["trade_date"].astype(str).str.strip()
-        if start_date:
-            df = df[df["trade_date"] >= str(start_date).strip()].copy()
-        if end_date:
-            df = df[df["trade_date"] <= str(end_date).strip()].copy()
+        df = _normalize_processed_frame(df, file_path.name, start_date=start_date, end_date=end_date)
         if df.empty:
             continue
-
-        numeric_cols = {
-            "open",
-            "high",
-            "low",
-            "close",
-            "raw_open",
-            "raw_high",
-            "raw_low",
-            "raw_close",
-            "qfq_open",
-            "qfq_high",
-            "qfq_low",
-            "qfq_close",
-            "adj_factor",
-            "next_open",
-            "next_close",
-            "r_on",
-            "next_raw_open",
-            "next_raw_close",
-            "r_on_raw",
-            "up_limit",
-            "down_limit",
-            "vol",
-            "vol5",
-            "vol10",
-            "amount",
-            "amount5",
-            "amount10",
-            "pct_chg",
-            "ret1",
-            "ret2",
-            "ret3",
-            "ma5",
-            "ma10",
-            "ma20",
-            "bias_ma5",
-            "bias_ma10",
-            "amp",
-            "amp5",
-            "close_to_up_limit",
-            "high_to_up_limit",
-            "close_pos_in_bar",
-            "body_pct",
-            "upper_shadow_pct",
-            "lower_shadow_pct",
-            "vol_ratio_5",
-            "ret_accel_3",
-            "vol_ratio_3",
-            "amount_ratio_3",
-            "body_pct_3avg",
-            "close_to_up_limit_3max",
-            "vr",
-            "listed_days",
-            "total_mv_snapshot",
-            "turnover_rate_snapshot",
-        }
-        for col in df.columns:
-            if (
-                col in numeric_cols
-                or col in SECTOR_NUMERIC_COLUMNS
-                or col in ROTATION_NUMERIC_COLUMNS
-                or col.startswith(("avg5m", "avg10m", "high_", "low_", "sh_", "hs300_", "cyb_"))
-                or (col.startswith("m") and col[1:].isdigit())
-            ):
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        for col in [
-            "can_buy_t",
-            "can_buy_open_t",
-            "can_buy_open_t1",
-            "can_sell_t",
-            "can_sell_t1",
-            "is_suspended_t",
-            "is_suspended_t1",
-        ]:
-            if col in df.columns:
-                df[col] = df[col].astype(str).str.lower().isin(["true", "1", "yes"])
-
-        symbol = str(df.iloc[0]["symbol"]).strip()
-        name = str(df.iloc[0]["name"]).strip()
-        loaded.append(
-            LoadedSymbol(
-                symbol=symbol,
-                name=name,
-                df=df.reset_index(drop=True),
-                idx_by_date={d: i for i, d in enumerate(df["trade_date"].tolist())},
-            )
-        )
+        loaded.append(_loaded_symbol_from_frame(df))
 
     if not loaded:
         raise ValueError("no data available in selected date range")
     diagnostics = {
+        "data_source": "csv",
         "processed_dir": str(folder),
         "file_count": len(loaded),
     }
     return loaded, diagnostics
+
+
+def load_stock_pool_template_data(
+    *,
+    username: str = DEFAULT_USERNAME,
+    template_name: str,
+    db_path: str | Path | None = None,
+    start_date: str = "",
+    end_date: str = "",
+) -> tuple[list[LoadedSymbol], dict]:
+    clean_username = str(username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
+    clean_template = str(template_name or "").strip()
+    if not clean_template:
+        raise ValueError("请选择股票池模板")
+    init_stock_pool_db(db_path)
+    with _connect(db_path) as conn:
+        template = conn.execute(
+            "SELECT * FROM stock_pool_templates WHERE username=? AND template_name=?",
+            (clean_username, clean_template),
+        ).fetchone()
+        if template is None:
+            raise FileNotFoundError(f"股票池模板不存在: {clean_username}/{clean_template}")
+        stocks = conn.execute(
+            """
+            SELECT symbol, ts_code, stock_name, display_order
+            FROM stock_pool_template_stocks
+            WHERE username=? AND template_name=?
+            ORDER BY display_order, symbol
+            """,
+            (clean_username, clean_template),
+        ).fetchall()
+        if not stocks:
+            raise ValueError(f"股票池模板没有股票: {clean_template}")
+
+        loaded: list[LoadedSymbol] = []
+        missing_feature_symbols: list[str] = []
+        empty_range_symbols: list[str] = []
+        for stock in stocks:
+            symbol = str(stock["symbol"] or "").strip().zfill(6)
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM stock_daily_features
+                WHERE symbol=?
+                ORDER BY trade_date
+                """,
+                (symbol,),
+            ).fetchall()
+            if not rows:
+                missing_feature_symbols.append(symbol)
+                continue
+            df = pd.DataFrame([dict(row) for row in rows])
+            if "adj_factor" not in df.columns:
+                df["adj_factor"] = pd.NA
+            stock_name = str(stock["stock_name"] or "").strip()
+            if stock_name:
+                df["name"] = df["name"].fillna("").replace("", stock_name)
+            df = _normalize_processed_frame(df, f"{symbol}.sqlite", start_date=start_date, end_date=end_date)
+            if df.empty:
+                empty_range_symbols.append(symbol)
+                continue
+            loaded.append(_loaded_symbol_from_frame(df))
+
+    if not loaded:
+        raise ValueError(f"股票池模板 {clean_template} 在所选日期范围内没有可回测数据")
+    diagnostics = {
+        "data_source": "stock_pool",
+        "processed_dir": f"stock_pool://{clean_username}/{clean_template}",
+        "stock_pool_username": clean_username,
+        "stock_pool_template_name": clean_template,
+        "stock_pool_db_path": str(db_path or DEFAULT_DB_PATH),
+        "template_stock_count": len(stocks),
+        "file_count": len(loaded),
+        "missing_feature_count": len(missing_feature_symbols),
+        "missing_feature_symbols": missing_feature_symbols[:20],
+        "empty_range_count": len(empty_range_symbols),
+        "empty_range_symbols": empty_range_symbols[:20],
+    }
+    return loaded, diagnostics
+
+
+def load_backtest_input(req: BacktestRequest) -> tuple[list[LoadedSymbol], dict]:
+    if str(getattr(req, "data_source", "csv") or "csv") == "stock_pool":
+        return load_stock_pool_template_data(
+            username=getattr(req, "stock_pool_username", DEFAULT_USERNAME),
+            template_name=getattr(req, "stock_pool_template_name", ""),
+            db_path=getattr(req, "stock_pool_db_path", "") or None,
+            start_date="",
+            end_date="",
+        )
+    return load_processed_folder(req.processed_dir)
 
 
 def _build_eval_row(df: pd.DataFrame, idx: int, max_offset: int) -> dict[str, Any]:
@@ -1294,7 +1343,7 @@ def run_portfolio_backtest_loaded(
 
 
 def run_portfolio_backtest(req: BacktestRequest) -> dict[str, Any]:
-    loaded, diagnostics = load_processed_folder(req.processed_dir)
+    loaded, diagnostics = load_backtest_input(req)
     data_profile = resolve_data_profile(
         requested_profile=req.data_profile,
         processed_dir=diagnostics["processed_dir"],

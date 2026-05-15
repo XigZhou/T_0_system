@@ -38,7 +38,7 @@ from overnight_bt.models import (
     StockPoolTemplateSaveRequest,
     StockPoolValidateRequest,
 )
-from tests.helpers import make_processed_stock, write_processed_dir
+from tests.helpers import make_processed_stock, write_processed_dir, write_stock_pool_db
 
 
 class ApiIntegrationTest(unittest.TestCase):
@@ -181,6 +181,68 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertIn("期末权益", summary_csv.splitlines()[0])
             self.assertIn("股票名称", trades_csv.splitlines()[0])
             self.assertIn("交易日期", trades_csv.splitlines()[0])
+
+
+    def test_api_run_with_stock_pool_template_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock_a = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m5": 0.3, "m20": 0.8, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 10.5, "raw_high": 10.6, "raw_low": 10.4, "raw_close": 10.5, "m5": 0.1, "m20": 0.7, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 10.8, "raw_high": 10.9, "raw_low": 10.7, "raw_close": 10.8, "m5": 0.0, "m20": 0.6, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            stock_b = make_processed_stock(
+                "000002",
+                "万科A",
+                [
+                    {"trade_date": "20240102", "raw_open": 20.0, "raw_high": 20.2, "raw_low": 19.8, "raw_close": 20.0, "m5": 0.1, "m20": 0.4, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240103", "raw_open": 20.2, "raw_high": 20.4, "raw_low": 20.0, "raw_close": 20.3, "m5": 0.1, "m20": 0.3, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                    {"trade_date": "20240104", "raw_open": 20.5, "raw_high": 20.6, "raw_low": 20.1, "raw_close": 20.4, "m5": 0.0, "m20": 0.2, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
+                ],
+            )
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "接口股票池", [stock_a, stock_b], username="api_user")
+            payload = BacktestRequest(
+                data_source="stock_pool",
+                processed_dir="",
+                stock_pool_username="api_user",
+                stock_pool_template_name="接口股票池",
+                stock_pool_db_path=str(db_path),
+                start_date="20240102",
+                end_date="20240102",
+                buy_condition="m20>0",
+                score_expression="m20 + m5",
+                top_n=1,
+                initial_cash=100000.0,
+                per_trade_budget=10000.0,
+                lot_size=100,
+                buy_fee_rate=0.0,
+                sell_fee_rate=0.0,
+                stamp_tax_sell=0.0,
+                entry_offset=1,
+                exit_offset=2,
+                realistic_execution=True,
+                slippage_bps=0.0,
+                min_commission=0.0,
+                settlement_mode="complete",
+            )
+
+            body = run_backtest_api(payload)
+            self.assertEqual(body["diagnostics"]["data_source"], "stock_pool")
+            self.assertEqual(body["diagnostics"]["stock_pool_template_name"], "接口股票池")
+            self.assertEqual(body["summary"]["buy_count"], 1)
+            self.assertEqual(body["pick_rows"][0]["symbol"], "000001")
+
+            quality = run_signal_quality_api(SignalQualityRequest(**payload.model_dump()))
+            self.assertEqual(quality["diagnostics"]["data_source"], "stock_pool")
+            self.assertEqual(quality["summary"]["signal_count"], 1)
+
+            export_response = export_backtest_api(payload)
+            self.assertEqual(export_response.status_code, 200)
+            self.assertGreater(len(export_response.body), 100)
 
     def test_daily_plan_api_returns_buy_and_sell_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

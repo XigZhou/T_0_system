@@ -266,7 +266,7 @@ python scripts/build_theme_tradeable_universe.py \
 
 ### 股票池模板与共享行情库
 
-用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。当前阶段仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的 CSV 输入。
+用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。第四阶段已先把批量回测前端切到股票池模板输入；每日收盘选股、多账户模拟交易、单股回测和板块研究暂时仍沿用 CSV 输入。
 
 页面入口：
 
@@ -1132,7 +1132,11 @@ python scripts/run_topn_hold_compare.py
 
 | 参数 | 说明 |
 | --- | --- |
-| `processed_dir` | 处理后数据目录 |
+| `data_source` | 数据源，`stock_pool` 表示读取股票池模板 SQLite，`csv` 表示兼容旧处理后 CSV 目录 |
+| `processed_dir` | 处理后数据目录，仅 `data_source=csv` 时使用 |
+| `stock_pool_username` | 股票池模板用户，当前未接入登录系统时默认为 `admin` |
+| `stock_pool_template_name` | 股票池模板名称，`data_source=stock_pool` 时必填 |
+| `stock_pool_db_path` | 股票池 SQLite 路径，默认 `data_store/stock_pool_templates.sqlite` |
 | `start_date/end_date` | 信号日期范围 |
 | `buy_condition` | 信号筛选表达式 |
 | `sell_condition` | 可选卖出表达式，收盘后判断、次日开盘执行 |
@@ -1179,7 +1183,8 @@ python scripts/run_topn_hold_compare.py
 
 ### 异常处理
 
-- `processed_dir` 不存在时抛出 `FileNotFoundError`
+- `data_source=csv` 且 `processed_dir` 不存在时抛出 `FileNotFoundError`
+- `data_source=stock_pool` 且模板不存在、模板没有股票或股票没有入库日线时抛出 4xx 错误
 - `exit_offset <= entry_offset` 时抛出 `ValueError`
 - 表达式非法时抛出 `ValueError` 或表达式解析错误
 
@@ -1234,7 +1239,7 @@ http://127.0.0.1:8083/
 
 ### 页面输入项
 
-- 处理后数据目录
+- 股票池模板：从当前用户 `admin` 的模板下拉框选择；页面不再输入 CSV 路径
 - 回测模式：`信号质量回测` 或 `实盘账户回测`
 - 开始日期、结束日期
 - 买入条件
@@ -1249,6 +1254,7 @@ http://127.0.0.1:8083/
 - 买卖费率、印花税、滑点、最低佣金
 - 是否严格成交
 - 结束日处理方式，默认“截止日估值”，适合不想使用未来数据的实盘式回测
+- 策略预设：当前股票池模板 SQLite 只开放“基准动量”；“板块过滤”和“板块过滤 + 评分加权”需要 `sector_*` 字段入库后再开放
 
 ### 输出结果
 
@@ -1291,7 +1297,7 @@ http://127.0.0.1:8083/
 
 | 参数 | 说明 |
 | --- | --- |
-| `processed_dir` | 处理后数据目录 |
+| `processed_dir` | 处理后数据目录，当前每日收盘选股仍使用 CSV 输入 |
 | `signal_date` | 信号日期；留空时使用数据中最新交易日；若输入非交易日，使用此前最近交易日 |
 | `buy_condition` | 买入筛选条件 |
 | `sell_condition` | 当前持仓卖出条件 |
@@ -1478,7 +1484,7 @@ http://127.0.0.1:8083/
 - 提供类似账户模板管理的股票池模板页面，用于手工维护一组股票代码列表。
 - 支持新建、复制、载入、保存、删除、校验股票列表和初始化基础模板。
 - 模板按 `username + template_name` 唯一保存；当前默认用户为 `admin`。
-- 第一阶段保存模板和股票列表到 SQLite；第二阶段支持共享日线与指标入库、任务日志和补数脚本；当前仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+- 第一阶段保存模板和股票列表到 SQLite；第二阶段支持共享日线与指标入库、任务日志和补数脚本；第四阶段已先接入批量回测，其他旧模块后续再逐步切换。
 
 ### 入口
 

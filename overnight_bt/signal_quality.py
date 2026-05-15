@@ -23,6 +23,7 @@ from .backtest import (
     _profit_factor,
     _score_required_offset,
     _within_range,
+    load_backtest_input,
     load_processed_folder,
 )
 from .expressions import (
@@ -918,7 +919,7 @@ def run_signal_quality_loaded(
 
 
 def run_signal_quality(req: SignalQualityRequest) -> dict[str, Any]:
-    loaded, diagnostics = load_processed_folder(req.processed_dir)
+    loaded, diagnostics = load_backtest_input(req)
     data_profile = resolve_data_profile(
         requested_profile=req.data_profile,
         processed_dir=diagnostics["processed_dir"],

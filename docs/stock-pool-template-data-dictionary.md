@@ -1,6 +1,6 @@
 # 股票池模板系统数据说明
 
-本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库，但仍不改变每日收盘选股、多账户模拟交易、批量回测、单股回测和板块研究的现有 CSV 输入。
+本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库；第四阶段已先把批量回测接入股票池模板 SQLite。每日收盘选股、多账户模拟交易、单股回测和板块研究暂时仍沿用原 CSV 输入。
 
 ## 1. 数据来源
 
@@ -46,7 +46,7 @@
 | `stock_pool_templates` | 每个用户的每个模板一行 | `template_id`；业务唯一键 `UNIQUE(username, template_name)` |
 | `stock_pool_template_stocks` | 每个模板中的每只股票一行 | `PRIMARY KEY(username, template_name, symbol)` |
 | `stock_basic` | 每只股票一行 | `symbol` |
-| `stock_daily_features` | 每只股票每个交易日一行 | `PRIMARY KEY(symbol, trade_date)` |
+| `stock_daily_features` | 每只股票每个交易日一行 | `PRIMARY KEY(symbol, trade_date)`；批量回测以股票池模板关系表限定股票范围，再按该表读取日线和指标 |
 | `stock_pool_update_jobs` | 每个数据更新任务一行 | `job_id` |
 | `stock_pool_update_job_items` | 每个任务内每只股票一行 | `PRIMARY KEY(job_id, symbol)` |
 
@@ -131,6 +131,8 @@
 | `listed_days` | INTEGER | 上市天数 |
 | `total_mv_snapshot/turnover_rate_snapshot` | REAL | 市值和换手率快照 |
 | `created_at/updated_at` | TEXT | 入库和更新时间 |
+
+说明：当前 `stock_daily_features` 覆盖基准动量、量价、大盘环境和行业/市值快照字段，暂未写入 `sector_*` 板块增强字段。批量回测页因此只开放基准动量预设；板块增强预设需要后续把板块研究字段同步入库后再开放。
 
 ## 5. 缺失值和去重规则
 

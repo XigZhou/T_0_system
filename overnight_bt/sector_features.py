@@ -89,8 +89,9 @@ def validate_sector_feature_set(
     processed_dir: str | Path,
 ) -> dict[str, Any]:
     folder = Path(processed_dir)
+    source_text = str(processed_dir or "")
     manifest_path = folder / "sector_feature_manifest.csv"
-    if not manifest_path.exists():
+    if not source_text.startswith("stock_pool://") and not manifest_path.exists():
         raise ValueError(
             "当前选择的是板块增强口径，但处理后数据目录缺少 "
             "sector_feature_manifest.csv；请先运行 scripts/build_sector_research_features.py "

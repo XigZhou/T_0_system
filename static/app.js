@@ -21,7 +21,11 @@ const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const modeInputs = Array.from(document.querySelectorAll('input[name="backtestMode"]'));
 const modeOptions = Array.from(document.querySelectorAll(".mode-option"));
 const strategyPreset = document.getElementById("strategyPreset");
+const backtestPoolUser = document.getElementById("backtestPoolUser");
+const stockPoolTemplateSelect = document.getElementById("stockPoolTemplateSelect");
+const reloadBacktestPoolsBtn = document.getElementById("reloadBacktestPoolsBtn");
 
+const DEFAULT_BACKTEST_POOL_USERNAME = "admin";
 const BASE_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100";
 const SECTOR_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100_sector";
 const BASE_BUY_CONDITION = "m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02";
@@ -34,21 +38,23 @@ const STRATEGY_PRESETS = {
     buyCondition: BASE_BUY_CONDITION,
     scoreExpression: BASE_SCORE_EXPRESSION,
     dataProfile: "auto",
-    note: "已切换为基准动量预设，使用原主题前100处理后目录。",
+    note: "已切换为基准动量预设，数据来自所选股票池模板。",
   },
   sector_filter: {
     processedDir: SECTOR_PROCESSED_DIR,
     buyCondition: SECTOR_FILTER_CONDITION,
     scoreExpression: BASE_SCORE_EXPRESSION,
     dataProfile: "sector",
-    note: "已切换为板块过滤预设，会校验增强目录中的 sector_* 字段。",
+    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
+    disabled: true,
   },
   sector_score: {
     processedDir: SECTOR_PROCESSED_DIR,
     buyCondition: SECTOR_FILTER_CONDITION,
     scoreExpression: SECTOR_SCORE_EXPRESSION,
     dataProfile: "sector",
-    note: "已切换为板块过滤 + 评分加权预设，会校验增强目录中的 sector_* 字段。",
+    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
+    disabled: true,
   },
 };
 
@@ -298,9 +304,60 @@ if (tabButtons.length) {
   setActiveTab(initialTab);
 }
 
+function currentBacktestPoolUsername() {
+  return DEFAULT_BACKTEST_POOL_USERNAME;
+}
+
+function selectedBacktestPoolTemplate() {
+  return stockPoolTemplateSelect?.value || "";
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `请求失败：${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadBacktestPoolTemplates(showStatus = false) {
+  if (!stockPoolTemplateSelect) {
+    return;
+  }
+  const username = currentBacktestPoolUsername();
+  if (backtestPoolUser) {
+    backtestPoolUser.textContent = username;
+  }
+  if (showStatus) {
+    setStatus("正在读取股票池模板...");
+  }
+  const previous = stockPoolTemplateSelect.value;
+  const data = await fetchJson(`/api/stock-pools/templates?username=${encodeURIComponent(username)}`);
+  stockPoolTemplateSelect.innerHTML = "";
+  if (!data.templates.length) {
+    stockPoolTemplateSelect.appendChild(new Option("没有找到模板，请先到股票池模板管理新建", ""));
+    setStatus("没有找到股票池模板，请先到 /stock-pools 新建模板。", true);
+    return;
+  }
+  data.templates.forEach((item) => {
+    stockPoolTemplateSelect.appendChild(new Option(`${item.template_name}（${item.stock_count}只）`, item.template_name || ""));
+  });
+  const hasPrevious = previous && Array.from(stockPoolTemplateSelect.options).some((option) => option.value === previous);
+  stockPoolTemplateSelect.value = hasPrevious ? previous : stockPoolTemplateSelect.options[0].value;
+  if (showStatus) {
+    setStatus(`已读取 ${data.templates.length} 个股票池模板。`);
+  }
+}
+
 function applyStrategyPreset(presetKey, showStatus = true) {
   const preset = STRATEGY_PRESETS[presetKey] || STRATEGY_PRESETS.base;
-  document.getElementById("processedDir").value = preset.processedDir;
+  if (preset.disabled) {
+    if (strategyPreset) {
+      strategyPreset.value = "base";
+    }
+    return applyStrategyPreset("base", showStatus);
+  }
   document.getElementById("buyCondition").value = preset.buyCondition;
   document.getElementById("scoreExpression").value = preset.scoreExpression;
   if (showStatus) {
@@ -338,12 +395,23 @@ modeInputs.forEach((input) => {
 });
 updateBacktestModeUI();
 strategyPreset?.addEventListener("change", () => applyStrategyPreset(strategyPreset.value));
+reloadBacktestPoolsBtn?.addEventListener("click", () => {
+  loadBacktestPoolTemplates(true).catch((error) => setStatus(`读取股票池模板失败: ${error.message}`, true));
+});
 applyStrategyPreset(strategyPreset?.value || "base", false);
+loadBacktestPoolTemplates(false).catch((error) => setStatus(`读取股票池模板失败: ${error.message}`, true));
 
 function buildPayload() {
   const preset = STRATEGY_PRESETS[strategyPreset?.value] || STRATEGY_PRESETS.base;
+  const templateName = selectedBacktestPoolTemplate();
+  if (!templateName) {
+    throw new Error("请选择股票池模板");
+  }
   return {
-    processed_dir: document.getElementById("processedDir").value.trim(),
+    data_source: "stock_pool",
+    processed_dir: "",
+    stock_pool_username: currentBacktestPoolUsername(),
+    stock_pool_template_name: templateName,
     data_profile: preset.dataProfile,
     start_date: document.getElementById("startDate").value.trim(),
     end_date: document.getElementById("endDate").value.trim(),
@@ -803,12 +871,14 @@ function applyResult(result) {
     renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
     renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "rank", "score", "entry_price", "exit_price", "trade_return", "holding_days", "exit_type", "exit_signal_date"]);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "signal_count", "total_signal_return", "win_rate", "avg_trade_return", "median_trade_return"]);
-    diagText.textContent = `信号质量回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
+    const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
+    diagText.textContent = `信号质量回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
   } else {
     renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
     renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "action", "price", "shares", "gross_amount", "fees", "net_amount", "cash_after", "trade_return", "price_pnl", "exit_reason", "exit_signal_date"]);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "realized_pnl", "trade_count", "win_rate", "avg_trade_return"]);
-    diagText.textContent = `实盘账户回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${result.diagnostics.file_count} 个文件，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
+    const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
+    diagText.textContent = `实盘账户回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
   }
 }
 
@@ -827,7 +897,13 @@ async function postJson(url, payload) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = buildPayload();
+  let payload;
+  try {
+    payload = buildPayload();
+  } catch (error) {
+    setStatus(error.message, true);
+    return;
+  }
   const mode = getBacktestMode();
   const isSignalQuality = mode === "signal_quality";
   const endpoint = isSignalQuality ? "/api/run-signal-quality" : "/api/run-backtest";
@@ -851,7 +927,13 @@ exportBtn.addEventListener("click", async () => {
     setStatus("信号质量回测暂不支持导出；请切换到实盘账户回测后导出表格压缩包。", true);
     return;
   }
-  const payload = buildPayload();
+  let payload;
+  try {
+    payload = buildPayload();
+  } catch (error) {
+    setStatus(error.message, true);
+    return;
+  }
   exportBtn.disabled = true;
   setStatus("正在准备导出文件...");
   try {
