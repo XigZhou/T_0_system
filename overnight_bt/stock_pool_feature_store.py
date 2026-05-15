@@ -690,6 +690,23 @@ def _finish_job(
     )
 
 
+def _set_job_output_paths(
+    conn: sqlite3.Connection,
+    job_id: str,
+    log_file: str | Path,
+    item_csv: str | Path,
+    summary_json: str | Path,
+) -> None:
+    conn.execute(
+        """
+        UPDATE stock_pool_update_jobs
+        SET log_file=?, item_csv=?, summary_json=?
+        WHERE job_id=?
+        """,
+        (str(log_file), str(item_csv), str(summary_json), job_id),
+    )
+
+
 def _write_runtime_outputs(log_dir: Path, job_id: str, summary: dict[str, Any], items: list[dict[str, Any]]) -> tuple[Path, Path]:
     ensure_dir(log_dir)
     item_csv = log_dir / f"{job_id}_items.csv"
@@ -723,6 +740,8 @@ def _empty_summary(
         "failed_count": 0,
         "skipped_count": 0,
         "log_file": str(log_file),
+        "item_csv": "",
+        "summary_json": "",
         "message": message,
         "resolved_stock_count": int(counts.get("resolved_stock_count", 0) or 0),
         "due_stock_count": int(counts.get("due_stock_count", 0) or 0),
@@ -797,6 +816,7 @@ def run_stock_pool_feature_update(
             item_csv, summary_json = _write_runtime_outputs(log_dir, job_id, summary_base, [])
             summary_base.update({"item_csv": str(item_csv), "summary_json": str(summary_json), "items": []})
             summary_json.write_text(json.dumps(summary_base, ensure_ascii=False, indent=2), encoding="utf-8")
+            _set_job_output_paths(conn, job_id, log_file, item_csv, summary_json)
             logger.info(message)
             return summary_base
 
@@ -837,6 +857,7 @@ def run_stock_pool_feature_update(
             item_csv, summary_json = _write_runtime_outputs(log_dir, job_id, summary_base, [])
             summary_base.update({"item_csv": str(item_csv), "summary_json": str(summary_json), "items": []})
             summary_json.write_text(json.dumps(summary_base, ensure_ascii=False, indent=2), encoding="utf-8")
+            _set_job_output_paths(conn, job_id, log_file, item_csv, summary_json)
             logger.info(message)
             return summary_base
 
@@ -980,6 +1001,8 @@ def run_stock_pool_feature_update(
     summary["item_csv"] = str(item_csv)
     summary["summary_json"] = str(summary_json)
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _connect(db_path) as conn:
+        _set_job_output_paths(conn, job_id, log_file, item_csv, summary_json)
     logger.info(message)
     logger.info("任务输出：items=%s summary=%s log=%s", item_csv, summary_json, log_file)
     return summary

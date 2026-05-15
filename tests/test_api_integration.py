@@ -21,6 +21,7 @@ from overnight_bt.app import (
     run_single_stock_api,
     stock_pool_template_delete_api,
     stock_pool_template_page,
+    stock_pool_template_refresh_api,
     stock_pool_template_save_api,
     stock_pool_template_validate_api,
     stock_pool_update_job_api,
@@ -33,6 +34,7 @@ from overnight_bt.models import (
     PaperTemplateSaveRequest,
     SignalQualityRequest,
     SingleStockBacktestRequest,
+    StockPoolRefreshRequest,
     StockPoolTemplateSaveRequest,
     StockPoolValidateRequest,
 )
@@ -69,6 +71,27 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(saved["template"]["stock_count"], 2)
         deleted = stock_pool_template_delete_api(template_name="API股票池", username="api_test_user")
         self.assertIn("日线数据保留", deleted["message"])
+
+
+    def test_stock_pool_admin_only_update_apis_reject_non_admin(self) -> None:
+        with self.assertRaises(Exception) as jobs_ctx:
+            stock_pool_update_jobs_api(limit=5, username="normal_user")
+        self.assertEqual(getattr(jobs_ctx.exception, "status_code", None), 403)
+
+        with self.assertRaises(Exception) as detail_ctx:
+            stock_pool_update_job_api(job_id="missing", username="normal_user")
+        self.assertEqual(getattr(detail_ctx.exception, "status_code", None), 403)
+
+        with self.assertRaises(Exception) as refresh_ctx:
+            stock_pool_template_refresh_api(
+                StockPoolRefreshRequest(
+                    username="normal_user",
+                    source="template",
+                    template_name="任意模板",
+                    max_symbols=1,
+                )
+            )
+        self.assertEqual(getattr(refresh_ctx.exception, "status_code", None), 403)
 
     def test_stock_pool_update_job_api_returns_existing_jobs(self) -> None:
         jobs = stock_pool_update_jobs_api(limit=5)

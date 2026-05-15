@@ -94,6 +94,41 @@
           </div>
         </section>
 
+        <section id="stockPoolAdminPanel" class="panel compact-panel stock-pool-admin-panel admin-only" hidden>
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">数据运维</p>
+              <h3>模板数据刷新</h3>
+            </div>
+            <p class="panel-note">仅 admin 可见；默认只补缺失或未更新到最新交易日的股票。</p>
+          </div>
+          <div class="stock-pool-admin-actions">
+            <button id="refreshPoolDataBtn" type="button">刷新当前模板数据</button>
+            <button id="reloadPoolJobsBtn" type="button" class="secondary">刷新任务状态</button>
+            <p id="poolAdminStatus" class="status">等待 admin 操作。</p>
+          </div>
+          <div class="table-wrap stock-pool-job-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>任务ID</th>
+                  <th>状态</th>
+                  <th>来源</th>
+                  <th>模板</th>
+                  <th>执行股票</th>
+                  <th>成功</th>
+                  <th>失败</th>
+                  <th>截止日期</th>
+                  <th>完成时间</th>
+                  <th>日志路径</th>
+                </tr>
+              </thead>
+              <tbody id="poolJobRows"></tbody>
+            </table>
+          </div>
+          <p id="poolJobDetail" class="panel-note stock-pool-job-detail">点击任务行可查看失败明细和输出文件。</p>
+        </section>
+
         <section class="panel compact-panel">
           <div class="panel-head">
             <div>

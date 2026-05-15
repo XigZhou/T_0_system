@@ -204,9 +204,9 @@ data_store/stock_pool_templates.sqlite
 - `DELETE /api/stock-pools/template`
 - `POST /api/stock-pools/template/validate`
 - `POST /api/stock-pools/templates/seed?username=admin`
-- `POST /api/stock-pools/template/refresh`
-- `GET /api/stock-pools/jobs?limit=50`
-- `GET /api/stock-pools/jobs/{job_id}`
+- `POST /api/stock-pools/template/refresh`（仅 admin）
+- `GET /api/stock-pools/jobs?username=admin&limit=50`（仅 admin）
+- `GET /api/stock-pools/jobs/{job_id}?username=admin`（仅 admin）
 
 
 第二阶段数据入库常用命令：
@@ -250,6 +250,8 @@ python scripts/run_stock_pool_template_update.py --source active_templates --res
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
 
 说明：当前未接入登录系统，前端不再提供用户名输入，保存时自动使用 `admin`。所有模板默认参与后续每日更新，第一阶段页面不提供关闭开关。校验股票列表时，系统会尽量从 SQLite `stock_basic`、Top500 分层文件、当前 Top100 处理后 CSV 和已有股票池快照回填股票名称。如果同一只股票重复输入，后端只保留首次出现的顺序，SQLite 主键 `username + template_name + symbol` 不会重复写入，对后续更新任务和模板读取没有额外影响。
+
+股票池数据刷新和任务状态属于 admin-only 能力。`/stock-pools` 页面只有 admin 会看到“模板数据刷新”和“最近任务状态”区域；后端也会拒绝非 admin 调用刷新和任务接口。普通用户后续接入登录后只维护自己的股票池模板，不能主动触发 Tushare 拉取或查看底层更新任务。
 
 ### 5. 生成行业强度指标
 

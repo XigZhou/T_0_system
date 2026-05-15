@@ -259,6 +259,14 @@ class StockPoolTemplateTest(unittest.TestCase):
                 self.assertAlmostEqual(row["m5"], 0.05)
                 self.assertAlmostEqual(row["ma5"], 102.2)
                 self.assertEqual(row["can_buy_t"], 1)
+                stored_job = conn.execute(
+                    "SELECT log_file, item_csv, summary_json FROM stock_pool_update_jobs WHERE job_id=?",
+                    (summary["job_id"],),
+                ).fetchone()
+                self.assertIn("log_file", stored_job.keys())
+                self.assertTrue(stored_job["log_file"])
+                self.assertTrue(stored_job["item_csv"])
+                self.assertTrue(stored_job["summary_json"])
 
             jobs = list_stock_pool_update_jobs(db_path=db_path)
             self.assertEqual(jobs[0]["job_id"], summary["job_id"])

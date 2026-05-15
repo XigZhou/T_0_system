@@ -160,9 +160,10 @@
 3. 选择已有模板并点击“载入模板”，或点击“新建模板”。
 4. 在“手工股票列表”中粘贴股票代码。
 5. 点击“校验股票列表”，确认有效、重复和错误项。
-6. 点击“保存模板”。保存动作只写 SQLite 模板表，不直接拉取行情，避免大股票池保存超时；需要补行情时运行刷新 API 或 CLI。
+6. 点击“保存模板”。保存动作只写 SQLite 模板表，不直接拉取行情，避免大股票池保存超时；新增股票会在夜间统一调度中补齐，也可以由 admin 在页面手动刷新当前模板数据。
 7. 如需基于已有模板稍作修改，点击“复制模板”，修改名称或股票列表后保存。
 8. 删除模板时只删除模板关系，不删除后续日线事实数据。
+9. 只有 admin 会看到“模板数据刷新”和“最近任务状态”区域；普通用户只能维护模板，不能触发行情刷新或查看任务明细。
 
 ### 7.2 API 使用
 
@@ -174,9 +175,31 @@
 | `/api/stock-pools/template` | DELETE | 删除模板 |
 | `/api/stock-pools/template/validate` | POST | 校验手工股票列表 |
 | `/api/stock-pools/templates/seed?username=admin` | POST | 手动初始化基础模板 |
-| `/api/stock-pools/template/refresh` | POST | 手动触发行情与指标入库任务 |
-| `/api/stock-pools/jobs?limit=50` | GET | 查看最近更新任务 |
-| `/api/stock-pools/jobs/{job_id}` | GET | 查看任务明细 |
+| `/api/stock-pools/template/refresh` | POST | 手动触发行情与指标入库任务；仅 admin |
+| `/api/stock-pools/jobs?username=admin&limit=50` | GET | 查看最近更新任务；仅 admin |
+| `/api/stock-pools/jobs/{job_id}?username=admin` | GET | 查看任务明细；仅 admin |
+
+### 7.2.1 admin-only 数据刷新接口
+
+当前未接入登录系统时，刷新和任务接口使用 `username=admin` 作为过渡权限判断。非 admin 调用会返回 403。接入登录系统后，应由后端从登录态读取用户名和角色，不再信任前端传入的用户名。
+
+刷新当前模板示例：
+
+```json
+{
+  "source": "template",
+  "username": "admin",
+  "template_name": "当前多账户模拟股票池",
+  "start_date": "20220101",
+  "end_date": "",
+  "retry_attempts": 3,
+  "retry_sleep_seconds": 5,
+  "sleep_seconds": 0.5,
+  "only_missing": true
+}
+```
+
+任务状态字段说明：`stock_pool_update_jobs.status` 表示任务状态，`success_count/failed_count` 表示成功和失败股票数，`message` 记录汇总说明，`log_file/item_csv/summary_json` 记录运行日志、逐股票明细和任务摘要路径。旧任务若没有这些路径，前端显示“历史任务未记录”。
 
 保存模板请求示例：
 

@@ -310,5 +310,102 @@ if (!element("poolStockRows").innerHTML.includes("宁德时代")) {
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
 
+    def test_stock_pool_js_admin_refresh_and_jobs(self) -> None:
+        if shutil.which("node") is None:
+            self.skipTest("node is not available")
+        repo_root = Path(__file__).resolve().parents[1]
+        script = """
+const fs = require("fs");
+const vm = require("vm");
+const code = fs.readFileSync("static/stock_pools.js", "utf8");
+const elements = new Map();
+const handlers = new Map();
+function element(id) {
+  if (!elements.has(id)) {
+    const options = [];
+    elements.set(id, {
+      id,
+      type: "text",
+      textContent: "",
+      style: {},
+      value: "",
+      checked: false,
+      disabled: false,
+      hidden: false,
+      options,
+      innerHTML: "",
+      dataset: {},
+      appendChild: (child) => {
+        options.push(child);
+        return child;
+      },
+      addEventListener: (eventName, handler) => {
+        handlers.set(`${id}:${eventName}`, handler);
+      },
+      querySelectorAll: () => [],
+    });
+  }
+  return elements.get(id);
+}
+const calls = [];
+const context = {
+  document: { getElementById: element },
+  window: { confirm: () => true },
+  Option: function Option(label, value) {
+    return { label, value, dataset: {} };
+  },
+  fetch: (url, options = {}) => {
+    calls.push({ url, options });
+    if (url.startsWith("/api/stock-pools/templates")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ templates: [{ template_name: "测试池", stock_count: 1 }] }) });
+    }
+    if (url.startsWith("/api/stock-pools/template?")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ username: "admin", template_name: "测试池", stock_count: 1, stock_text: "300750", stocks: [{ symbol: "300750", ts_code: "300750.SZ", stock_name: "宁德时代", latest_trade_date: "20260514" }] }) });
+    }
+    if (url.startsWith("/api/stock-pools/jobs")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ jobs: [{ job_id: "abcdef123456", status: "success", job_type: "manual_refresh", template_name: "测试池", stock_count: 1, success_count: 1, failed_count: 0, end_date: "20260514", finished_at: "2026-05-14 20:00:00", log_file: "logs/job.log" }] }) });
+    }
+    if (url === "/api/stock-pools/template/refresh") {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: "success", message: "刷新完成" }) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  },
+  URLSearchParams,
+  Intl,
+  Date,
+  Number,
+  String,
+  Boolean,
+  Math,
+  console,
+};
+vm.createContext(context);
+vm.runInContext(code, context);
+if (element("stockPoolAdminPanel").hidden !== false) {
+  throw new Error("admin panel should be visible for admin");
+}
+context.populatePoolEditor({ username: "admin", template_name: "测试池", original_template_name: "测试池", stock_text: "300750", stocks: [] });
+handlers.get("refreshPoolDataBtn:click")();
+setTimeout(() => {
+  const refreshCall = calls.find((call) => call.url === "/api/stock-pools/template/refresh");
+  if (!refreshCall) {
+    throw new Error("refresh api not called");
+  }
+  const payload = JSON.parse(refreshCall.options.body);
+  if (payload.username !== "admin" || payload.template_name !== "测试池" || payload.only_missing !== true) {
+    throw new Error("refresh payload is wrong");
+  }
+}, 0);
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

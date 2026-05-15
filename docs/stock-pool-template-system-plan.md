@@ -25,7 +25,8 @@
 - 支持四类更新来源：`active_templates`、`template`、`symbols`、`all`。`all` 用于系统初始化全市场股票；其余用于模板或手工股票的补数和刷新。
 - 新增 CLI：`scripts/init_stock_pool_feature_store.py`、`scripts/run_stock_pool_template_update.py`、`scripts/run_stock_pool_template_update.sh`。
 - 新增 API：`POST /api/stock-pools/template/refresh`、`GET /api/stock-pools/jobs`、`GET /api/stock-pools/jobs/{job_id}`。
-- 每次任务都会写入 `stock_pool_update_jobs` 和 `stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出 `.log`、`_items.csv`、`_summary.json`。
+- 数据刷新和任务查看为 admin-only 能力。当前未接入登录系统时，后端以 `username=admin` 作为过渡校验；后续接入登录后应改为从 session/token 获取用户。普通用户可以管理自己的模板，但不能触发 Tushare 刷新或查看更新任务。
+- 每次任务都会写入 `stock_pool_update_jobs` 和 `stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出 `.log`、`_items.csv`、`_summary.json`；新任务会把这些输出路径同步记录到任务表，旧任务若无路径则页面显示“历史任务未记录”。
 - 数据更新已支持 `--batch-size/--batch-index/--offset` 分批、`--resume-after-symbol` 断点续跑、`--retry-attempts/--retry-sleep-seconds` 单股失败重试，以及默认只补库内缺失数据。
 - 单测已用假数据源验证“模板股票 -> 日线/复权/交易日历/大盘环境 -> 指标 -> SQLite -> 任务日志”的完整链路，并覆盖分批、只补缺失、断点续跑和重试行为。
 - 保存模板本身仍只保存模板和股票关系；行情采集通过手动刷新、初始化脚本或后续定时任务触发，避免前端保存请求被长时间阻塞。
@@ -105,9 +106,10 @@
 - 删除模板：只删除模板和模板股票关系，不删除 SQLite 中已有股票日线数据。
 - 股票列表输入框：用户手工粘贴股票代码，支持一行一个、逗号分隔、空格分隔。
 - 股票校验预览：保存前显示有效股票、重复股票、格式错误股票。
-- 更新状态：显示模板内股票的最新数据日期、缺失数量、最近更新任务状态。
+- 更新状态：显示模板内股票的最新数据日期。
+- admin 数据运维区：仅 admin 可见，支持手动刷新当前模板数据、查看最近任务状态、查看任务输出路径和失败明细。
 
-页面不提供自动筛选条件输入，不提供市值/主题/指数/行业筛选控件。
+页面不提供自动筛选条件输入，不提供市值/主题/指数/行业筛选控件。普通用户不展示数据运维区，后端也会拒绝非 admin 调用刷新和任务状态接口。
 
 ## 4. 基础模板
 
@@ -350,11 +352,11 @@ PRIMARY KEY(symbol, trade_date)
 | `/api/stock-pools/template` | POST | 新建或保存模板 |
 | `/api/stock-pools/template` | DELETE | 删除模板关系，不删除日线数据 |
 | `/api/stock-pools/template/validate` | POST | 校验手工股票列表 |
-| `/api/stock-pools/template/refresh` | POST | 手动触发某模板数据更新 |
-| `/api/stock-pools/jobs` | GET | 查看更新任务列表 |
-| `/api/stock-pools/jobs/{job_id}` | GET | 查看任务明细 |
+| `/api/stock-pools/template/refresh` | POST | 手动触发某模板数据更新；仅 admin |
+| `/api/stock-pools/jobs` | GET | 查看更新任务列表；仅 admin |
+| `/api/stock-pools/jobs/{job_id}` | GET | 查看任务明细；仅 admin |
 
-当前无登录系统时，API 默认 `username=admin`。后续接入登录后，从 session 或 token 中读取用户名。
+当前无登录系统时，模板 API 默认 `username=admin`。刷新和任务 API 会校验 `username=admin`，非 admin 返回 403。后续接入登录后，应从 session 或 token 中读取用户名，并在后端用真实登录态判断 admin 权限，不再信任前端传参。
 
 ## 10. 流程图
 
@@ -458,9 +460,12 @@ flowchart LR
 
 ### 第三阶段：每日定时更新
 
-- 新增 `scripts/run_stock_pool_template_update.sh`。
-- 接入 crontab 或现有收盘后调度。
-- 页面展示模板最新数据日期和任务状态。
+状态：后台调度已完成，admin 前端闭环已补齐。
+
+- 已新增 `scripts/run_stock_pool_template_update.sh`。
+- 已接入现有收盘后统一调度，交易日晚间由 `scripts/run_after_close_pipeline.sh` 第 8 步执行。
+- 页面已展示模板内每只股票最新数据日期。
+- 页面已新增 admin-only 数据运维区，可手动刷新当前模板数据，并查看最近任务状态、任务输出路径和失败明细。
 
 ### 第四阶段：旧模块逐步接入
 

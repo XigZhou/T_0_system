@@ -13,6 +13,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = PROJECT_ROOT / "data_store" / "stock_pool_templates.sqlite"
 DEFAULT_USERNAME = "admin"
+ADMIN_USERNAME = "admin"
 TOP500_LAYER_CONSTITUENTS = PROJECT_ROOT / "research_runs" / "20260509_top500_stock_pool_layer_grid_account" / "stock_pool_layer_constituents.csv"
 DEFAULT_PAPER_PROCESSED_DIR = PROJECT_ROOT / "data_bundle" / "processed_qfq_theme_focus_top100"
 
@@ -53,6 +54,13 @@ def _connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def _ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
+    existing = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    for column_name, column_definition in columns.items():
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -287,6 +295,15 @@ def init_stock_pool_db(db_path: str | Path | None = None) -> None:
                 PRIMARY KEY(job_id, symbol)
             );
             """
+        )
+        _ensure_columns(
+            conn,
+            "stock_pool_update_jobs",
+            {
+                "log_file": "TEXT DEFAULT ''",
+                "item_csv": "TEXT DEFAULT ''",
+                "summary_json": "TEXT DEFAULT ''",
+            },
         )
         now = _now_text()
         conn.execute(

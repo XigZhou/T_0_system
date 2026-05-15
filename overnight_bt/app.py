@@ -44,6 +44,7 @@ from .stock_pool_feature_store import (
     run_stock_pool_feature_update,
 )
 from .stock_pool_templates import (
+    ADMIN_USERNAME,
     DEFAULT_USERNAME,
     delete_stock_pool_template,
     ensure_default_stock_pool_templates,
@@ -60,6 +61,13 @@ STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="Signal-Based Swing Portfolio Backtest")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _require_stock_pool_admin(username: str) -> str:
+    clean_username = str(username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
+    if clean_username != ADMIN_USERNAME:
+        raise HTTPException(status_code=403, detail="只有 admin 用户可以执行股票池数据刷新和查看更新任务")
+    return clean_username
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -264,11 +272,12 @@ def stock_pool_template_seed_api(username: str = DEFAULT_USERNAME):
 @app.post("/api/stock-pools/template/refresh")
 def stock_pool_template_refresh_api(req: StockPoolRefreshRequest):
     try:
+        operator = _require_stock_pool_admin(req.username or DEFAULT_USERNAME)
         job_type = "initial_load" if req.source == "all" else "manual_refresh"
         config = StockPoolFeatureUpdateConfig(
             source=req.source,
             job_type=job_type,
-            username=req.username or DEFAULT_USERNAME,
+            username=operator,
             template_name=req.template_name,
             stock_text=req.stock_text,
             start_date=req.start_date,
@@ -285,6 +294,8 @@ def stock_pool_template_refresh_api(req: StockPoolRefreshRequest):
             only_missing=req.only_missing,
         )
         return run_stock_pool_feature_update(config)
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -294,17 +305,23 @@ def stock_pool_template_refresh_api(req: StockPoolRefreshRequest):
 
 
 @app.get("/api/stock-pools/jobs")
-def stock_pool_update_jobs_api(limit: int = 50):
+def stock_pool_update_jobs_api(limit: int = 50, username: str = DEFAULT_USERNAME):
     try:
+        _require_stock_pool_admin(username)
         return {"jobs": list_stock_pool_update_jobs(limit=limit)}
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/stock-pools/jobs/{job_id}")
-def stock_pool_update_job_api(job_id: str):
+def stock_pool_update_job_api(job_id: str, username: str = DEFAULT_USERNAME):
     try:
+        _require_stock_pool_admin(username)
         return read_stock_pool_update_job(job_id=job_id)
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
