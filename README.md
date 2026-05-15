@@ -171,7 +171,7 @@ python scripts/build_theme_tradeable_universe.py \
 
 ### 4.2 股票池模板管理
 
-股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段保存模板和股票列表；第二阶段已支持共享日线与指标入库、任务日志和补数脚本。第四阶段已先把批量回测前端切到股票池模板输入；后端 `/api/run-backtest`、`/api/run-signal-quality` 和导出接口仍保留 `data_source=csv` 兼容旧脚本。每日收盘选股、多账户模拟交易、单股回测和板块研究暂时仍沿用原 CSV 输入。
+股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段保存模板和股票列表；第二阶段已支持共享日线与指标入库、任务日志和补数脚本。第四阶段已先把批量回测和每日收盘选股前端切到股票池模板输入；后端 `/api/run-backtest`、`/api/run-signal-quality`、导出接口和 `/api/daily-plan` 仍保留 `data_source=csv` 兼容旧脚本。多账户模拟交易、单股回测和板块研究暂时仍沿用原 CSV 输入。
 
 页面入口：
 
@@ -978,7 +978,7 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - 入口：`/stock-pools`
 - 默认用户：`admin`
 - 用途：维护用户手工股票列表模板，作为后续批量回测、每日收盘选股、多账户模拟交易、单股回测和板块研究统一股票池输入的基础。
-- 当前阶段：模板写入 `data_store/stock_pool_templates.sqlite`；日线和指标写入共享表 `stock_daily_features`。批量回测页面已经使用股票池模板读取 SQLite，其他旧模块暂时仍保持 CSV 输入。
+- 当前阶段：模板写入 `data_store/stock_pool_templates.sqlite`；日线和指标写入共享表 `stock_daily_features`。批量回测页面和每日收盘选股页面已经使用股票池模板读取 SQLite，其他旧模块暂时仍保持 CSV 输入。
 - 页面按钮：
   - `刷新模板`：重新读取当前用户模板列表。
   - `载入模板`：把下拉框选中的模板载入编辑区。
@@ -992,7 +992,8 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - 模板名称在同一用户下唯一；保存时会检查名称冲突。
 - 第二阶段入库脚本会写 `logs/stock_pool_template_update/`，失败时按 `job_id` 查看任务表和日志。
 - 批量回测页面 `/` 不再填写“处理后数据目录”，而是读取当前用户 `admin` 下的股票池模板下拉框；点击“刷新模板”会重新读取 `/api/stock-pools/templates?username=admin`。
-- 现阶段 SQLite `stock_daily_features` 还没有入库 `sector_*` 板块增强字段，所以批量回测页的“板块过滤”和“板块过滤 + 评分加权”预设先禁用；需要板块增强时仍使用旧 CSV 增强目录或等后续把板块字段写入 SQLite。
+- 每日收盘选股页面 `/daily` 也不再填写“处理后数据目录”，而是选择当前用户 `admin` 的股票池模板，提交时向 `/api/daily-plan` 发送 `data_source=stock_pool`、`stock_pool_username` 和 `stock_pool_template_name`。
+- 现阶段 SQLite `stock_daily_features` 还没有入库 `sector_*` 板块增强字段，所以批量回测页和每日收盘选股页的“板块过滤”和“板块过滤 + 评分加权”预设先禁用；需要板块增强时仍使用旧 CSV 增强目录或等后续把板块字段写入 SQLite。
 
 ### API
 

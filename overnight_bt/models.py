@@ -105,7 +105,11 @@ class DailyHolding(BaseModel):
 
 
 class DailyPlanRequest(BaseModel):
-    processed_dir: str = Field(..., description="Directory containing per-stock processed CSV files")
+    data_source: Literal["csv", "stock_pool"] = Field("csv", description="csv=读取处理后CSV目录；stock_pool=读取股票池模板SQLite")
+    processed_dir: str = Field("", description="Directory containing per-stock processed CSV files; csv mode only")
+    stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
+    stock_pool_template_name: str = Field("", description="股票池模板名称；stock_pool mode required")
+    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；为空时使用默认 data_store/stock_pool_templates.sqlite")
     data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
     signal_date: str = Field("", description="Signal date YYYYMMDD; empty means latest available trade date")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")

@@ -10,7 +10,7 @@ from .backtest import (
     _count_holding_days,
     _future_row,
     _score_required_offset,
-    load_processed_folder,
+    load_backtest_input,
 )
 from .expressions import (
     compile_score_expression,
@@ -66,7 +66,7 @@ def _estimate_shares(raw_close: float | None, per_trade_budget: float, lot_size:
 
 
 def build_daily_plan(req: DailyPlanRequest) -> dict[str, Any]:
-    loaded, diagnostics = load_processed_folder(req.processed_dir)
+    loaded, diagnostics = load_backtest_input(req)
     data_profile = resolve_data_profile(
         requested_profile=req.data_profile,
         processed_dir=diagnostics["processed_dir"],

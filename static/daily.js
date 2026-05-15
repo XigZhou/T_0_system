@@ -9,34 +9,35 @@ const dailyHoldingTable = document.getElementById("dailyHoldingTable");
 const dailyTabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const dailyTabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const strategyPreset = document.getElementById("strategyPreset");
+const dailyPoolUser = document.getElementById("dailyPoolUser");
+const dailyStockPoolTemplateSelect = document.getElementById("dailyStockPoolTemplateSelect");
+const dailyReloadPoolsBtn = document.getElementById("dailyReloadPoolsBtn");
 
-const BASE_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100";
-const SECTOR_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100_sector";
+const DEFAULT_DAILY_POOL_USERNAME = "admin";
 const BASE_BUY_CONDITION = "m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02";
 const BASE_SCORE_EXPRESSION = "m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30";
 const SECTOR_FILTER_CONDITION = `${BASE_BUY_CONDITION},sector_exposure_score>0,sector_strongest_theme_score>=0.6,sector_strongest_theme_rank_pct<=0.5`;
 const SECTOR_SCORE_EXPRESSION = `${BASE_SCORE_EXPRESSION} + sector_strongest_theme_score * 30 + sector_exposure_score * 10 - sector_strongest_theme_rank_pct * 15`;
 const STRATEGY_PRESETS = {
   base: {
-    processedDir: BASE_PROCESSED_DIR,
     buyCondition: BASE_BUY_CONDITION,
     scoreExpression: BASE_SCORE_EXPRESSION,
     dataProfile: "auto",
-    note: "已切换为基准动量预设，使用原主题前100处理后目录。",
+    note: "已切换为基准动量预设，数据来自所选股票池模板。",
   },
   sector_filter: {
-    processedDir: SECTOR_PROCESSED_DIR,
     buyCondition: SECTOR_FILTER_CONDITION,
     scoreExpression: BASE_SCORE_EXPRESSION,
     dataProfile: "sector",
-    note: "已切换为板块过滤预设，会校验增强目录中的 sector_* 字段。",
+    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
+    disabled: true,
   },
   sector_score: {
-    processedDir: SECTOR_PROCESSED_DIR,
     buyCondition: SECTOR_FILTER_CONDITION,
     scoreExpression: SECTOR_SCORE_EXPRESSION,
     dataProfile: "sector",
-    note: "已切换为板块过滤 + 评分加权预设，会校验增强目录中的 sector_* 字段。",
+    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
+    disabled: true,
   },
 };
 
@@ -115,9 +116,60 @@ function setDailyStatus(text, error = false) {
   dailyStatus.style.color = error ? "#8a2f13" : "";
 }
 
+function currentDailyPoolUsername() {
+  return DEFAULT_DAILY_POOL_USERNAME;
+}
+
+function selectedDailyPoolTemplate() {
+  return dailyStockPoolTemplateSelect?.value || "";
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `请求失败：${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadDailyPoolTemplates(showStatus = false) {
+  if (!dailyStockPoolTemplateSelect) {
+    return;
+  }
+  const username = currentDailyPoolUsername();
+  if (dailyPoolUser) {
+    dailyPoolUser.textContent = username;
+  }
+  if (showStatus) {
+    setDailyStatus("正在读取股票池模板...");
+  }
+  const previous = dailyStockPoolTemplateSelect.value;
+  const data = await fetchJson(`/api/stock-pools/templates?username=${encodeURIComponent(username)}`);
+  dailyStockPoolTemplateSelect.innerHTML = "";
+  if (!data.templates.length) {
+    dailyStockPoolTemplateSelect.appendChild(new Option("没有找到模板，请先到股票池模板管理新建", ""));
+    setDailyStatus("没有找到股票池模板，请先到 /stock-pools 新建模板。", true);
+    return;
+  }
+  data.templates.forEach((item) => {
+    dailyStockPoolTemplateSelect.appendChild(new Option(`${item.template_name}（${item.stock_count}只）`, item.template_name || ""));
+  });
+  const hasPrevious = previous && Array.from(dailyStockPoolTemplateSelect.options).some((option) => option.value === previous);
+  dailyStockPoolTemplateSelect.value = hasPrevious ? previous : dailyStockPoolTemplateSelect.options[0].value;
+  if (showStatus) {
+    setDailyStatus(`已读取 ${data.templates.length} 个股票池模板。`);
+  }
+}
+
 function applyStrategyPreset(presetKey, showStatus = true) {
   const preset = STRATEGY_PRESETS[presetKey] || STRATEGY_PRESETS.base;
-  document.getElementById("processedDir").value = preset.processedDir;
+  if (preset.disabled) {
+    if (strategyPreset) {
+      strategyPreset.value = "base";
+    }
+    return applyStrategyPreset("base", showStatus);
+  }
   document.getElementById("buyCondition").value = preset.buyCondition;
   document.getElementById("scoreExpression").value = preset.scoreExpression;
   if (showStatus) {
@@ -212,8 +264,15 @@ function parseHoldings(text) {
 
 function buildPayload() {
   const preset = STRATEGY_PRESETS[strategyPreset?.value] || STRATEGY_PRESETS.base;
+  const templateName = selectedDailyPoolTemplate();
+  if (!templateName) {
+    throw new Error("请选择股票池模板");
+  }
   return {
-    processed_dir: document.getElementById("processedDir").value.trim(),
+    data_source: "stock_pool",
+    processed_dir: "",
+    stock_pool_username: currentDailyPoolUsername(),
+    stock_pool_template_name: templateName,
     data_profile: preset.dataProfile,
     signal_date: document.getElementById("signalDate").value.trim(),
     buy_condition: document.getElementById("buyCondition").value.trim(),
@@ -262,11 +321,16 @@ function applyResult(result) {
   renderTable(dailyBuyTable, result.buy_rows, ["signal_date", "planned_buy_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "signal_raw_close", "estimated_shares", "estimated_budget", "open_check"]);
   renderTable(dailySellTable, result.sell_rows, ["signal_date", "planned_sell_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_reason", "open_check"]);
   renderTable(dailyHoldingTable, result.holding_rows, ["signal_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_days", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_reason", "condition_note"]);
-  setDailyStatus(`计划生成完成：${formatValue("data_profile", result.diagnostics.data_profile)}，载入 ${result.diagnostics.file_count} 个文件，使用 ${result.summary.signal_date}。`);
+  const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
+  setDailyStatus(`计划生成完成：${formatValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，使用 ${result.summary.signal_date}。`);
 }
 
 strategyPreset?.addEventListener("change", () => applyStrategyPreset(strategyPreset.value));
+dailyReloadPoolsBtn?.addEventListener("click", () => {
+  loadDailyPoolTemplates(true).catch((error) => setDailyStatus(`读取股票池模板失败: ${error.message}`, true));
+});
 applyStrategyPreset(strategyPreset?.value || "base", false);
+loadDailyPoolTemplates(false).catch((error) => setDailyStatus(`读取股票池模板失败: ${error.message}`, true));
 
 dailyForm.addEventListener("submit", async (event) => {
   event.preventDefault();
