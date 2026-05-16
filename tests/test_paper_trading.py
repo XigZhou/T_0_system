@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tempfile
 import unittest
@@ -17,14 +17,32 @@ from overnight_bt.paper_trading import (
     run_paper_trading,
     save_paper_account_template,
 )
-from tests.helpers import make_processed_stock, write_processed_dir
+from tests.helpers import make_processed_stock, write_stock_pool_db
 
 
 class PaperTradingTest(unittest.TestCase):
+    def _one_stock(self) -> pd.DataFrame:
+        return make_processed_stock(
+            "000001",
+            "平安银行",
+            [
+                {
+                    "trade_date": "20240102",
+                    "raw_open": 10.0,
+                    "raw_high": 10.2,
+                    "raw_low": 9.8,
+                    "raw_close": 10.0,
+                    "m20": 0.8,
+                    "can_buy_open_t": True,
+                    "can_sell_t": True,
+                }
+            ],
+        )
+
     def _write_config(
         self,
         base: Path,
-        processed_dir: Path,
+        db_path: Path,
         initial_capital: float = 100000,
         buy_shares: int = 200,
         top_n: int = 1,
@@ -42,7 +60,10 @@ class PaperTradingTest(unittest.TestCase):
 账户编号: 测试账户
 账户名称: 测试模拟账户
 初始资金: {initial_capital}
-处理后数据目录: {processed_dir.as_posix()}
+股票池:
+  用户: admin
+  模板名称: 测试股票池
+  数据库路径: {db_path.as_posix()}
 买入条件: "m20>0.5"
 卖出条件: "m20<0.2"
 评分表达式: "m20"
@@ -100,12 +121,13 @@ class PaperTradingTest(unittest.TestCase):
                     {"trade_date": "20240104", "raw_open": 20.4, "raw_high": 20.6, "raw_low": 20.3, "raw_close": 20.4, "m20": 0.3, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock_a, stock_b])
-            config_path = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [stock_a, stock_b])
+            config_path = self._write_config(base, db_path)
 
             generated = run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102"))
             self.assertEqual(generated["summary"]["added_order_count"], 1)
             self.assertEqual(generated["pending_order_rows"][0]["订单方向"], "买入")
+            self.assertEqual(generated["summary"]["stock_pool_template_name"], "测试股票池")
 
             executed = run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="execute", trade_date="20240103"))
             self.assertEqual(executed["summary"]["executed_count"], 1)
@@ -156,8 +178,8 @@ class PaperTradingTest(unittest.TestCase):
                     {"trade_date": "20240104", "raw_open": 8.0, "raw_high": 8.2, "raw_low": 7.8, "raw_close": 8.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock_a, stock_b])
-            config_path = self._write_config(base, processed_dir, initial_capital=1000, buy_shares=100)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [stock_a, stock_b])
+            config_path = self._write_config(base, db_path, initial_capital=1000, buy_shares=100)
 
             run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102"))
             run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="execute", trade_date="20240103"))
@@ -191,8 +213,8 @@ class PaperTradingTest(unittest.TestCase):
                     {"trade_date": "20240103", "raw_open": 10.5, "raw_high": 10.8, "raw_low": 10.4, "raw_close": 10.7, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock])
-            config_path = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [stock])
+            config_path = self._write_config(base, db_path)
 
             run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102"))
             run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="execute", trade_date="20240103"))
@@ -227,8 +249,8 @@ class PaperTradingTest(unittest.TestCase):
                     {"trade_date": "20240103", "raw_open": 50.0, "raw_high": 51.0, "raw_low": 49.0, "raw_close": 50.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [high_price, normal_price])
-            config_path = self._write_config(base, processed_dir, max_close=100)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [high_price, normal_price])
+            config_path = self._write_config(base, db_path, max_close=100)
 
             generated = run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102"))
 
@@ -256,8 +278,8 @@ class PaperTradingTest(unittest.TestCase):
                     {"trade_date": "20240103", "raw_open": 70.0, "raw_high": 71.0, "raw_low": 69.0, "raw_close": 70.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock_a, stock_b])
-            config_path = self._write_config(base, processed_dir, buy_shares=300, top_n=2, min_buy_amount=10000, lot_size=100)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [stock_a, stock_b])
+            config_path = self._write_config(base, db_path, buy_shares=300, top_n=2, min_buy_amount=10000, lot_size=100)
 
             generated = run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102"))
 
@@ -268,14 +290,14 @@ class PaperTradingTest(unittest.TestCase):
     def test_list_templates_reads_chinese_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
-            processed_dir = base / "processed_qfq"
-            processed_dir.mkdir()
-            config_path = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
+            config_path = self._write_config(base, db_path)
             templates = list_paper_account_templates(config_path.parent)
             self.assertEqual(templates[0]["account_id"], "测试账户")
+            self.assertEqual(templates[0]["stock_pool_template_name"], "测试股票池")
             self.assertEqual(templates[0]["buy_shares"], 200)
 
-    def test_generate_latest_signal_uses_trade_calendar_next_date(self) -> None:
+    def test_generate_latest_signal_falls_back_to_next_weekday_when_template_has_no_next_row(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             stock = make_processed_stock(
@@ -285,14 +307,8 @@ class PaperTradingTest(unittest.TestCase):
                     {"trade_date": "20240104", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock])
-            pd.DataFrame(
-                [
-                    {"exchange": "SSE", "trade_date": "20240104", "is_open": "1", "pretrade_date": "20240103"},
-                    {"exchange": "SSE", "trade_date": "20240105", "is_open": "1", "pretrade_date": "20240104"},
-                ]
-            ).to_csv(base / "trade_calendar.csv", index=False)
-            config_path = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [stock])
+            config_path = self._write_config(base, db_path)
 
             generated = run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240104"))
 
@@ -303,15 +319,16 @@ class PaperTradingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             config_dir = base / "configs" / "paper_accounts"
-            processed_dir = base / "processed_qfq"
-            processed_dir.mkdir()
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
             result = save_paper_account_template(
                 PaperTemplateSaveRequest(
                     config_dir=str(config_dir),
                     file_name="editor_account.yaml",
                     account_id="编辑账户",
                     account_name="编辑模拟账户",
-                    processed_dir=str(processed_dir),
+                    stock_pool_username="admin",
+                    stock_pool_template_name="测试股票池",
+                    stock_pool_db_path=str(db_path),
                     buy_condition="m20>0.1",
                     sell_condition="m20<0",
                     score_expression="m20",
@@ -324,15 +341,15 @@ class PaperTradingTest(unittest.TestCase):
             self.assertTrue(saved_path.exists())
             loaded = read_paper_account_template(str(saved_path), str(config_dir))
             self.assertEqual(loaded["account_id"], "编辑账户")
+            self.assertEqual(loaded["stock_pool_template_name"], "测试股票池")
             self.assertEqual(loaded["buy_condition"], "m20>0.1")
             self.assertEqual(Path(loaded["ledger_path"]), base / "paper_trading" / "accounts" / "editor_account.xlsx")
 
     def test_save_template_rejects_conflicting_identity_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
-            processed_dir = base / "processed_qfq"
-            processed_dir.mkdir()
-            existing = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
+            existing = self._write_config(base, db_path)
             config_dir = existing.parent
             existing_ledger = base / "paper_trading" / "accounts" / "test_account.xlsx"
 
@@ -343,7 +360,9 @@ class PaperTradingTest(unittest.TestCase):
                         file_name="duplicate_id.yaml",
                         account_id="测试账户",
                         account_name="另一个账户",
-                        processed_dir=str(processed_dir),
+                        stock_pool_username="admin",
+                        stock_pool_template_name="测试股票池",
+                        stock_pool_db_path=str(db_path),
                         buy_condition="m20>0",
                         score_expression="m20",
                         ledger_path=str(base / "paper_trading" / "accounts" / "duplicate_id.xlsx"),
@@ -357,7 +376,9 @@ class PaperTradingTest(unittest.TestCase):
                         file_name="duplicate_ledger.yaml",
                         account_id="新账户",
                         account_name="新模拟账户",
-                        processed_dir=str(processed_dir),
+                        stock_pool_username="admin",
+                        stock_pool_template_name="测试股票池",
+                        stock_pool_db_path=str(db_path),
                         buy_condition="m20>0",
                         score_expression="m20",
                         ledger_path=str(existing_ledger),
@@ -367,9 +388,8 @@ class PaperTradingTest(unittest.TestCase):
     def test_delete_template_keeps_excel_ledger_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
-            processed_dir = base / "processed_qfq"
-            processed_dir.mkdir()
-            config_path = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
+            config_path = self._write_config(base, db_path)
             ledger_path = base / "paper_trading" / "accounts" / "test_account.xlsx"
             ledger_path.parent.mkdir(parents=True, exist_ok=True)
             ledger_path.write_bytes(b"ledger placeholder")
@@ -383,9 +403,8 @@ class PaperTradingTest(unittest.TestCase):
     def test_overwrite_template_rejects_switching_to_existing_old_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
-            processed_dir = base / "processed_qfq"
-            processed_dir.mkdir()
-            config_path = self._write_config(base, processed_dir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
+            config_path = self._write_config(base, db_path)
             old_ledger = base / "paper_trading" / "accounts" / "old_strategy.xlsx"
             old_ledger.parent.mkdir(parents=True, exist_ok=True)
             old_ledger.write_bytes(b"old ledger")
@@ -399,7 +418,9 @@ class PaperTradingTest(unittest.TestCase):
                         overwrite_existing=True,
                         account_id="测试账户",
                         account_name="测试模拟账户",
-                        processed_dir=str(processed_dir),
+                        stock_pool_username="admin",
+                        stock_pool_template_name="测试股票池",
+                        stock_pool_db_path=str(db_path),
                         buy_condition="m20>0",
                         score_expression="m20",
                         ledger_path=str(old_ledger),

@@ -104,15 +104,23 @@ class ApiIntegrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             config_dir = base / "configs" / "paper_accounts"
-            processed_dir = base / "processed_qfq"
-            processed_dir.mkdir()
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
+                ],
+            )
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "接口股票池", [stock])
             saved = paper_template_save_api(
                 PaperTemplateSaveRequest(
                     config_dir=str(config_dir),
                     file_name="api_editor.yaml",
                     account_id="API账户",
                     account_name="API模拟账户",
-                    processed_dir=str(processed_dir),
+                    stock_pool_username="admin",
+                    stock_pool_template_name="接口股票池",
+                    stock_pool_db_path=str(db_path),
                     buy_condition="m20>0",
                     score_expression="m20",
                     ledger_path=str(base / "paper_trading" / "accounts" / "api_editor.xlsx"),
@@ -123,6 +131,7 @@ class ApiIntegrationTest(unittest.TestCase):
             config_path = saved["template"]["config_path"]
             loaded = paper_template_api(config_path=config_path, config_dir=str(config_dir))
             self.assertEqual(loaded["account_name"], "API模拟账户")
+            self.assertEqual(loaded["stock_pool_template_name"], "接口股票池")
             deleted = paper_template_delete_api(config_path=config_path, config_dir=str(config_dir))
             self.assertIn("Excel 账本保留", deleted["message"])
 

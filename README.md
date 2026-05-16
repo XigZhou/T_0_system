@@ -171,7 +171,7 @@ python scripts/build_theme_tradeable_universe.py \
 
 ### 4.2 股票池模板管理
 
-股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段保存模板和股票列表；第二阶段已支持共享日线与指标入库、任务日志和补数脚本。第四阶段已先把批量回测和每日收盘选股前端切到股票池模板输入；后端 `/api/run-backtest`、`/api/run-signal-quality`、导出接口和 `/api/daily-plan` 仍保留 `data_source=csv` 兼容旧脚本。多账户模拟交易、单股回测和板块研究暂时仍沿用原 CSV 输入。
+股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段保存模板和股票列表；第二阶段已支持共享日线与指标入库、任务日志和补数脚本。第四阶段已把批量回测、每日收盘选股和多账户模拟交易接入股票池模板 SQLite。批量回测、信号质量、导出接口和每日收盘选股后端仍保留 `data_source=csv` 兼容旧脚本；多账户模拟交易账户模板已全面升级，不再填写或读取旧 CSV 处理后目录。单股回测和板块研究暂时仍沿用原 CSV 输入。
 
 页面入口：
 
@@ -236,7 +236,7 @@ python scripts/run_stock_pool_template_update.py --source active_templates --res
 
 每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。统一调度本身写入 `logs/after_close_pipeline/YYYYMMDD.log`。默认只补库内未更新到截止交易日的股票；已更新股票会在任务前置过滤阶段跳过，避免重复消耗 Tushare。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码" --retry-attempts 3` 单独补跑。
 
-当前股票池 SQLite 还没有作为模拟账户的正式输入，所以统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，股票池更新失败只记录警告并继续模拟账户收盘任务。后续把每日选股、模拟交易、批量回测等模块切到股票池模板输入后，可改为 `RUN_STOCK_POOL_UPDATE_REQUIRED=1`。
+当前多账户模拟交易已经正式读取股票池 SQLite。统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，股票池更新失败会记录警告并继续模拟账户收盘任务；如果希望严格保证模拟账户只使用当天最新共享行情库，可把该变量改为 `1`，让股票池更新失败时中止后续模拟账户任务。
 
 批处理参数说明：
 
@@ -931,7 +931,7 @@ curl http://127.0.0.1:8083/health
   - `当前持仓`
   - `每日资产`
   - `运行日志`
-- 当前本地测试默认用处理后日线的 `raw_open` 作为 T+1 开盘成交价；模板中已经预留 `行情源` 字段，后续可切换到东方财富或腾讯股票实时行情
+- 本地日线模式读取股票池 SQLite 中的 `stock_daily_features.raw_open/raw_close` 作为成交和估值价格；模板中的 `行情源` 字段也可切换到东方财富或腾讯股票实时行情
 - 买入候选支持按 T 日未复权收盘价过滤，例如在 YAML 中配置 `买入价格筛选.最高收盘价: 100` 后，超过 100 元的股票不会进入最终 TopN
 - 买入股数支持最低买入金额下限：`买入数量.股数` 是基础股数，`买入数量.最低买入金额` 会按 T 日收盘价和 `每手股数` 向上补足，例如 25 元股票基础 200 股会补到 400 股以超过 10000 元
 - 实时刷新在交易时段通常使用盘中最新价，收盘后通常使用当日收盘价或收盘后的最新可用价格，非交易日或节假日通常使用最近交易日收盘价或行情源最后可用价格；页面摘要和运行日志会写明行情状态
@@ -978,7 +978,7 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 - 入口：`/stock-pools`
 - 默认用户：`admin`
 - 用途：维护用户手工股票列表模板，作为后续批量回测、每日收盘选股、多账户模拟交易、单股回测和板块研究统一股票池输入的基础。
-- 当前阶段：模板写入 `data_store/stock_pool_templates.sqlite`；日线和指标写入共享表 `stock_daily_features`。批量回测页面和每日收盘选股页面已经使用股票池模板读取 SQLite，其他旧模块暂时仍保持 CSV 输入。
+- 当前阶段：模板写入 `data_store/stock_pool_templates.sqlite`；日线和指标写入共享表 `stock_daily_features`。批量回测页面、每日收盘选股页面和多账户模拟交易账户模板已经使用股票池模板读取 SQLite；单股回测和板块研究暂时仍保持 CSV 输入。
 - 页面按钮：
   - `刷新模板`：重新读取当前用户模板列表。
   - `载入模板`：把下拉框选中的模板载入编辑区。

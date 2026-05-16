@@ -266,7 +266,7 @@ python scripts/build_theme_tradeable_universe.py \
 
 ### 股票池模板与共享行情库
 
-用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。第四阶段已先把批量回测和每日收盘选股前端切到股票池模板输入；多账户模拟交易、单股回测和板块研究暂时仍沿用 CSV 输入。
+用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。第四阶段已把批量回测、每日收盘选股和多账户模拟交易切到股票池模板输入；单股回测和板块研究暂时仍沿用 CSV 输入。
 
 页面入口：
 
@@ -345,7 +345,7 @@ python scripts/run_stock_pool_template_update.py \
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `RUN_STOCK_POOL_TEMPLATE_UPDATE` | `1` | 是否在收盘后统一调度中运行股票池共享行情更新 |
-| `RUN_STOCK_POOL_UPDATE_REQUIRED` | `0` | 更新失败时是否中止后续模拟账户；当前模拟账户仍用 CSV，默认不中止 |
+| `RUN_STOCK_POOL_UPDATE_REQUIRED` | `0` | 更新失败时是否中止后续模拟账户；当前默认不中止，但多账户模拟交易自身仍会校验股票池 SQLite 是否更新到动作日期 |
 | `STOCK_POOL_USERNAME` | `admin` | 当前默认用户；登录系统接入后由登录用户名替代 |
 | `STOCK_POOL_START_DATE` | `20220101` | 新股票首次补数起始日期 |
 | `STOCK_POOL_BATCH_SIZE` | 空 | 每批处理股票数，适合模板股票很多时限流 |
@@ -751,14 +751,16 @@ python scripts/run_sector_rotation_followup.py \
 
 ### 板块增强结果接入模拟账户
 
-用途：把已经确认的板块参数候选接入 `/paper` 多账户模拟系统，使用 T 日收盘信号生成 T+1 待执行订单。当前新增两个模板：
+用途：历史上曾把板块参数候选接入 `/paper` 多账户模拟系统，使用 T 日收盘信号生成 T+1 待执行订单。多账户模拟交易全面切到股票池模板 SQLite 后，当前 `stock_daily_features` 暂未入库 `sector_*` 和 `rotation_*` 字段，因此两个板块增强模板先保留账户身份和账本，但买入条件已临时切回基准动量口径。
 
-| 账户 | 模板 | 处理后数据目录 | 买入条件差异 |
-| --- | --- | --- | --- |
-| 板块候选_score04_rank07_v1 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector` | 基础动量 + `sector_exposure_score>0` + `sector_strongest_theme_score>=0.4` + `sector_strongest_theme_rank_pct<=0.7` |
-| 板块轮动_避开新能源_v1 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | 在上一个账户基础上增加 `rotation_top_cluster!=新能源` |
+| 账户 | 模板 | 当前股票池模板 | 当前条件口径 | 恢复板块增强前置条件 |
+| --- | --- | --- | --- | --- |
+| 板块候选_score04_rank07_v1 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `当前多账户模拟股票池` | 基准动量 | 先把 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct` 等字段写入 SQLite |
+| 候选_避开新能源主线 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `当前多账户模拟股票池` | 基准动量 | 先把 `rotation_top_cluster`、`stock_matches_rotation_top_cluster` 等轮动字段写入 SQLite |
 
-策略 2 的数据目录需要先由下面命令生成：
+如果后续要恢复真正的板块增强模拟账户，应先扩展股票池模板入库任务，把板块研究和轮动诊断结果同步到 `stock_daily_features` 或独立扩展表；再在账户模板中恢复板块过滤、轮动过滤和评分表达式。旧 CSV 增强目录仍可用于离线研究，不再作为多账户模拟交易的正式输入。
+
+旧离线增强目录仍可用下面命令生成，用于研究和回测复核：
 
 ```bash
 python scripts/build_sector_rotation_features.py \
@@ -768,7 +770,7 @@ python scripts/build_sector_rotation_features.py \
   --overwrite
 ```
 
-输入来源：`sector_processed_dir` 是已经合并板块研究字段的股票日线目录，`rotation_daily_path` 是轮动诊断脚本输出的每日主线表。输出结果：每只股票 CSV 追加 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster` 等字段，同时生成 `rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 记录源路径、生成时间、股票数量和轮动字段清单。异常处理：输出目录不能等于源目录；不加 `--overwrite` 时目录已存在会拒绝覆盖；模拟交易加载目录时会跳过 `rotation_feature_manifest.csv`，避免把元数据误当股票日线。
+输入来源：`sector_processed_dir` 是已经合并板块研究字段的股票日线目录，`rotation_daily_path` 是轮动诊断脚本输出的每日主线表。输出结果：每只股票 CSV 追加 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster` 等字段，同时生成 `rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 记录源路径、生成时间、股票数量和轮动字段清单。异常处理：输出目录不能等于源目录；不加 `--overwrite` 时目录已存在会拒绝覆盖。
 
 手动生成计划示例：
 
@@ -1346,7 +1348,7 @@ http://127.0.0.1:8083/
 - 收盘后根据模板生成 T+1 待执行订单，开盘时按配置行情源模拟成交。
 - 当前持仓或已有待买订单的股票不会重复生成买入订单。
 - 买入、卖出、持仓、现金、浮动盈亏、实现盈亏和每日资产都写入 Excel 账本。
-- 新系统独立于原有组合回测、信号质量回测、单股回测和每日收盘选股；它只复用条件解析、每日计划和处理后行情读取能力，不改变旧系统结果。
+- 新系统独立于原有组合回测、信号质量回测、单股回测和每日收盘选股；它复用条件解析、每日计划和股票池 SQLite 共享行情库，不再读取账户模板里的旧 CSV 处理后目录。
 
 ### 入口
 
@@ -1372,7 +1374,9 @@ http://127.0.0.1:8083/
 | `账户编号` | 模拟账户唯一编号，也用于默认账本文件名 |
 | `账户名称` | 页面和账本里展示的账户名称 |
 | `初始资金` | 模拟账户初始现金 |
-| `处理后数据目录` | 每只股票一个 CSV 的处理后数据目录 |
+| `股票池.用户` | 股票池模板所属用户；当前未接入登录系统时固定为 `admin` |
+| `股票池.模板名称` | 多账户模拟交易使用的股票池模板名称，例如 `当前多账户模拟股票池` 或 L0-L4 模板 |
+| `股票池.数据库路径` | 股票池 SQLite 路径，默认 `data_store/stock_pool_templates.sqlite` |
 | `买入条件` | 收盘后筛选明日买入候选的表达式 |
 | `卖出条件` | 收盘后判断当前持仓是否需要卖出的表达式 |
 | `评分表达式` | 对买入候选排序的表达式 |
@@ -1386,7 +1390,7 @@ http://127.0.0.1:8083/
 | `买入数量.最低买入金额` | 用 T 日收盘价估算的最低买入市值；不足时按整手向上补足股数，`0` 表示不用金额下限 |
 | `买入价格筛选.最低收盘价` | 可选，用 T 日未复权收盘价过滤过低价格股票，`0` 表示不限制 |
 | `买入价格筛选.最高收盘价` | 可选，用 T 日未复权收盘价过滤过高价格股票，`0` 表示不限制 |
-| `行情源.首选` | 本地测试默认 `本地日线`；后续可切换东方财富或腾讯股票 |
+| `行情源.首选` | `东方财富`、`腾讯股票` 或 `本地日线`；本地日线来自股票池 SQLite 的 `raw_open/raw_close` |
 | `行情源.备用` | 首选行情源失败后的备用来源 |
 | `行情源.价格字段` | `开盘价` 或 `收盘价` |
 | `交易规则.持仓时不重复买入` | 已持仓股票再次入选时是否跳过 |
@@ -1468,16 +1472,16 @@ http://127.0.0.1:8083/
 运行逻辑：
 
 - 开盘后 `execute`：先判断当天是否为 A 股交易日，是交易日才执行所有模板账户的待成交订单。
-- 收盘后 `after-close`：先判断交易日，再确认 `data_bundle/processed_qfq_theme_focus_top100` 已经更新到当天，然后更新估值并生成下一交易日订单。
+- 收盘后 `after-close`：先判断交易日；推荐由 `scripts/run_after_close_pipeline.sh` 先更新股票池模板共享行情库，再更新估值并生成下一交易日订单。
 - 日志目录：`logs/paper_trading_cron/`。
 - 检查模式：`scripts/run_paper_trading_cron.sh --check-only after-close 20260429`。
 
 ### 异常处理
 
 - 模板不存在或 YAML 格式错误时，API 返回 4xx/5xx，并在前端状态栏显示错误。
-- 处理后数据目录不存在或股票文件缺失时，订单会执行失败并写入失败原因。
+- 股票池模板不存在、模板内股票没有 `stock_daily_features` 日线或动作日期缺少价格时，订单会执行失败并写入失败原因。
 - 现金不足、已持仓重复买入、开盘不可成交等情况会把订单标记为 `执行失败`，不会隔天继续误买旧信号。
-- 如果使用实时行情源失败，订单不会静默成交，会写入失败原因；本地测试默认使用 `本地日线`，避免实时接口波动影响账本逻辑验证。
+- 如果使用实时行情源失败，订单不会静默成交，会写入失败原因；离线复盘可把 `行情源.首选` 配成 `本地日线`，价格来自股票池 SQLite，便于稳定验证账本逻辑。
 
 详细说明见 `docs/paper-trading-system.md`。
 

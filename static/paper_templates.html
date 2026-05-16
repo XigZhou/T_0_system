@@ -91,9 +91,18 @@
               <span>初始资金</span>
               <input id="tplInitialCash" type="number" min="1" step="1000" />
             </label>
+            <div class="readonly-field">
+              <span>股票池用户</span>
+              <strong id="paperTemplatePoolUser">admin</strong>
+              <small>登录系统接入后自动获取</small>
+            </div>
             <label class="field-wide">
-              <span>处理后数据目录</span>
-              <input id="tplProcessedDir" type="text" />
+              <span>股票池模板</span>
+              <select id="tplStockPoolTemplateName"></select>
+            </label>
+            <label class="field-wide">
+              <span>股票池数据库</span>
+              <input id="tplStockPoolDbPath" type="text" value="data_store/stock_pool_templates.sqlite" readonly />
             </label>
             <label>
               <span>买入排名数量</span>

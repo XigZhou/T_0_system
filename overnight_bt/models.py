@@ -144,7 +144,9 @@ class PaperTemplateSaveRequest(BaseModel):
     account_id: str = Field(..., min_length=1, description="账户编号")
     account_name: str = Field(..., min_length=1, description="账户名称")
     initial_cash: float = Field(100_000.0, gt=0)
-    processed_dir: str = Field(..., min_length=1)
+    stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
+    stock_pool_template_name: str = Field(..., min_length=1, description="股票池模板名称")
+    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；为空时使用默认 data_store/stock_pool_templates.sqlite")
     buy_condition: str = Field(..., min_length=1)
     sell_condition: str = ""
     score_expression: str = Field(..., min_length=1)

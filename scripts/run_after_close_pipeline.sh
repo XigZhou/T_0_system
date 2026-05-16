@@ -346,7 +346,7 @@ fi
 
 log "9/9 运行模拟账户 after-close"
 if [[ "${RUN_PAPER_AFTER_CLOSE}" == "1" ]]; then
-  CONFIG_DIR="${PAPER_CONFIG_DIR}" PROCESSED_CHECK_DIR="${PROCESSED_CHECK_TARGET}" scripts/run_paper_trading_cron.sh after-close "${RUN_DATE}"
+  CONFIG_DIR="${PAPER_CONFIG_DIR}" scripts/run_paper_trading_cron.sh after-close "${RUN_DATE}"
 else
   log "RUN_PAPER_AFTER_CLOSE=${RUN_PAPER_AFTER_CLOSE}, skip paper after-close."
 fi

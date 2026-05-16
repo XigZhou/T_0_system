@@ -22,7 +22,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on minimal server en
 
 from .daily_plan import build_daily_plan
 from .models import DailyHolding, DailyPlanRequest, PaperTemplateSaveRequest, PaperTradingRunRequest
-from .utils import load_env, to_float
+from .stock_pool_templates import DEFAULT_DB_PATH, DEFAULT_USERNAME, _connect, init_stock_pool_db, read_stock_pool_template
+from .utils import to_float
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -120,7 +121,9 @@ class PaperAccountConfig:
     account_id: str
     account_name: str
     initial_cash: float
-    processed_dir: str
+    stock_pool_username: str
+    stock_pool_template_name: str
+    stock_pool_db_path: str
     buy_condition: str
     sell_condition: str
     score_expression: str
@@ -173,6 +176,26 @@ def _normalize_path(path_text: str | Path, base: Path = PROJECT_ROOT) -> Path:
     return path
 
 
+def _stock_pool_db_path(path_text: str | Path | None = None) -> Path:
+    if path_text is None or str(path_text).strip() == "":
+        return DEFAULT_DB_PATH
+    return _normalize_path(path_text)
+
+
+def _stock_pool_db_path_text(path_text: str | Path | None = None) -> str:
+    return _relative_text(_stock_pool_db_path(path_text))
+
+
+def _daily_plan_source_kwargs(cfg: PaperAccountConfig) -> dict[str, Any]:
+    return {
+        "data_source": "stock_pool",
+        "processed_dir": "",
+        "stock_pool_username": cfg.stock_pool_username,
+        "stock_pool_template_name": cfg.stock_pool_template_name,
+        "stock_pool_db_path": cfg.stock_pool_db_path,
+    }
+
+
 def _symbol_key(symbol: str) -> str:
     text = str(symbol or "").strip().upper()
     if "." in text:
@@ -199,53 +222,6 @@ def _next_weekday(date_text: str) -> str:
         current += timedelta(days=1)
         if current.weekday() < 5:
             return _format_date(current)
-
-
-def _bundle_dir_from_processed_dir(processed_dir: str) -> Path:
-    path = _normalize_path(processed_dir)
-    if path.name.startswith("processed_"):
-        return path.parent
-    return path
-
-
-def _next_trade_date_from_calendar(processed_dir: str, signal_date: str) -> str:
-    bundle_dir = _bundle_dir_from_processed_dir(processed_dir)
-    calendar_path = bundle_dir / "trade_calendar.csv"
-    if calendar_path.exists():
-        try:
-            calendar = pd.read_csv(calendar_path, dtype=str, encoding="utf-8-sig")
-            date_col = "trade_date" if "trade_date" in calendar.columns else "cal_date"
-            open_dates = sorted(
-                str(item)
-                for item in calendar.loc[calendar.get("is_open", "1").astype(str) == "1", date_col].dropna().tolist()
-                if str(item) > signal_date
-            )
-            if open_dates:
-                return open_dates[0]
-        except Exception:
-            pass
-
-    try:
-        import tushare as ts
-
-        token = load_env(PROJECT_ROOT / ".env").get("TUSHARE_TOKEN", "").strip()
-        if token:
-            start_dt = datetime.strptime(signal_date, "%Y%m%d") + timedelta(days=1)
-            end_dt = start_dt + timedelta(days=45)
-            pro = ts.pro_api(token)
-            cal = pro.trade_cal(
-                exchange="",
-                start_date=_format_date(start_dt),
-                end_date=_format_date(end_dt),
-                is_open="1",
-                fields="cal_date",
-            )
-            if cal is not None and not cal.empty:
-                return str(cal["cal_date"].astype(str).sort_values().iloc[0])
-    except Exception:
-        pass
-
-    return _next_weekday(signal_date)
 
 
 def _truthy(value: Any, default: bool = False) -> bool:
@@ -411,7 +387,9 @@ def _template_payload_from_config(cfg: PaperAccountConfig, config_path: Path) ->
         "account_id": cfg.account_id,
         "account_name": cfg.account_name,
         "initial_cash": cfg.initial_cash,
-        "processed_dir": cfg.processed_dir,
+        "stock_pool_username": cfg.stock_pool_username,
+        "stock_pool_template_name": cfg.stock_pool_template_name,
+        "stock_pool_db_path": cfg.stock_pool_db_path,
         "buy_condition": cfg.buy_condition,
         "sell_condition": cfg.sell_condition,
         "score_expression": cfg.score_expression,
@@ -452,8 +430,14 @@ def load_paper_account_config(config_path: str | Path) -> PaperAccountConfig:
     rules = data.get("交易规则") or {}
     fees = data.get("费用") or {}
     output = data.get("输出") or {}
+    stock_pool = data.get("股票池") or {}
     account_id = str(data.get("账户编号") or path.stem).strip()
     account_name = str(data.get("账户名称") or account_id).strip()
+    stock_pool_username = str(stock_pool.get("用户") or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
+    stock_pool_template_name = str(stock_pool.get("模板名称") or "").strip()
+    if not stock_pool_template_name:
+        raise ValueError("模拟账户模板缺少 股票池.模板名称；请在账户模板管理页面选择股票池模板并保存")
+    stock_pool_db_path = _stock_pool_db_path_text(stock_pool.get("数据库路径") or "")
     buy_fee_rate = _as_float(fees.get("买入费率", fees.get("买卖费率")), 0.00003)
     sell_fee_rate = _as_float(fees.get("卖出费率", fees.get("买卖费率")), 0.00003)
     ledger_path = output.get("账本路径") or DEFAULT_LEDGER_DIR / f"{account_id}.xlsx"
@@ -462,7 +446,9 @@ def load_paper_account_config(config_path: str | Path) -> PaperAccountConfig:
         account_id=account_id,
         account_name=account_name,
         initial_cash=_as_float(data.get("初始资金"), 100_000.0),
-        processed_dir=str(data.get("处理后数据目录") or "data_bundle/processed_qfq_theme_focus_top100"),
+        stock_pool_username=stock_pool_username,
+        stock_pool_template_name=stock_pool_template_name,
+        stock_pool_db_path=stock_pool_db_path,
         buy_condition=str(data.get("买入条件") or "").strip(),
         sell_condition=str(data.get("卖出条件") or "").strip(),
         score_expression=str(data.get("评分表达式") or "m20").strip(),
@@ -493,6 +479,7 @@ def load_paper_account_config(config_path: str | Path) -> PaperAccountConfig:
     )
 
 
+
 def list_paper_account_templates(config_dir: str | Path = DEFAULT_CONFIG_DIR) -> list[dict[str, Any]]:
     folder = _normalize_path(config_dir)
     if not folder.exists():
@@ -507,7 +494,9 @@ def list_paper_account_templates(config_dir: str | Path = DEFAULT_CONFIG_DIR) ->
                     "account_name": cfg.account_name,
                     "config_path": str(path),
                     "ledger_path": str(cfg.ledger_path),
-                    "processed_dir": cfg.processed_dir,
+                    "stock_pool_username": cfg.stock_pool_username,
+                    "stock_pool_template_name": cfg.stock_pool_template_name,
+                    "stock_pool_db_path": cfg.stock_pool_db_path,
                     "top_n": cfg.top_n,
                     "buy_shares": cfg.buy_shares,
                     "buy_lot_size": cfg.buy_lot_size,
@@ -543,7 +532,11 @@ def _template_config_from_request(req: PaperTemplateSaveRequest, ledger_path: Pa
         "账户编号": req.account_id.strip(),
         "账户名称": req.account_name.strip(),
         "初始资金": req.initial_cash,
-        "处理后数据目录": req.processed_dir.strip(),
+        "股票池": {
+            "用户": req.stock_pool_username.strip() or DEFAULT_USERNAME,
+            "模板名称": req.stock_pool_template_name.strip(),
+            "数据库路径": _stock_pool_db_path_text(req.stock_pool_db_path),
+        },
         "买入条件": req.buy_condition.strip(),
         "卖出条件": req.sell_condition.strip(),
         "评分表达式": req.score_expression.strip(),
@@ -624,6 +617,11 @@ def save_paper_account_template(req: PaperTemplateSaveRequest) -> dict[str, Any]
 
     ledger_path = _normalize_path(req.ledger_path or DEFAULT_LEDGER_DIR / f"{account_id}.xlsx").resolve()
     log_dir = _normalize_path(req.log_dir or DEFAULT_LOG_DIR).resolve()
+    read_stock_pool_template(
+        template_name=req.stock_pool_template_name.strip(),
+        username=req.stock_pool_username.strip() or DEFAULT_USERNAME,
+        db_path=req.stock_pool_db_path.strip() or None,
+    )
     for row in list_paper_account_templates(folder):
         other_path = _normalize_path(row.get("config_path", "")).resolve()
         if other_path == target_path:
@@ -705,7 +703,9 @@ def _config_snapshot(cfg: PaperAccountConfig) -> pd.DataFrame:
         ("账户编号", cfg.account_id),
         ("账户名称", cfg.account_name),
         ("初始资金", cfg.initial_cash),
-        ("处理后数据目录", cfg.processed_dir),
+        ("股票池用户", cfg.stock_pool_username),
+        ("股票池模板", cfg.stock_pool_template_name),
+        ("股票池数据库", cfg.stock_pool_db_path),
         ("买入条件", cfg.buy_condition),
         ("卖出条件", cfg.sell_condition),
         ("评分表达式", cfg.score_expression),
@@ -827,7 +827,7 @@ def _resolve_signal_date(cfg: PaperAccountConfig, signal_date: str) -> str:
         return signal_date
     result = build_daily_plan(
         DailyPlanRequest(
-            processed_dir=cfg.processed_dir,
+            **_daily_plan_source_kwargs(cfg),
             signal_date="",
             buy_condition=cfg.buy_condition,
             sell_condition=cfg.sell_condition,
@@ -846,7 +846,7 @@ def _planned_trade_date(cfg: PaperAccountConfig, planned_date: Any, signal_date:
     text = str(planned_date or "").strip()
     if text and text != "下一交易日":
         return text
-    return _next_trade_date_from_calendar(cfg.processed_dir, signal_date)
+    return _next_trade_date_from_stock_pool(cfg, signal_date)
 
 
 def _round_up_to_lot(shares: int, lot_size: int) -> int:
@@ -885,7 +885,7 @@ def _generate_orders(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], s
     )
     plan = build_daily_plan(
         DailyPlanRequest(
-            processed_dir=cfg.processed_dir,
+            **_daily_plan_source_kwargs(cfg),
             signal_date=signal_date,
             buy_condition=cfg.buy_condition,
             sell_condition=cfg.sell_condition,
@@ -989,44 +989,43 @@ def _generate_orders(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], s
     }
 
 
-class LocalDailyPriceProvider:
-    def __init__(self, processed_dir: str, price_field: str) -> None:
-        self.processed_dir = _normalize_path(processed_dir)
+class StockPoolDailyPriceProvider:
+    def __init__(self, cfg: PaperAccountConfig, price_field: str) -> None:
+        self.username = cfg.stock_pool_username
+        self.template_name = cfg.stock_pool_template_name
+        self.db_path = _stock_pool_db_path(cfg.stock_pool_db_path)
         self.price_field = price_field
-
-    def _file_for_symbol(self, symbol: str) -> Path:
-        key = _symbol_key(symbol)
-        candidates = [
-            self.processed_dir / f"{key}.csv",
-            self.processed_dir / f"{key}.SZ.csv",
-            self.processed_dir / f"{key}.SH.csv",
-        ]
-        for item in candidates:
-            if item.exists():
-                return item
-        raise FileNotFoundError(f"找不到股票处理后数据: {symbol}")
+        init_stock_pool_db(self.db_path)
 
     def quote(self, symbol: str, trade_date: str) -> PriceQuote:
-        file_path = self._file_for_symbol(symbol)
-        frame = pd.read_csv(file_path, dtype=str, encoding="utf-8-sig")
-        rows = frame[frame["trade_date"].astype(str) == str(trade_date)]
-        if rows.empty:
-            raise ValueError(f"{symbol} 没有 {trade_date} 的本地日线数据")
-        row = rows.iloc[0]
+        key = _symbol_key(symbol)
+        with _connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT f.*
+                FROM stock_daily_features f
+                JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
+                WHERE s.username=? AND s.template_name=? AND f.symbol=? AND f.trade_date=?
+                """,
+                (self.username, self.template_name, key, str(trade_date)),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"{symbol} 没有 {trade_date} 的股票池SQLite日线数据")
+        data = dict(row)
         price_col = "raw_open" if "开盘" in self.price_field else "raw_close"
-        price = to_float(row.get(price_col))
+        price = to_float(data.get(price_col))
         if price is None or price <= 0:
             raise ValueError(f"{symbol} {trade_date} 缺少有效 {price_col}")
-        close_price = to_float(row.get("raw_close"))
+        close_price = to_float(data.get("raw_close"))
         return PriceQuote(
-            symbol=_ts_code(symbol),
-            name=str(row.get("name") or ""),
-            trade_date=str(row.get("trade_date") or trade_date),
+            symbol=_ts_code(str(data.get("ts_code") or key)),
+            name=str(data.get("name") or ""),
+            trade_date=str(data.get("trade_date") or trade_date),
             price=float(price),
             close_price=close_price,
-            can_buy=_truthy(row.get("can_buy_open_t"), True),
-            can_sell=_truthy(row.get("can_sell_t"), True),
-            source="本地日线",
+            can_buy=_truthy(data.get("can_buy_open_t"), True),
+            can_sell=_truthy(data.get("can_sell_t"), True),
+            source="股票池SQLite",
         )
 
 
@@ -1083,9 +1082,9 @@ class RealtimeQuoteProvider:
         return PriceQuote(_ts_code(symbol), name, trade_date, price, current, True, True, "东方财富")
 
 
-def _price_provider(cfg: PaperAccountConfig) -> LocalDailyPriceProvider | RealtimeQuoteProvider:
-    if "本地" in cfg.price_primary or "日线" in cfg.price_primary:
-        return LocalDailyPriceProvider(cfg.processed_dir, cfg.price_field)
+def _price_provider(cfg: PaperAccountConfig) -> StockPoolDailyPriceProvider | RealtimeQuoteProvider:
+    if "本地" in cfg.price_primary or "日线" in cfg.price_primary or "SQLite" in cfg.price_primary:
+        return StockPoolDailyPriceProvider(cfg, cfg.price_field)
     return RealtimeQuoteProvider(cfg.price_primary, cfg.price_fallback, cfg.price_field)
 
 
@@ -1236,7 +1235,7 @@ def _execute_orders(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], tr
 
 
 def _mark_to_market(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], trade_date: str, note: str = "收盘估值") -> dict[str, Any]:
-    provider = LocalDailyPriceProvider(cfg.processed_dir, "收盘价")
+    provider = StockPoolDailyPriceProvider(cfg, "收盘价")
     holdings = ledger["当前持仓"].copy()
     market_value = 0.0
     updated = 0
@@ -1249,7 +1248,7 @@ def _mark_to_market(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], tr
             cost = _as_float(row.get("买入总成本"), 0.0)
             value = round(price * shares, 2)
             buy_date = str(row.get("买入日期") or "")
-            holding_days = _count_trade_days(cfg.processed_dir, symbol, buy_date, trade_date)
+            holding_days = _count_trade_days(cfg, symbol, buy_date, trade_date)
             holdings.loc[idx, "当前价格"] = round(price, 4)
             holdings.loc[idx, "当前市值"] = value
             holdings.loc[idx, "浮动盈亏"] = round(value - cost, 2)
@@ -1297,32 +1296,29 @@ def _today_china_text() -> str:
     return _china_now().strftime("%Y%m%d")
 
 
-def _is_trade_day_from_calendar(processed_dir: str, trade_date: str) -> bool | None:
-    calendar_path = _bundle_dir_from_processed_dir(processed_dir) / "trade_calendar.csv"
-    if not calendar_path.exists():
-        return None
-    try:
-        calendar = pd.read_csv(calendar_path, dtype=str, encoding="utf-8-sig")
-        date_col = "trade_date" if "trade_date" in calendar.columns else "cal_date"
-        rows = calendar[calendar[date_col].astype(str) == str(trade_date)]
-        if rows.empty:
-            return None
-        return str(rows.iloc[-1].get("is_open", "1")).strip() == "1"
-    except Exception:
-        return None
+def _stock_pool_has_trade_date(cfg: PaperAccountConfig, trade_date: str) -> bool:
+    with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM stock_daily_features f
+            JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
+            WHERE s.username=? AND s.template_name=? AND f.trade_date=?
+            LIMIT 1
+            """,
+            (cfg.stock_pool_username, cfg.stock_pool_template_name, str(trade_date)),
+        ).fetchone()
+    return row is not None
 
 
-def _realtime_market_note(processed_dir: str, trade_date: str) -> str:
+def _realtime_market_note(cfg: PaperAccountConfig, trade_date: str) -> str:
     now = _china_now()
     today = now.strftime("%Y%m%d")
     if trade_date != today:
         return "动作日期不是今天，实时行情源仍返回当前最新价，不是历史日期价格"
 
-    is_trade_day = _is_trade_day_from_calendar(processed_dir, trade_date)
-    if is_trade_day is False:
-        return "非交易日或节假日，行情源通常返回最近交易日收盘价或最后可用价格"
-    if is_trade_day is None and now.weekday() >= 5:
-        return "周末或本地交易日历缺失，行情源通常返回最近交易日收盘价或最后可用价格"
+    if not _stock_pool_has_trade_date(cfg, trade_date) and now.weekday() >= 5:
+        return "周末或股票池SQLite尚无当天数据，行情源通常返回最近交易日收盘价或最后可用价格"
 
     current_minutes = now.hour * 60 + now.minute
     if current_minutes < 9 * 60 + 30:
@@ -1334,6 +1330,7 @@ def _realtime_market_note(processed_dir: str, trade_date: str) -> str:
     if 13 * 60 <= current_minutes <= 15 * 60:
         return "交易时段，按行情源盘中最新价估值"
     return "交易日已收盘，行情源通常返回当日收盘价或收盘后的最新可用价格"
+
 
 
 def _realtime_price_provider(cfg: PaperAccountConfig) -> RealtimeQuoteProvider:
@@ -1355,7 +1352,7 @@ def _refresh_realtime_positions(cfg: PaperAccountConfig, ledger: dict[str, pd.Da
     updated = 0
     failed = 0
     sources: set[str] = set()
-    market_note = _realtime_market_note(cfg.processed_dir, trade_date)
+    market_note = _realtime_market_note(cfg, trade_date)
 
     for idx, row in holdings.iterrows():
         symbol = str(row.get("股票代码") or "")
@@ -1366,7 +1363,7 @@ def _refresh_realtime_positions(cfg: PaperAccountConfig, ledger: dict[str, pd.Da
             cost = _as_float(row.get("买入总成本"), 0.0)
             value = round(price * shares, 2)
             buy_date = str(row.get("买入日期") or "")
-            holding_days = _count_trade_days(cfg.processed_dir, symbol, buy_date, trade_date)
+            holding_days = _count_trade_days(cfg, symbol, buy_date, trade_date)
             if holding_days <= 0 and buy_date != trade_date:
                 holding_days = _as_int(row.get("持有天数"), 0)
             holdings.loc[idx, "当前价格"] = round(price, 4)
@@ -1425,14 +1422,37 @@ def _refresh_realtime_positions(cfg: PaperAccountConfig, ledger: dict[str, pd.Da
     }
 
 
-def _count_trade_days(processed_dir: str, symbol: str, start_date: str, end_date: str) -> int:
+def _next_trade_date_from_stock_pool(cfg: PaperAccountConfig, signal_date: str) -> str:
+    with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT MIN(f.trade_date) AS next_trade_date
+            FROM stock_daily_features f
+            JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
+            WHERE s.username=? AND s.template_name=? AND f.trade_date>?
+            """,
+            (cfg.stock_pool_username, cfg.stock_pool_template_name, str(signal_date)),
+        ).fetchone()
+    next_date = str(row["next_trade_date"] or "") if row is not None else ""
+    return next_date or _next_weekday(signal_date)
+
+
+def _count_trade_days(cfg: PaperAccountConfig, symbol: str, start_date: str, end_date: str) -> int:
     if not start_date or not end_date:
         return 0
+    key = _symbol_key(symbol)
     try:
-        provider = LocalDailyPriceProvider(processed_dir, "收盘价")
-        file_path = provider._file_for_symbol(symbol)
-        frame = pd.read_csv(file_path, usecols=["trade_date"], dtype=str, encoding="utf-8-sig")
-        dates = frame["trade_date"].astype(str).tolist()
+        with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
+            rows = conn.execute(
+                """
+                SELECT f.trade_date
+                FROM stock_daily_features f
+                WHERE f.symbol=? AND f.trade_date>=? AND f.trade_date<=?
+                ORDER BY f.trade_date
+                """,
+                (key, str(start_date), str(end_date)),
+            ).fetchall()
+        dates = [str(row["trade_date"]) for row in rows]
         if start_date not in dates or end_date not in dates:
             return 0
         return max(0, dates.index(end_date) - dates.index(start_date))
@@ -1440,20 +1460,20 @@ def _count_trade_days(processed_dir: str, symbol: str, start_date: str, end_date
         return 0
 
 
-def _latest_available_date(processed_dir: str) -> str:
-    folder = _normalize_path(processed_dir)
-    latest = ""
-    for file_path in folder.glob("*.csv"):
-        if file_path.name == "processing_manifest.csv":
-            continue
-        try:
-            frame = pd.read_csv(file_path, usecols=["trade_date"], dtype=str, encoding="utf-8-sig")
-        except Exception:
-            continue
-        if not frame.empty:
-            latest = max(latest, str(frame["trade_date"].iloc[-1]))
+def _latest_available_date(cfg: PaperAccountConfig) -> str:
+    with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(f.trade_date) AS latest_trade_date
+            FROM stock_daily_features f
+            JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
+            WHERE s.username=? AND s.template_name=?
+            """,
+            (cfg.stock_pool_username, cfg.stock_pool_template_name),
+        ).fetchone()
+    latest = str(row["latest_trade_date"] or "") if row is not None else ""
     if not latest:
-        raise ValueError("无法从处理后数据目录识别最新交易日")
+        raise ValueError(f"股票池模板没有可用日线数据: {cfg.stock_pool_username}/{cfg.stock_pool_template_name}")
     return latest
 
 
@@ -1490,6 +1510,8 @@ def _ledger_response(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], a
         "account_name": cfg.account_name,
         "ledger_path": str(cfg.ledger_path),
         "ledger_exists": cfg.ledger_path.exists(),
+        "stock_pool_username": cfg.stock_pool_username,
+        "stock_pool_template_name": cfg.stock_pool_template_name,
         "order_count": len(pending),
         "trade_count": len(trades),
         "holding_count": len(holdings),
@@ -1527,6 +1549,9 @@ def _ledger_response(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], a
             "config_path": str(_normalize_path(cfg.raw_config.get("_config_path", ""))) if cfg.raw_config.get("_config_path") else "",
             "ledger_path": str(cfg.ledger_path),
             "log_dir": str(cfg.log_dir),
+            "stock_pool_username": cfg.stock_pool_username,
+            "stock_pool_template_name": cfg.stock_pool_template_name,
+            "stock_pool_db_path": cfg.stock_pool_db_path,
             "template_count": len(list_paper_account_templates(DEFAULT_CONFIG_DIR)),
         },
     }
@@ -1554,12 +1579,12 @@ def run_paper_trading(req: PaperTradingRunRequest) -> dict[str, Any]:
         summary = {"action": "生成收盘信号", **_generate_orders(cfg, ledger, trade_date)}
     elif action == "execute":
         if not trade_date:
-            trade_date = _latest_available_date(cfg.processed_dir)
+            trade_date = _latest_available_date(cfg)
         summary = {"action": "执行待成交订单", **_execute_orders(cfg, ledger, trade_date)}
         summary.update(_mark_to_market(cfg, ledger, trade_date, note="开盘成交后估值"))
     elif action == "mark":
         if not trade_date:
-            trade_date = _latest_available_date(cfg.processed_dir)
+            trade_date = _latest_available_date(cfg)
         summary = {"action": "收盘估值", **_mark_to_market(cfg, ledger, trade_date)}
     elif action == "refresh":
         summary = {"action": "实时刷新持仓价格", **_refresh_realtime_positions(cfg, ledger, trade_date)}
@@ -1572,6 +1597,8 @@ def run_paper_trading(req: PaperTradingRunRequest) -> dict[str, Any]:
         {
             "account_id": cfg.account_id,
             "account_name": cfg.account_name,
+            "stock_pool_username": cfg.stock_pool_username,
+            "stock_pool_template_name": cfg.stock_pool_template_name,
             "ledger_path": str(cfg.ledger_path),
             "elapsed_seconds": elapsed,
         }
@@ -1587,6 +1614,9 @@ def run_paper_trading(req: PaperTradingRunRequest) -> dict[str, Any]:
             "config_path": str(_normalize_path(config_path)),
             "ledger_path": str(cfg.ledger_path),
             "log_dir": str(cfg.log_dir),
+            "stock_pool_username": cfg.stock_pool_username,
+            "stock_pool_template_name": cfg.stock_pool_template_name,
+            "stock_pool_db_path": cfg.stock_pool_db_path,
             "template_count": len(list_paper_account_templates(req.config_dir)),
         },
     }

@@ -135,7 +135,7 @@ const context = {
   Option: function Option(label, value) {
     return { label, value, dataset: {} };
   },
-  fetch: () => new Promise(() => {}),
+  fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ templates: [{ template_name: "L2_中等市值主题股层", stock_count: 100 }] }) }),
   URLSearchParams,
   Intl,
   Date,
@@ -153,7 +153,9 @@ context.populateTemplateEditor({
   account_id: "sector_l2_top500_v1",
   account_name: "L2 Top500 模拟账户",
   initial_cash: 100000,
-  processed_dir: "data_bundle/theme_tradeable_top500_4y/processed_qfq",
+  stock_pool_username: "admin",
+  stock_pool_template_name: "L2_中等市值主题股层",
+  stock_pool_db_path: "data_store/stock_pool_templates.sqlite",
   buy_condition: "m20>0",
   sell_condition: "",
   score_expression: "m20",

@@ -1084,6 +1084,29 @@ td {
   font-size: 0.74rem;
 }
 
+.paper-template-page .template-editor-grid .readonly-field {
+  display: grid;
+  gap: 3px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.28);
+  font-size: 0.74rem;
+}
+
+.paper-template-page .template-editor-grid .readonly-field strong {
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-template-page .template-editor-grid .readonly-field small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
 .paper-template-page .template-editor-grid .field-wide {
   grid-column: span 2;
 }

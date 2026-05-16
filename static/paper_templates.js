@@ -12,12 +12,17 @@ const templateStatus = document.getElementById("templateStatus");
 const templateSummaryGrid = document.getElementById("templateSummaryGrid");
 const openPaperLink = document.getElementById("openPaperLink");
 
+const DEFAULT_STOCK_POOL_USERNAME = "admin";
+const DEFAULT_STOCK_POOL_DB_PATH = "data_store/stock_pool_templates.sqlite";
+const poolUserLabel = document.getElementById("paperTemplatePoolUser");
+
 const templateFields = {
   file_name: document.getElementById("tplFileName"),
   account_id: document.getElementById("tplAccountId"),
   account_name: document.getElementById("tplAccountName"),
   initial_cash: document.getElementById("tplInitialCash"),
-  processed_dir: document.getElementById("tplProcessedDir"),
+  stock_pool_template_name: document.getElementById("tplStockPoolTemplateName"),
+  stock_pool_db_path: document.getElementById("tplStockPoolDbPath"),
   buy_condition: document.getElementById("tplBuyCondition"),
   sell_condition: document.getElementById("tplSellCondition"),
   score_expression: document.getElementById("tplScoreExpression"),
@@ -50,7 +55,7 @@ const SUMMARY_LABELS = {
   file_name: "模板文件",
   account_id: "账户编号",
   account_name: "账户名称",
-  processed_dir: "数据目录",
+  stock_pool_template_name: "股票池模板",
   top_n: "TopN",
   ledger_path: "账本路径",
   ledger_exists: "账本状态",
@@ -132,7 +137,9 @@ function defaultTemplateValues() {
     account_id: `新账户_${suffix}`,
     account_name: `新模拟账户_${suffix}`,
     initial_cash: 100000,
-    processed_dir: "data_bundle/processed_qfq_theme_focus_top100",
+    stock_pool_username: DEFAULT_STOCK_POOL_USERNAME,
+    stock_pool_template_name: "当前多账户模拟股票池",
+    stock_pool_db_path: DEFAULT_STOCK_POOL_DB_PATH,
     buy_condition: "m20>0",
     sell_condition: "",
     score_expression: "m20",
@@ -190,6 +197,9 @@ function formatSummaryValue(key, value) {
     }
     return value ? "是" : "否";
   }
+  if (key === "stock_pool_template_name") {
+    return String(value);
+  }
   if (typeof value === "number") {
     return value.toLocaleString("zh-CN", { maximumFractionDigits: 4 });
   }
@@ -202,7 +212,7 @@ function renderTemplateSummary(template = {}) {
     file_name: merged.file_name,
     account_id: merged.account_id,
     account_name: merged.account_name,
-    processed_dir: merged.processed_dir,
+    stock_pool_template_name: merged.stock_pool_template_name,
     top_n: merged.top_n,
     ledger_path: merged.ledger_path,
     ledger_exists: merged.ledger_exists,
@@ -216,6 +226,8 @@ function renderTemplateSummary(template = {}) {
 
 function populateTemplateEditor(data = {}) {
   const merged = { ...defaultTemplateValues(), ...data };
+  merged.stock_pool_username = merged.stock_pool_username || DEFAULT_STOCK_POOL_USERNAME;
+  merged.stock_pool_db_path = merged.stock_pool_db_path || DEFAULT_STOCK_POOL_DB_PATH;
   Object.entries(templateFields).forEach(([key, el]) => {
     if (!el) {
       return;
@@ -227,6 +239,7 @@ function populateTemplateEditor(data = {}) {
     }
   });
   renderTemplateSummary(merged);
+  loadStockPoolTemplates(merged.stock_pool_template_name).catch((error) => setTemplateStatus(`读取股票池模板失败：${error.message}`, true));
 }
 
 function collectTemplatePayload(overwriteExisting) {
@@ -238,7 +251,9 @@ function collectTemplatePayload(overwriteExisting) {
     account_id: templateFields.account_id.value.trim(),
     account_name: templateFields.account_name.value.trim(),
     initial_cash: numberValue(templateFields.initial_cash.value, 100000),
-    processed_dir: templateFields.processed_dir.value.trim(),
+    stock_pool_username: DEFAULT_STOCK_POOL_USERNAME,
+    stock_pool_template_name: templateFields.stock_pool_template_name.value.trim(),
+    stock_pool_db_path: templateFields.stock_pool_db_path.value.trim() || DEFAULT_STOCK_POOL_DB_PATH,
     buy_condition: templateFields.buy_condition.value.trim(),
     sell_condition: templateFields.sell_condition.value.trim(),
     score_expression: templateFields.score_expression.value.trim(),
@@ -270,7 +285,9 @@ function collectTemplatePayload(overwriteExisting) {
 
 function setTemplateButtonsDisabled(disabled) {
   [reloadTemplatesBtn, loadTemplateBtn, newTemplateBtn, copyTemplateBtn, saveTemplateBtn, saveAsTemplateBtn, deleteTemplateBtn].forEach((button) => {
-    button.disabled = disabled;
+    if (button) {
+      button.disabled = disabled;
+    }
   });
 }
 
@@ -281,6 +298,32 @@ async function fetchJson(url, options = {}) {
     throw new Error(data.detail || `请求失败：${response.status}`);
   }
   return response.json();
+}
+
+async function loadStockPoolTemplates(selectedName = "") {
+  if (poolUserLabel) {
+    poolUserLabel.textContent = DEFAULT_STOCK_POOL_USERNAME;
+  }
+  if (templateFields.stock_pool_db_path) {
+    templateFields.stock_pool_db_path.value = templateFields.stock_pool_db_path.value || DEFAULT_STOCK_POOL_DB_PATH;
+  }
+  const select = templateFields.stock_pool_template_name;
+  if (!select) {
+    return;
+  }
+  const data = await fetchJson(`/api/stock-pools/templates?username=${encodeURIComponent(DEFAULT_STOCK_POOL_USERNAME)}`);
+  select.innerHTML = "";
+  if (!data.templates.length) {
+    select.appendChild(new Option("没有可用股票池模板", ""));
+    return;
+  }
+  data.templates.forEach((item) => {
+    const label = `${item.template_name}（${item.stock_count || 0}只）`;
+    select.appendChild(new Option(label, item.template_name || ""));
+  });
+  const desired = selectedName || select.value || "当前多账户模拟股票池";
+  const exists = Array.from(select.options).some((option) => option.value === desired);
+  select.value = exists ? desired : select.options[0].value;
 }
 
 function buildPaperHref() {
@@ -480,4 +523,5 @@ if (urlParams.get("config_path")) {
 
 populateTemplateEditor();
 syncNavigationState();
+loadStockPoolTemplates().catch((error) => setTemplateStatus(`读取股票池模板失败：${error.message}`, true));
 loadTemplates().catch((error) => setTemplateStatus(`读取模板失败：${error.message}`, true));

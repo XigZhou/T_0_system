@@ -1,34 +1,74 @@
 # 多账户模拟交易系统说明
 
-本文档说明新增的多账户模拟交易系统。它是独立模块，不改变原有组合回测、信号质量回测、每日收盘选股和单股回测逻辑。
+本文档说明多账户模拟交易系统的使用方式、数据来源和运维口径。当前版本已经全面升级为“账户模板 + 股票池模板 SQLite”模式：账户 YAML 不再填写旧的处理后 CSV 目录，股票范围、信号字段、本地成交价和收盘估值价统一来自股票池模板系统。
 
 ## 1. 设计目标
 
 - 每个中文 YAML 模板对应一个独立模拟账户。
-- 每个账户可以使用不同买入条件、卖出条件、评分表达式、TopN、买入股数、费用和行情源。
-- 收盘后生成 T+1 待执行订单，开盘后按配置价格模拟成交。
+- 每个账户可以使用不同买入条件、卖出条件、评分表达式、TopN、买入股数、费用、行情源和股票池模板。
+- 收盘后基于 T 日股票池 SQLite 指标生成 T+1 待执行订单，开盘后按配置价格模拟成交。
 - 已持仓股票不重复买入；已有待买订单时也不重复生成买入订单。
-- 先用 Excel 账本存储，后续可迁移到 SQLite。
+- 先用 Excel 账本存储交易流水、持仓、资产和日志，后续可迁移到账本数据库。
 
 ## 2. 文件位置
 
 | 类型 | 路径 |
 | --- | --- |
-| 页面入口 | `/paper` |
-| 模板管理页面 | `/paper/templates` |
-| 模板目录 | `configs/paper_accounts/` |
-| 默认模板 | `configs/paper_accounts/momentum_top5_v1.yaml` |
+| 交易页面 | `/paper` |
+| 账户模板管理页面 | `/paper/templates` |
+| 股票池模板管理页面 | `/stock-pools` |
+| 账户模板目录 | `configs/paper_accounts/` |
+| 默认账户模板 | `configs/paper_accounts/momentum_top5_v1.yaml` |
+| 股票池 SQLite | `data_store/stock_pool_templates.sqlite` |
 | 账本目录 | `paper_trading/accounts/` |
 | 日志目录 | `paper_trading/logs/` |
 | 命令行脚本 | `scripts/run_paper_trading.py` |
+| 定时任务脚本 | `scripts/run_paper_trading_cron.sh` |
 
 `paper_trading/` 是运行输出目录，已经加入 `.gitignore`，不会把本地模拟账本误提交到仓库。模板建议使用 UTF-8 编码；系统也兼容历史 Windows 模板常见的 GB18030 编码。
 
-打开 `/paper` 时，页面会自动读取所选模板对应的 Excel 账本，并展示待执行订单、成交流水、当前持仓、每日资产和运行日志。如果需要手动刷新，可以点击“读取账本”。该动作是只读操作，不会生成订单或执行成交；读取成功后页面会自动切到“运行日志”页签，并在摘要区展示最后一条日志。
+打开 `/paper` 时，页面会自动读取所选模板对应的 Excel 账本，并展示待执行订单、成交流水、当前持仓、每日资产和运行日志。`/paper` 只负责模板选择、账本读取、订单生成、成交执行和持仓估值；模板字段编辑已经独立到 `/paper/templates` 页面。
 
-模板编辑已经独立到 `/paper/templates` 页面。`/paper` 只保留模板选择、账本读取、订单生成、成交执行和持仓估值，避免交易页和模板字段编辑混在一起。模板管理页仍然支持载入当前 YAML、新建模板、复制模板、覆盖保存当前模板、另存为新模板和删除模板。模板编辑只写 `configs/paper_accounts/` 下的 YAML 文件，不直接修改 Excel 账本；复制模板只生成一个未落盘的新草稿；删除模板也只删除 YAML，账本保留不动。保存时后端会检查模板文件名、账户编号、账户名称和账本路径冲突，新模板或另存为不能复用已经存在的账本文件，避免旧历史记录和新策略设置混在一起。
+## 3. 数据来源与字段定义
 
-## 3. 中文 YAML 模板
+### 股票池模板
+
+多账户模拟交易通过账户 YAML 中的 `股票池` 节点选择股票池模板：
+
+```yaml
+股票池:
+  用户: admin
+  模板名称: 当前多账户模拟股票池
+  数据库路径: data_store/stock_pool_templates.sqlite
+```
+
+当前未接入登录系统，股票池用户固定为 `admin`。接入登录系统后，前端应从登录态自动带入用户名，不在页面上提供手工输入。
+
+### SQLite 表
+
+| 表 | 用途 | 主键或唯一约束 |
+| --- | --- | --- |
+| `stock_pool_templates` | 股票池模板基本信息 | `template_id`；业务唯一键 `username + template_name` |
+| `stock_pool_template_stocks` | 模板内股票清单 | `username + template_name + symbol` |
+| `stock_daily_features` | 共享日线行情和指标事实表 | `symbol + trade_date` |
+| `stock_pool_update_jobs` | 股票池数据更新任务状态 | `job_id` |
+| `stock_pool_update_job_items` | 每个任务内每只股票状态 | `job_id + symbol` |
+
+### 多账户使用的字段
+
+| 场景 | 读取字段 |
+| --- | --- |
+| 收盘生成买入候选 | `trade_date`、`symbol`、`name`、动量字段、量价字段、大盘字段、`raw_close` |
+| 卖出提醒 | 当前持仓 + `stock_daily_features` 中的卖出条件字段 |
+| T 日价格过滤 | `raw_close` |
+| 本地日线开盘成交 | `raw_open` |
+| 收盘估值 | `raw_close` |
+| 严格成交约束 | `can_buy_open_t`、`can_sell_t` |
+| 持仓天数 | 同一股票在 `stock_daily_features` 中的交易日序列 |
+
+当前 `stock_daily_features` 覆盖基准动量、量价、大盘环境、行业/市值快照和交易可行性字段，暂未写入 `sector_*` 和 `rotation_*`。因此多账户模拟交易现阶段只应使用基准动量类条件；板块增强模拟账户需要等板块研究字段和轮动字段入库后再恢复增强条件。
+
+## 4. 中文 YAML 模板
 
 示例：
 
@@ -36,7 +76,6 @@
 账户编号: 动量Top5_v1
 账户名称: 动量Top5模拟账户
 初始资金: 100000
-处理后数据目录: data_bundle/processed_qfq_theme_focus_top100
 
 买入条件: "m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02"
 卖出条件: "m20<0.08,hs300_m20<0.02"
@@ -75,29 +114,58 @@
 输出:
   账本路径: paper_trading/accounts/动量Top5_v1.xlsx
   日志目录: paper_trading/logs
+
+股票池:
+  用户: admin
+  模板名称: 当前多账户模拟股票池
+  数据库路径: data_store/stock_pool_templates.sqlite
 ```
 
-### 前端模板编辑
+字段说明：
 
-`/paper/templates` 会先显示模板目录、模板下拉框和模板路径。选择下拉框中的模板后，页面会自动载入当前 YAML 内容，再把字段展开成表单：
+| 字段 | 说明 |
+| --- | --- |
+| `账户编号` | 模拟账户唯一编号，也用于默认账本文件名 |
+| `账户名称` | 页面和账本里展示的账户名称 |
+| `初始资金` | 模拟账户初始现金 |
+| `股票池.用户` | 股票池模板所属用户，当前固定为 `admin` |
+| `股票池.模板名称` | 要使用的股票池模板，例如 `当前多账户模拟股票池` 或 L0-L4 分层模板 |
+| `股票池.数据库路径` | 股票池 SQLite 路径，默认 `data_store/stock_pool_templates.sqlite` |
+| `买入条件` | 收盘后筛选明日买入候选的表达式 |
+| `卖出条件` | 收盘后判断当前持仓是否需要卖出的表达式 |
+| `评分表达式` | 对买入候选排序的表达式 |
+| `买入排名数量` | 每天最多生成多少只候选买入订单 |
+| `买入偏移` | 默认 `1`，表示 T 日信号、T+1 执行 |
+| `最短持有天数` | 持仓达到该天数后卖出条件才生效 |
+| `最大持有天数` | 达到后可触发卖出提醒 |
+| `买入数量.股数` | 每只股票基础买入股数 |
+| `买入数量.最低买入金额` | 用 T 日收盘价估算的最低买入市值；不足时按整手向上补足股数 |
+| `行情源.首选` | `东方财富`、`腾讯股票` 或 `本地日线`；本地日线从 SQLite 读取价格 |
+| `交易规则.严格成交` | 是否检查涨跌停、停牌等成交约束字段 |
+| `输出.账本路径` | Excel 账本路径 |
+| `输出.日志目录` | 文本日志目录 |
 
-- 基础信息：模板文件名、账户编号、账户名称、初始资金、处理后数据目录。
-- 策略条件：买入条件、卖出条件、评分表达式、买入排名数量、买入偏移、最短/最大持有天数。
-- 买入约束：固定股数、每手股数、最低买入金额、最低/最高收盘价。
-- 行情与费用：首选/备用行情源、成交价格字段、买入费率、卖出费率、印花税、滑点和最低佣金。
-- 风控开关：持仓时不重复买入、有待成交订单时不重复买入、严格成交。
-- 输出位置：Excel 账本路径和文本日志目录。
+## 5. 前端模板编辑
 
-保存与删除规则：
+`/paper/templates` 会先显示模板目录、模板下拉框和模板路径。选择下拉框中的模板后，页面会自动载入当前 YAML 内容，再把字段展开成表单。
 
-- `保存模板`：覆盖当前 `模板路径` 指向的 YAML；如果当前是“新建模板”状态、没有 `config_path`，前端会自动按“另存为新模板”处理。
-- `复制模板`：把当前表单内容复制成一个新模板草稿，自动生成新的模板文件名、账户编号、账户名称和 Excel 账本路径，并清空 `模板路径`；点击 `保存模板` 后才会真正写入 YAML。
-- `另存为新模板`：创建新的 YAML，后端拒绝已有模板文件名、已有账户编号、已有账户名称、已有账本路径。
-- 新模板的账本路径如果文件已经存在，也会拒绝保存；这是为了防止新策略接着旧账本运行。
-- `删除模板`：只删除 YAML 文件，不删除 `paper_trading/accounts/*.xlsx` 账本。需要清理账本时应单独人工确认。
-- 模板目录限制在当前 `模板目录` 内，文件名不能包含目录或 `..`。
+页面能力：
 
-## 4. 每日运行流程
+- `载入模板`：读取当前 YAML 并填充表单。
+- `新建模板`：初始化空白模板草稿。
+- `复制模板`：复制当前表单为新草稿，自动生成新文件名、账户编号、账户名称和账本路径。
+- `保存模板`：覆盖当前 `模板路径` 指向的 YAML；新建草稿会自动按另存为处理。
+- `另存为新模板`：创建新的 YAML。
+- `删除模板`：只删除 YAML 文件，不删除 Excel 账本。
+
+保存规则：
+
+- 模板文件名不能包含目录或 `..`，必须是 `.yaml` 或 `.yml`。
+- 新模板或另存为不能复用已有模板文件名、账户编号、账户名称和账本路径。
+- 新模板的账本路径如果文件已经存在，也会拒绝保存，避免新策略接着旧账本运行。
+- 保存时会校验股票池模板存在；如果股票池模板不存在，后端返回错误。
+
+## 6. 每日运行流程
 
 收盘后生成明日订单：
 
@@ -129,28 +197,18 @@ python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top
 python scripts/run_paper_trading.py --config-dir configs/paper_accounts --all --action generate --date 20260416
 ```
 
-当前新增两个板块增强模拟账户模板：
+当前内置模板：
 
-| 策略 | 模板路径 | 数据目录 | 账本路径 |
+| 账户 | 模板路径 | 股票池模板 | 说明 |
 | --- | --- | --- | --- |
-| 板块候选_score0.4_rank0.7 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector` | `paper_trading/accounts/板块候选_score04_rank07_v1.xlsx` |
-| 候选_避开新能源主线 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `data_bundle/processed_qfq_theme_focus_top100_sector_rotation` | `paper_trading/accounts/板块轮动_避开新能源_v1.xlsx` |
+| 动量Top5模拟账户 | `configs/paper_accounts/momentum_top5_v1.yaml` | `当前多账户模拟股票池` | 基准动量 Top5 |
+| 动量Top2模拟账户 | `configs/paper_accounts/momentum_top2_v1.yaml` | `当前多账户模拟股票池` | 基准动量 Top2 |
+| 板块候选_score0.4_rank0.7 | `configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` | `当前多账户模拟股票池` | 原板块增强模板，因 SQLite 暂未入库 `sector_*` 字段，当前先切回基准动量条件 |
+| 候选_避开新能源主线 | `configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` | `当前多账户模拟股票池` | 原轮动增强模板，因 SQLite 暂未入库 `rotation_*` 字段，当前先切回基准动量条件 |
 
-策略 1 直接读取板块增强目录，核心买入条件是在基础动量、大盘动量过滤后增加 `sector_exposure_score>0`、`sector_strongest_theme_score>=0.4`、`sector_strongest_theme_rank_pct<=0.7`，并按原动量评分表达式取 Top2。策略 2 在策略 1 的基础上增加 `rotation_top_cluster!=新能源`。
+## 7. 腾讯云定时任务
 
-为了保证模拟账户可比，`data_bundle/processed_qfq_theme_focus_top100`、`data_bundle/processed_qfq_theme_focus_top100_sector`、`data_bundle/processed_qfq_theme_focus_top100_sector_rotation` 必须是同一批 100 只股票：基础目录只提供原始股票日线和行业字段，板块增强目录增加 `sector_*` 字段，轮动增强目录再增加 `rotation_*` 和 `stock_matches_rotation_*` 字段。不要手工往增强目录追加旧 CSV。运行前建议用统一调度生成轮动增强目录：
-
-```bash
-python scripts/build_sector_rotation_features.py \
-  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
-  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
-  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector_rotation \
-  --overwrite
-```
-
-轮动增强目录的数据定义：股票日线仍来自 `data_bundle/processed_qfq_theme_focus_top100_sector`，轮动字段来自 `sector_rotation_daily.csv`；新增字段包括 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`rotation_top_score`、`rotation_top_rank_pct`、`stock_theme_cluster`、`stock_matches_rotation_top_cluster`。`rotation_feature_manifest.csv` 和 `rotation_feature_metadata.json` 只用于说明生成时间、源目录、源文件和行数，不参与买卖信号计算。`--overwrite` 会先清理输出目录里的旧 CSV，避免 Top100 更新后残留旧股票。
-
-腾讯云定时任务脚本：
+命令示例：
 
 ```bash
 scripts/run_paper_trading_cron.sh execute 20260429
@@ -162,21 +220,20 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 
 ```cron
 35 9 * * 1-5 /home/ubuntu/T_0_system/scripts/run_paper_trading_cron.sh execute >> /home/ubuntu/T_0_system/logs/paper_trading_cron/cron.log 2>&1
-30 21 * * * /home/ubuntu/T_0_system/scripts/run_paper_trading_cron.sh after-close >> /home/ubuntu/T_0_system/logs/paper_trading_cron/cron.log 2>&1
+30 21 * * * /home/ubuntu/T_0_system/scripts/run_after_close_pipeline.sh >> /home/ubuntu/T_0_system/logs/after_close_pipeline/cron.log 2>&1
 ```
 
 说明：
 
-- `execute` 在开盘后执行所有模板账户的待成交订单，适合使用东方财富或腾讯股票实时行情；同一批到期订单会先执行卖出、再执行买入，避免需要卖出释放现金时新买入先因为现金不足失败。
-- `after-close` 在数据更新完成后运行，先更新持仓估值，再生成下一交易日订单。
-- 推荐收盘后正式任务使用 `scripts/run_after_close_pipeline.sh`，它会先更新基础 Top100、板块研究、板块增强目录和轮动增强目录，再调用本脚本。
+- `execute` 在开盘后执行所有模板账户的待成交订单；同一批到期订单会先执行卖出、再执行买入。
+- `after-close` 在股票池模板共享行情库更新完成后运行，先更新持仓估值，再生成下一交易日订单。
+- 推荐收盘后正式任务使用 `scripts/run_after_close_pipeline.sh`，它会先执行股票池模板共享行情更新，再调用 `scripts/run_paper_trading_cron.sh after-close`。
 - 脚本会先判断是否为 A 股交易日，非交易日自动跳过。
-- `after-close` 会检查传入的处理后数据目录是否已经更新到当天；统一调度默认检查轮动增强目录，避免某个板块/轮动账户用旧数据生成计划。
-- 生成买入订单时，系统使用 T 日未复权收盘价做价格筛选；超过 `买入价格筛选.最高收盘价` 的股票不会进入最终 TopN，会继续向后寻找符合价格要求的候选。
-- `买入数量.股数` 是基础股数，`买入数量.最低买入金额` 是下限；系统会用 T 日收盘价估算买入市值，并按 `买入数量.每手股数` 向上补足。例如股价 25 元、基础 200 股、最低 10000 元，会计划买 400 股；股价 70 元、基础 300 股时，基础市值已经 21000 元，就仍买 300 股。
-- `/paper` 页面里的“获取当前持仓最新价格”会调用 `refresh` 动作，只更新当前持仓价格、市值、浮动盈亏和每日资产，不生成订单、不执行买卖。交易时段一般是盘中最新价；已收盘后通常是当日收盘价或收盘后的最新可用价格；非交易日或节假日通常是最近交易日收盘价或行情源最后可用价格。页面摘要和运行日志会写明当时的行情状态。
+- `after-close`、`generate` 和 `mark` 会校验每个模拟账户绑定的股票池模板中所有股票是否已经在 `stock_daily_features` 更新到动作日期；不再检查旧的处理后 CSV 目录。
+- `execute` 不做全量股票池日期校验，因为开盘执行只读取已生成订单对应股票在执行日的价格；缺少价格会把单笔订单标记为 `执行失败`。
+- `RUN_STOCK_POOL_UPDATE_REQUIRED=1` 表示股票池更新失败时统一调度立即中止；默认 `0` 时会继续进入模拟账户环节，但模拟账户自身仍会做最终日期校验，数据未更新到动作日期时会失败退出。
 
-## 5. 账本怎么看
+## 8. 账本怎么看
 
 | Sheet | 用途 |
 | --- | --- |
@@ -187,19 +244,15 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 | `每日资产` | 记录现金、持仓市值、总资产、累计收益和持仓数量 |
 | `运行日志` | 记录每次运行的动作、成交数量、失败数量和异常说明 |
 
-订单状态说明：
+订单状态：
 
 - `待执行`：已经生成但还没有执行。
 - `已成交`：已经按配置行情源模拟成交。
 - `执行失败`：开盘不可成交、现金不足、找不到行情、已持仓重复买入等原因导致没有成交。
 
-执行顺序说明：
+执行顺序：T 日收盘生成的订单可以同时包含买入和卖出。T+1 开盘执行时，系统会处理所有计划执行日期不晚于动作日期的待执行订单；如果同一轮执行里既有卖出又有买入，系统先执行卖出订单，再执行买入订单，让卖出到账资金可以参与后续模拟买入。
 
-- T 日收盘生成的订单可以同时包含买入和卖出。
-- T+1 开盘执行时，系统会处理所有计划执行日期不晚于动作日期的待执行订单。
-- 如果同一轮执行里既有卖出又有买入，系统先执行卖出订单，再执行买入订单，让卖出到账资金可以参与后续模拟买入。
-
-## 6. 成交和盈亏计算
+## 9. 成交和盈亏计算
 
 买入：
 
@@ -232,39 +285,46 @@ scripts/run_paper_trading_cron.sh --check-only after-close 20260429
 累计收益 = 总资产 / 初始资金 - 1
 ```
 
-## 7. 行情源说明
+买入价格和股数：生成 T 日收盘买入候选时，系统会先用 T 日未复权收盘价应用 `买入价格筛选`，被过滤的高价或低价股票不会占用最终 TopN 名额；之后再根据 `买入数量.股数`、`买入数量.最低买入金额` 和 `买入数量.每手股数` 计算计划股数。例如股价 25 元、基础 200 股、最低 10000 元时计划买 400 股；股价 70 元、基础 300 股时基础市值已经 21000 元，就仍计划买 300 股。
 
-本地 Windows 测试默认使用 `本地日线`：
+## 10. 行情源说明
 
-- 买入和卖出执行价来自处理后 CSV 的 `raw_open`。
-- 收盘估值价来自处理后 CSV 的 `raw_close`。
-- 严格成交会读取 `can_buy_open_t` 和 `can_sell_t`。
+多账户模拟交易现在统一以股票池模板 SQLite 作为本地行情和指标事实表：
 
-模块已经预留实时行情源：
+- 收盘生成订单读取 `stock_daily_features` 中的 `raw_close`、动量、量价、大盘环境和可交易字段。
+- 本地日线成交价读取 `stock_daily_features.raw_open`，收盘估值读取 `stock_daily_features.raw_close`。
+- 严格成交会读取 `can_buy_open_t` 和 `can_sell_t`，用于模拟开盘涨跌停、停牌等不可成交场景。
+- 持仓天数根据同一只股票在 `stock_daily_features` 中的交易日序列计算。
+
+模块仍保留实时行情源：
 
 - `腾讯股票`
 - `东方财富`
 
-实时行情适合开盘后执行模拟订单；如果行情接口失败，订单会标记为 `执行失败`，不会静默使用旧价格成交。默认模板已经使用 `东方财富`，备用 `腾讯股票`；如果要做离线复盘测试，可以把模板里的 `行情源.首选` 改回 `本地日线`。
+实时行情适合开盘后执行模拟订单或手动刷新持仓最新价；如果行情接口失败，订单会标记为 `执行失败`，不会静默使用旧价格成交。若要做离线复盘测试，可以把模板里的 `行情源.首选` 改成 `本地日线`，此时成交与估值都来自股票池 SQLite。
 
-## 8. 和旧系统的关系
+## 11. 和旧系统的关系
 
-- 旧的 `/` 组合回测不变。
-- 旧的 `/daily` 每日收盘选股不变。
-- 旧的 `/single` 单股回测不变。
-- 新系统新增 `/paper`、`/paper/templates`、`/api/paper/templates`、`/api/paper/template`、`/api/paper/ledger`、`/api/paper/run`、`overnight_bt/paper_trading.py` 和 `scripts/run_paper_trading.py`。
-- 新系统复用已有条件表达式、评分表达式和处理后数据读取能力，避免重复实现指标逻辑。
+- `/` 组合回测已经支持前端选择股票池模板；后端仍保留 `data_source=csv` 兼容旧脚本。
+- `/daily` 每日收盘选股已经支持前端选择股票池模板；后端仍保留 `data_source=csv` 兼容旧调用。
+- `/single` 单股回测暂时不变，仍按处理后 CSV 目录读取单股数据。
+- 多账户模拟交易已经全面切换为股票池模板 SQLite，不再读取账户 YAML 中的旧 `处理后数据目录` 字段，也不再依赖旧 CSV 日线目录。
+- 多账户模拟交易复用已有条件表达式、评分表达式和每日计划能力，但股票范围、信号字段、本地成交价和估值价都从 `stock_daily_features` 读取。
 
-## 9. 当前本地测试结果
+## 12. 异常处理
 
-使用本地 `data_bundle/processed_qfq_theme_focus_top100`，以 `20260416` 为信号日、`20260417` 为执行日测试：
+- 模板不存在或 YAML 格式错误时，API 返回 4xx/5xx，并在前端状态栏显示错误。
+- 股票池模板不存在时，保存账户模板会失败。
+- 股票池模板内股票没有 `stock_daily_features` 日线，或动作日期缺少价格时，订单会执行失败并写入失败原因。
+- `after-close`、`generate`、`mark` 发现股票池没有更新到动作日期时，会中止本次任务，避免用旧数据生成新计划。
+- 现金不足、已持仓重复买入、开盘不可成交等情况会把订单标记为 `执行失败`，不会隔天继续误买旧信号。
+- 如果使用实时行情源失败，订单不会静默成交，会写入失败原因。
 
-- 生成待执行买入订单：5 条。
-- T+1 开盘成交：3 条。
-- 资金不足失败：2 条。
-- 期末现金：`2217.74`。
-- 持仓市值：`97324.00`。
-- 总资产：`99541.74`。
-- 账本路径：`paper_trading/accounts/动量Top5_v1.xlsx`。
+## 13. 测试结果
 
-这次测试也说明：固定买入 `200` 股时，高价股会显著占用资金，模拟系统能把资金不足问题明确记录出来。
+本轮升级后的验证口径：
+
+- 使用测试 SQLite 股票池生成、执行、卖出、估值和读取 Excel 账本。
+- 覆盖先卖后买、价格过滤、实时刷新、模板保存/复制/删除、账户模板 API 和前端复制模板行为。
+- 腾讯云执行命令：`python -m pytest tests/test_paper_trading.py tests/test_api_integration.py tests/test_paper_frontend_formatting.py -q`，结果为 `27 passed`。
+- 交付前还会继续执行完整相关测试、文档检查、脚本语法检查和服务冒烟。

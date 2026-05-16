@@ -1,6 +1,6 @@
 # 股票池模板系统数据说明
 
-本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库；第四阶段已先把批量回测和每日收盘选股接入股票池模板 SQLite。多账户模拟交易、单股回测和板块研究暂时仍沿用原 CSV 输入。
+本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库；第四阶段已把批量回测、每日收盘选股和多账户模拟交易接入股票池模板 SQLite。单股回测和板块研究暂时仍沿用原 CSV 输入。
 
 ## 1. 数据来源
 
@@ -132,7 +132,7 @@
 | `total_mv_snapshot/turnover_rate_snapshot` | REAL | 市值和换手率快照 |
 | `created_at/updated_at` | TEXT | 入库和更新时间 |
 
-说明：当前 `stock_daily_features` 覆盖基准动量、量价、大盘环境和行业/市值快照字段，暂未写入 `sector_*` 板块增强字段。批量回测页和每日收盘选股页因此只开放基准动量预设；板块增强预设需要后续把板块研究字段同步入库后再开放。每日收盘选股按 `username + template_name` 从 `stock_pool_template_stocks` 限定股票范围，再读取 `stock_daily_features` 生成候选买入、卖出提醒和持仓诊断。
+说明：当前 `stock_daily_features` 覆盖基准动量、量价、大盘环境和行业/市值快照字段，暂未写入 `sector_*` 板块增强字段。批量回测页、每日收盘选股页和多账户模拟交易因此只应使用基准动量条件；板块增强预设需要后续把板块研究字段同步入库后再开放。每日收盘选股和多账户模拟交易按 `username + template_name` 从 `stock_pool_template_stocks` 限定股票范围，再读取 `stock_daily_features` 生成候选、成交价格、估值价格和持仓天数。
 
 ## 5. 缺失值和去重规则
 
@@ -298,7 +298,7 @@ scripts/run_after_close_pipeline.sh 20260514
 STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECONDS=60 scripts/run_after_close_pipeline.sh 20260514
 ```
 
-包装脚本支持通过环境变量透传批次和重试参数：`STOCK_POOL_BATCH_SIZE`、`STOCK_POOL_BATCH_INDEX`、`STOCK_POOL_BATCH_COUNT`、`STOCK_POOL_BATCH_SLEEP_SECONDS`、`STOCK_POOL_OFFSET`、`STOCK_POOL_RESUME_AFTER_SYMBOL`、`STOCK_POOL_RETRY_ATTEMPTS`、`STOCK_POOL_RETRY_SLEEP_SECONDS`、`STOCK_POOL_SLEEP_SECONDS`、`STOCK_POOL_MAX_SYMBOLS`、`STOCK_POOL_INCLUDE_UP_TO_DATE=1`。当前 CSV 模拟账户尚未依赖 SQLite，统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`；如果以后把 SQLite 作为强依赖，可设为 `1`。
+包装脚本支持通过环境变量透传批次和重试参数：`STOCK_POOL_BATCH_SIZE`、`STOCK_POOL_BATCH_INDEX`、`STOCK_POOL_BATCH_COUNT`、`STOCK_POOL_BATCH_SLEEP_SECONDS`、`STOCK_POOL_OFFSET`、`STOCK_POOL_RESUME_AFTER_SYMBOL`、`STOCK_POOL_RETRY_ATTEMPTS`、`STOCK_POOL_RETRY_SLEEP_SECONDS`、`STOCK_POOL_SLEEP_SECONDS`、`STOCK_POOL_MAX_SYMBOLS`、`STOCK_POOL_INCLUDE_UP_TO_DATE=1`。多账户模拟交易已经依赖股票池 SQLite；统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0` 时，股票池更新失败会继续进入模拟账户环节，但模拟账户 after-close 自身会校验最新日期，不通过会失败退出。若希望更早中止后续任务，可设为 `1`。
 
 ### 7.4 日志和补救方式
 
@@ -340,5 +340,5 @@ STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECOND
 - 模板保存、改名、删除时实时更新 SQLite。
 - `/stock-pools` 页面和模板列表 API 会在当前用户没有模板时尝试初始化基础模板。
 - 第二阶段已提供手动刷新、初始化脚本和每日更新脚本。
-- 第三阶段已把 `scripts/run_stock_pool_template_update.sh` 接入 `scripts/run_after_close_pipeline.sh` 统一收盘后调度。默认 `RUN_STOCK_POOL_TEMPLATE_UPDATE=1`；当前 CSV 模拟账户尚未依赖 SQLite，默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，失败只记录警告并继续模拟账户收盘任务。
+- 第三阶段已把 `scripts/run_stock_pool_template_update.sh` 接入 `scripts/run_after_close_pipeline.sh` 统一收盘后调度。默认 `RUN_STOCK_POOL_TEMPLATE_UPDATE=1`；多账户模拟交易已依赖股票池 SQLite，默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0` 时更新失败只记录警告并继续进入模拟账户，但模拟账户自身会校验最新日期并在不满足时失败退出。
 - 批量验证记录见 `docs/stock-pool-template-batch-validation-20260514.md`。
