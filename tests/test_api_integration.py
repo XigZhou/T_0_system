@@ -12,6 +12,7 @@ from overnight_bt.app import (
     daily_plan_api,
     export_backtest_api,
     export_backtest_table_api,
+    index,
     paper_template_api,
     paper_template_delete_api,
     paper_template_manager_page,
@@ -43,6 +44,17 @@ from tests.helpers import make_processed_stock, write_processed_dir, write_stock
 
 
 class ApiIntegrationTest(unittest.TestCase):
+    def test_backtest_page_has_stock_pool_entry_and_excel_buttons(self) -> None:
+        html = index()
+        self.assertIn("/stock-pools", html)
+        self.assertIn("股票池模板", html)
+        self.assertIn("downloadPickRowsBtn", html)
+        self.assertIn("downloadTradeRowsBtn", html)
+
+        js = (Path(__file__).resolve().parents[1] / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("document.body.appendChild(a)", js)
+        self.assertIn("URL.revokeObjectURL(url)", js)
+
     def test_paper_pages_render_expected_entry_points(self) -> None:
         paper_html = paper_trading_page()
         template_html = paper_template_manager_page()

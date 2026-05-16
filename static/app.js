@@ -463,6 +463,27 @@ function setStatus(text, error = false) {
   statusEl.style.color = error ? "#8a2f13" : "";
 }
 
+function showPayloadError(error) {
+  const message = error?.message || String(error || "参数错误");
+  setStatus(message, true);
+  if (message.includes("股票池模板") && stockPoolTemplateSelect) {
+    stockPoolTemplateSelect.focus();
+    if (typeof stockPoolTemplateSelect.scrollIntoView === "function") {
+      stockPoolTemplateSelect.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+}
+
+function setButtonBusy(button, busyText) {
+  if (!button) {
+    return "";
+  }
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = busyText;
+  return previousText;
+}
+
 function formatValue(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
@@ -928,6 +949,16 @@ function applyResult(result) {
   }
 }
 
+async function readResponseError(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const data = await response.json().catch(() => ({}));
+    return data.detail || data.message || `请求失败：${response.status}`;
+  }
+  const text = await response.text().catch(() => "");
+  return text.trim() || `请求失败：${response.status}`;
+}
+
 async function postJson(url, payload) {
   const response = await fetch(url, {
     method: "POST",
@@ -935,10 +966,28 @@ async function postJson(url, payload) {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail || `请求失败：${response.status}`);
+    throw new Error(await readResponseError(response));
   }
   return response;
+}
+
+function triggerBrowserDownload(blob, filename) {
+  if (!blob || blob.size === 0) {
+    throw new Error("服务端返回空文件，请稍后重试");
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  if (window.setTimeout) {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } else {
+    URL.revokeObjectURL(url);
+  }
 }
 
 form.addEventListener("submit", async (event) => {
@@ -947,7 +996,7 @@ form.addEventListener("submit", async (event) => {
   try {
     payload = buildPayload();
   } catch (error) {
-    setStatus(error.message, true);
+    showPayloadError(error);
     return;
   }
   const mode = getBacktestMode();
@@ -973,30 +1022,28 @@ async function downloadResultTable(tableKey, button) {
   try {
     payload = buildPayload();
   } catch (error) {
-    setStatus(error.message, true);
+    showPayloadError(error);
     return;
   }
   const mode = getBacktestMode();
   const label = tableKey === "pick_rows" ? "每日选股明细" : "交易流水";
-  if (button) {
-    button.disabled = true;
-  }
+  const previousText = setButtonBusy(button, "生成中...");
   setStatus(`正在生成${label}Excel...`);
   try {
     const response = await postJson(`/api/run-backtest-table-export?mode=${encodeURIComponent(mode)}&table=${encodeURIComponent(tableKey)}`, payload);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) {
+      throw new Error(await readResponseError(response));
+    }
     const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${label}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBrowserDownload(blob, `${label}.xlsx`);
     setStatus(`${label}Excel已生成。`);
   } catch (error) {
     setStatus(`${label}Excel生成失败: ${error.message}`, true);
   } finally {
     if (button) {
       button.disabled = false;
+      button.textContent = previousText || "下载Excel";
     }
   }
 }
@@ -1013,24 +1060,24 @@ exportBtn?.addEventListener("click", async () => {
   try {
     payload = buildPayload();
   } catch (error) {
-    setStatus(error.message, true);
+    showPayloadError(error);
     return;
   }
-  exportBtn.disabled = true;
+  const previousText = setButtonBusy(exportBtn, "导出中...");
   setStatus("正在准备导出文件...");
   try {
     const response = await postJson("/api/run-backtest-export", payload);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/zip")) {
+      throw new Error(await readResponseError(response));
+    }
     const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "组合回测结果.zip";
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBrowserDownload(blob, "组合回测结果.zip");
     setStatus("导出完成。");
   } catch (error) {
     setStatus(`导出失败: ${error.message}`, true);
   } finally {
     exportBtn.disabled = false;
+    exportBtn.textContent = previousText || "下载表格压缩包";
   }
 });
