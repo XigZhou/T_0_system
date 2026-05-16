@@ -2,11 +2,37 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal
 
 
-class BacktestRequest(BaseModel):
+ExitMode = Literal["fixed", "sell_condition_with_fallback", "sell_condition_only"]
+
+
+class _ExitModeMixin(BaseModel):
+    exit_mode: ExitMode = Field(
+        "sell_condition_with_fallback",
+        description="fixed=只按固定/最长持有退出；sell_condition_with_fallback=卖出条件优先，固定/最长持有兜底；sell_condition_only=只按卖出条件退出，未触发则估值",
+    )
+    entry_offset: int = Field(1, ge=1, le=5, description="Enter at T+entry_offset open")
+    exit_offset: int | None = Field(2, ge=2, le=20, description="Fallback fixed exit at T+exit_offset open")
+    min_hold_days: int = Field(0, ge=0, le=20, description="Minimum holding days before sell_condition can trigger")
+    max_hold_days: int = Field(0, ge=0, le=20, description="Maximum holding days after entry; 0 means use exit_offset as fallback")
+
+    @model_validator(mode="after")
+    def validate_exit_settings(self):
+        if self.exit_mode == "sell_condition_only":
+            if not str(getattr(self, "sell_condition", "") or "").strip():
+                raise ValueError("仅卖出条件退出模式必须填写卖出条件")
+            return self
+        if self.exit_offset is None:
+            raise ValueError("固定退出或兜底退出模式必须填写固定卖出偏移天数")
+        if int(self.exit_offset) <= int(self.entry_offset):
+            raise ValueError("固定卖出偏移天数必须大于买入偏移天数")
+        return self
+
+
+class BacktestRequest(_ExitModeMixin):
     data_source: Literal["csv", "stock_pool"] = Field("csv", description="csv=读取处理后CSV目录；stock_pool=读取股票池模板SQLite")
     processed_dir: str = Field("", description="Directory containing per-stock processed CSV files; csv mode only")
     stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
@@ -25,10 +51,6 @@ class BacktestRequest(BaseModel):
     buy_fee_rate: float = Field(0.00003, ge=0)
     sell_fee_rate: float = Field(0.00003, ge=0)
     stamp_tax_sell: float = Field(0.0, ge=0)
-    entry_offset: int = Field(1, ge=1, le=5, description="Enter at T+entry_offset open")
-    exit_offset: int = Field(2, ge=2, le=20, description="Fallback fixed exit at T+exit_offset open")
-    min_hold_days: int = Field(0, ge=0, le=20, description="Minimum holding days before sell_condition can trigger")
-    max_hold_days: int = Field(0, ge=0, le=20, description="Maximum holding days after entry; 0 means use exit_offset as fallback")
     settlement_mode: Literal["cutoff", "complete"] = Field(
         "cutoff",
         description="cutoff stops at end_date and marks open positions; complete keeps simulating until open orders/positions settle",
@@ -53,7 +75,7 @@ class BacktestResponse(BaseModel):
     diagnostics: dict
 
 
-class SignalQualityRequest(BaseModel):
+class SignalQualityRequest(_ExitModeMixin):
     data_source: Literal["csv", "stock_pool"] = Field("csv", description="csv=读取处理后CSV目录；stock_pool=读取股票池模板SQLite")
     processed_dir: str = Field("", description="Directory containing per-stock processed CSV files; csv mode only")
     stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
@@ -69,10 +91,6 @@ class SignalQualityRequest(BaseModel):
     buy_fee_rate: float = Field(0.00003, ge=0)
     sell_fee_rate: float = Field(0.00003, ge=0)
     stamp_tax_sell: float = Field(0.0, ge=0)
-    entry_offset: int = Field(1, ge=1, le=5, description="Enter at T+entry_offset open")
-    exit_offset: int = Field(2, ge=2, le=20, description="Fallback fixed exit at T+exit_offset open")
-    min_hold_days: int = Field(0, ge=0, le=20, description="Minimum holding days before sell_condition can trigger")
-    max_hold_days: int = Field(0, ge=0, le=20, description="Maximum holding days after entry; 0 means use exit_offset as fallback")
     settlement_mode: Literal["cutoff", "complete"] = Field(
         "cutoff",
         description="cutoff does not use prices after end_date; complete keeps simulating until selected signals settle",
@@ -281,6 +299,7 @@ class Position:
     score: float | None = None
     exit_reason: str | None = None
     exit_signal_date: str | None = None
+    rank: int | None = None
 
 
 @dataclass

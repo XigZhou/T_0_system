@@ -11,6 +11,7 @@ import pandas as pd
 from overnight_bt.app import (
     daily_plan_api,
     export_backtest_api,
+    export_backtest_table_api,
     paper_template_api,
     paper_template_delete_api,
     paper_template_manager_page,
@@ -190,6 +191,12 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertIn("期末权益", summary_csv.splitlines()[0])
             self.assertIn("股票名称", trades_csv.splitlines()[0])
             self.assertIn("交易日期", trades_csv.splitlines()[0])
+
+            table_response = export_backtest_table_api(payload, mode="account", table="trade_rows")
+            self.assertEqual(table_response.status_code, 200)
+            self.assertEqual(table_response.media_type, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            exported = pd.read_excel(BytesIO(table_response.body))
+            self.assertEqual(exported.columns.tolist(), ["交易日期", "信号日期", "股票代码", "股票名称", "排名", "评分", "动作", "价格", "价格口径", "股数", "盈亏", "执行说明"])
 
 
     def test_api_run_with_stock_pool_template_source(self) -> None:
@@ -386,6 +393,9 @@ class ApiIntegrationTest(unittest.TestCase):
             self.assertEqual(body["topk_rows"][-1]["completed_signal_count"], 2)
             self.assertTrue(any(row["recommended"] == "建议" for row in body["topk_rows"]))
             self.assertEqual(body["pick_rows"][0]["status"], "已完成")
+            self.assertEqual([row["action"] for row in body["trade_rows"]], ["BUY", "BUY", "SELL", "SELL"])
+            self.assertIn("price_basis", body["trade_rows"][0])
+            self.assertIn("pnl", body["trade_rows"][-1])
 
     def test_single_stock_api_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

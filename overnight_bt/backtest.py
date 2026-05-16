@@ -36,6 +36,7 @@ class LoadedSymbol:
 _SCORE_OFFSET_RE = re.compile(r"\[(\d+)\]")
 _CUTOFF_EXIT_DATE = "99991231"
 _CUTOFF_EXIT_LABEL = "截止日后估值"
+_PRICE_BASIS_RAW_OPEN = "未复权开盘价（除权价格）"
 PROCESSED_METADATA_CSV_NAMES = {
     "processing_manifest.csv",
     "sector_feature_manifest.csv",
@@ -532,10 +533,27 @@ def _count_holding_days(date_index: dict[str, int], start_date: str, end_date: s
     return max(0, date_index[end_date] - date_index[start_date])
 
 
+def _exit_mode(req: BacktestRequest) -> str:
+    return str(getattr(req, "exit_mode", "sell_condition_with_fallback") or "sell_condition_with_fallback")
+
+
+def _uses_fixed_exit(req: BacktestRequest) -> bool:
+    return _exit_mode(req) != "sell_condition_only"
+
+
+def _fixed_exit_offset(req: BacktestRequest) -> int:
+    exit_offset = getattr(req, "exit_offset", None)
+    if exit_offset is None:
+        return int(req.entry_offset) + max(int(req.max_hold_days or 0), 1)
+    return int(exit_offset)
+
+
 def _effective_max_exit_offset(req: BacktestRequest) -> int:
+    if not _uses_fixed_exit(req):
+        return 10000
     if req.max_hold_days > 0:
-        return req.entry_offset + req.max_hold_days
-    return req.exit_offset
+        return int(req.entry_offset) + int(req.max_hold_days)
+    return _fixed_exit_offset(req)
 
 
 def _display_exit_date(value: str) -> str:
@@ -593,12 +611,10 @@ def run_portfolio_backtest_loaded(
     diagnostics: dict[str, Any],
     req: BacktestRequest,
 ) -> dict[str, Any]:
-    if req.exit_offset <= req.entry_offset:
-        raise ValueError("exit_offset must be greater than entry_offset")
-
     diagnostics = dict(diagnostics)
+    exit_mode = _exit_mode(req)
     buy_rules = parse_condition_expr(req.buy_condition)
-    sell_rules = parse_condition_expr(req.sell_condition) if str(req.sell_condition or "").strip() else []
+    sell_rules = [] if exit_mode == "fixed" else parse_condition_expr(req.sell_condition) if str(req.sell_condition or "").strip() else []
     score_tree, _ = compile_score_expression(req.score_expression)
     max_offset = max(
         max_required_offset(buy_rules),
@@ -757,9 +773,14 @@ def run_portfolio_backtest_loaded(
                     "holding_days": _count_holding_days(date_index, pos.buy_date, trade_date),
                     "trade_return": round(trade_return, 6),
                     "price_pnl": round(exec_price - pos.buy_price, 4),
+                    "rank": pos.rank,
+                    "score": round(float(pos.score), 6) if pos.score is not None else None,
+                    "price_basis": _PRICE_BASIS_RAW_OPEN,
+                    "pnl": round(net - pos.buy_net_amount, 2),
                     "exit_reason": exit_reason,
                     "exit_signal_date": pos.exit_signal_date,
                     "reason": "sell at scheduled or next available open",
+                    "execution_note": "卖出条件触发，按下一交易日未复权开盘价卖出" if exit_reason.startswith("sell_condition") else "固定或最大持有到期，按未复权开盘价卖出",
                 }
             )
             if exit_reason.startswith("sell_condition"):
@@ -959,6 +980,7 @@ def run_portfolio_backtest_loaded(
                 score=float(order.score),
                 exit_reason=None,
                 exit_signal_date=None,
+                rank=order.rank,
             )
             trades.append(
                 {
@@ -978,7 +1000,10 @@ def run_portfolio_backtest_loaded(
                     "cash_after": round(cash, 2),
                     "rank": order.rank,
                     "score": round(order.score, 6),
+                    "price_basis": _PRICE_BASIS_RAW_OPEN,
+                    "pnl": None,
                     "reason": "selected on signal day and executed at next open",
+                    "execution_note": "信号日入选，按下一交易日未复权开盘价买入",
                 }
             )
             bought_today += 1
@@ -1004,7 +1029,7 @@ def run_portfolio_backtest_loaded(
 
                 exit_date = _CUTOFF_EXIT_DATE
                 exit_row = None
-                if not is_cutoff_signal:
+                if not is_cutoff_signal and _uses_fixed_exit(req):
                     future_exit = _future_row(item, idx, _effective_max_exit_offset(req))
                     if future_exit is not None:
                         candidate_exit_date, candidate_exit_row = future_exit
@@ -1291,11 +1316,16 @@ def run_portfolio_backtest_loaded(
         "end_date": signal_dates[-1],
         "simulation_end_date": daily_rows[-1]["trade_date"] if daily_rows else signal_dates[-1],
         "settlement_mode": "截止日估值" if cutoff_mode else "完整结算",
+        "exit_mode": {
+            "fixed": "固定持有退出",
+            "sell_condition_with_fallback": "卖出条件优先+固定兜底",
+            "sell_condition_only": "仅卖出条件退出",
+        }.get(_exit_mode(req), _exit_mode(req)),
         "data_profile": diagnostics.get("data_profile", "base"),
         "valuation_date": valuation_date,
         "trade_days": len(daily_rows),
         "entry_offset": req.entry_offset,
-        "exit_offset": req.exit_offset,
+        "exit_offset": req.exit_offset if req.exit_offset is not None else None,
         "min_hold_days": req.min_hold_days,
         "max_hold_days": req.max_hold_days,
         "sell_condition": req.sell_condition,
@@ -1326,11 +1356,12 @@ def run_portfolio_backtest_loaded(
         "avg_holding_days": round(_average(holding_days), 2) if holding_days else 0.0,
         "total_fees": round(total_fees, 2),
     }
+    public_trade_rows = [row for row in trades if row.get("action") in {"BUY", "SELL"}]
     return {
         "summary": summary,
         "daily_rows": daily_rows,
         "pick_rows": picks,
-        "trade_rows": trades,
+        "trade_rows": public_trade_rows,
         "contribution_rows": contribution_rows,
         "condition_rows": condition_rows,
         "year_rows": year_rows,
@@ -1358,7 +1389,7 @@ def run_portfolio_backtest(req: BacktestRequest) -> dict[str, Any]:
 
 
 _EXPORT_COLUMN_LABELS = {
-    "action": "操作",
+    "action": "动作",
     "annualized_return": "年化收益率",
     "avg_holding_days": "平均持有天数",
     "avg_trade_return": "平均单笔收益",
@@ -1393,6 +1424,7 @@ _EXPORT_COLUMN_LABELS = {
     "exit_can_sell_open": "卖出日可开盘卖出",
     "exit_offset": "固定卖出偏移",
     "exit_raw_open": "卖出日未复权开盘价",
+    "exit_mode": "退出模式",
     "exit_reason": "退出原因",
     "exit_signal_date": "退出信号日",
     "exit_type": "退出类型",
@@ -1425,8 +1457,10 @@ _EXPORT_COLUMN_LABELS = {
     "planned_exit_date": "计划卖出日",
     "planned_sell_date": "计划卖出日",
     "position_count": "持仓数",
-    "price": "成交价",
+    "price": "价格",
+    "price_basis": "价格口径",
     "price_pnl": "价差盈亏",
+    "pnl": "盈亏",
     "profit_factor": "收益因子",
     "rank": "排名",
     "reading": "怎么看",
@@ -1476,6 +1510,43 @@ _EXPORT_COLUMN_LABELS = {
 
 def _localize_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.rename(columns={key: value for key, value in _EXPORT_COLUMN_LABELS.items() if key in frame.columns})
+
+
+_EXPORT_TABLE_COLUMNS = {
+    "trade_rows": [
+        "trade_date",
+        "signal_date",
+        "symbol",
+        "name",
+        "rank",
+        "score",
+        "action",
+        "price",
+        "price_basis",
+        "shares",
+        "pnl",
+        "execution_note",
+    ]
+}
+
+
+def export_backtest_table_excel(result: dict[str, Any], table_key: str) -> bytes:
+    table_names = {
+        "pick_rows": "每日选股明细",
+        "trade_rows": "交易流水",
+    }
+    if table_key not in table_names:
+        raise ValueError("只支持导出每日选股明细或交易流水")
+    frame = pd.DataFrame(result.get(table_key, []))
+    preferred_columns = _EXPORT_TABLE_COLUMNS.get(table_key)
+    if preferred_columns:
+        frame = frame.reindex(columns=preferred_columns)
+    if table_key == "trade_rows" and "action" in frame.columns:
+        frame["action"] = frame["action"].map({"BUY": "买", "SELL": "卖"}).fillna(frame["action"])
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        _localize_export_frame(frame).to_excel(writer, index=False, sheet_name=table_names[table_key])
+    return output.getvalue()
 
 
 def export_backtest_zip(result: dict[str, Any]) -> bytes:

@@ -1,6 +1,11 @@
 const form = document.getElementById("btForm");
 const runBtn = document.getElementById("runBtn");
 const exportBtn = document.getElementById("exportBtn");
+const downloadPickRowsBtn = document.getElementById("downloadPickRowsBtn");
+const downloadTradeRowsBtn = document.getElementById("downloadTradeRowsBtn");
+const exitModeSelect = document.getElementById("exitMode");
+const exitOffsetInput = document.getElementById("exitOffset");
+const exitOffsetField = document.getElementById("exitOffsetField");
 const statusEl = document.getElementById("status");
 const summaryGrid = document.getElementById("summaryGrid");
 const equityChart = document.getElementById("equityChart");
@@ -115,7 +120,7 @@ const PERCENT_KEYS = new Set([
 ]);
 
 const COLUMN_LABELS = {
-  action: "操作",
+  action: "动作",
   avg_holding_days: "平均持有天数",
   avg_signals_per_day: "平均每日信号数",
   avg_trade_return: "平均单笔收益",
@@ -147,6 +152,7 @@ const COLUMN_LABELS = {
   exit_signal_date: "退出信号日",
   exit_type: "退出类型",
   exit_price: "卖出执行价",
+  exit_mode: "退出模式",
   fees: "费用",
   gross_amount: "成交金额",
   holding_days: "持有天数",
@@ -192,8 +198,10 @@ const COLUMN_LABELS = {
   planned_entry_date: "计划买入日",
   planned_exit_date: "计划卖出日",
   position_count: "持仓数",
-  price: "成交价",
+  price: "价格",
+  price_basis: "价格口径",
   price_pnl: "价差盈亏",
+  pnl: "盈亏",
   rank: "排名",
   recommendation_score: "辅助推荐分",
   recommended: "建议",
@@ -259,11 +267,11 @@ const COLUMN_LABELS = {
 };
 
 const VALUE_LABELS = {
-  BUY: "买入",
+  BUY: "买",
   BUY_BLOCKED: "买入阻塞",
   BUY_SKIPPED_CASH: "资金不足跳过",
   BUY_SKIPPED_CUTOFF: "截止日不买入",
-  SELL: "卖出",
+  SELL: "卖",
   SELL_BLOCKED: "卖出阻塞",
   auto: "自动识别",
   base: "基准口径",
@@ -369,6 +377,15 @@ function getBacktestMode() {
   return modeInputs.find((input) => input.checked)?.value || "signal_quality";
 }
 
+function updateExitModeUI() {
+  const onlySellCondition = exitModeSelect?.value === "sell_condition_only";
+  if (exitOffsetInput) {
+    exitOffsetInput.disabled = onlySellCondition;
+    exitOffsetInput.placeholder = onlySellCondition ? "仅卖出条件退出时可不填" : "";
+  }
+  exitOffsetField?.classList.toggle("muted-field", onlySellCondition);
+}
+
 function updateBacktestModeUI() {
   const mode = getBacktestMode();
   const isSignalQuality = mode === "signal_quality";
@@ -378,8 +395,9 @@ function updateBacktestModeUI() {
     const input = option.querySelector('input[name="backtestMode"]');
     option.classList.toggle("active", input?.value === mode);
   });
-  exportBtn.disabled = isSignalQuality;
-  exportBtn.title = isSignalQuality ? "信号质量回测暂不支持导出，请切换到实盘账户回测后导出。" : "";
+  if (exportBtn) {
+    exportBtn.hidden = true;
+  }
   if (isSignalQuality && tabButtons.find((button) => button.dataset.tab === "cutoff")?.classList.contains("active")) {
     setActiveTab("condition");
   }
@@ -394,6 +412,8 @@ modeInputs.forEach((input) => {
   input.addEventListener("change", updateBacktestModeUI);
 });
 updateBacktestModeUI();
+updateExitModeUI();
+exitModeSelect?.addEventListener("change", updateExitModeUI);
 strategyPreset?.addEventListener("change", () => applyStrategyPreset(strategyPreset.value));
 reloadBacktestPoolsBtn?.addEventListener("click", () => {
   loadBacktestPoolTemplates(true).catch((error) => setStatus(`读取股票池模板失败: ${error.message}`, true));
@@ -404,6 +424,7 @@ loadBacktestPoolTemplates(false).catch((error) => setStatus(`读取股票池模�
 function buildPayload() {
   const preset = STRATEGY_PRESETS[strategyPreset?.value] || STRATEGY_PRESETS.base;
   const templateName = selectedBacktestPoolTemplate();
+  const exitMode = exitModeSelect?.value || "sell_condition_with_fallback";
   if (!templateName) {
     throw new Error("请选择股票池模板");
   }
@@ -421,8 +442,9 @@ function buildPayload() {
     top_n: Number(document.getElementById("topN").value),
     initial_cash: Number(document.getElementById("initialCash").value),
     per_trade_budget: Number(document.getElementById("perTradeBudget").value),
+    exit_mode: exitMode,
     entry_offset: Number(document.getElementById("entryOffset").value),
-    exit_offset: Number(document.getElementById("exitOffset").value),
+    exit_offset: exitMode === "sell_condition_only" ? null : Number(exitOffsetInput.value),
     min_hold_days: Number(document.getElementById("minHoldDays").value),
     max_hold_days: Number(document.getElementById("maxHoldDays").value),
     lot_size: Number(document.getElementById("lotSize").value),
@@ -737,6 +759,30 @@ function ensureTableWrap(el) {
   }
 }
 
+function selectColumns(rows, columns) {
+  return (rows || []).map((row) =>
+    columns.reduce((acc, key) => {
+      acc[key] = row[key];
+      return acc;
+    }, {})
+  );
+}
+
+const TRADE_TABLE_COLUMNS = [
+  "trade_date",
+  "signal_date",
+  "symbol",
+  "name",
+  "rank",
+  "score",
+  "action",
+  "price",
+  "price_basis",
+  "shares",
+  "pnl",
+  "execution_note",
+];
+
 function renderTable(el, rows, preferredOrder = []) {
   const wrap = el.closest(".table-wrap");
   if (!rows || !rows.length) {
@@ -869,13 +915,13 @@ function applyResult(result) {
   renderTable(pendingSellTable, result.pending_sell_rows, ["signal_date", "planned_sell_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_condition", "reason"]);
   if (isSignalQuality) {
     renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
-    renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "rank", "score", "entry_price", "exit_price", "trade_return", "holding_days", "exit_type", "exit_signal_date"]);
+    renderTable(tradeTable, selectColumns(result.trade_rows, TRADE_TABLE_COLUMNS), TRADE_TABLE_COLUMNS);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "signal_count", "total_signal_return", "win_rate", "avg_trade_return", "median_trade_return"]);
     const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
     diagText.textContent = `信号质量回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
   } else {
     renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
-    renderTable(tradeTable, result.trade_rows, ["trade_date", "signal_date", "symbol", "name", "action", "price", "shares", "gross_amount", "fees", "net_amount", "cash_after", "trade_return", "price_pnl", "exit_reason", "exit_signal_date"]);
+    renderTable(tradeTable, selectColumns(result.trade_rows, TRADE_TABLE_COLUMNS), TRADE_TABLE_COLUMNS);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "realized_pnl", "trade_count", "win_rate", "avg_trade_return"]);
     const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
     diagText.textContent = `实盘账户回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
@@ -922,9 +968,45 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-exportBtn.addEventListener("click", async () => {
+async function downloadResultTable(tableKey, button) {
+  let payload;
+  try {
+    payload = buildPayload();
+  } catch (error) {
+    setStatus(error.message, true);
+    return;
+  }
+  const mode = getBacktestMode();
+  const label = tableKey === "pick_rows" ? "每日选股明细" : "交易流水";
+  if (button) {
+    button.disabled = true;
+  }
+  setStatus(`正在生成${label}Excel...`);
+  try {
+    const response = await postJson(`/api/run-backtest-table-export?mode=${encodeURIComponent(mode)}&table=${encodeURIComponent(tableKey)}`, payload);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${label}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`${label}Excel已生成。`);
+  } catch (error) {
+    setStatus(`${label}Excel生成失败: ${error.message}`, true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+downloadPickRowsBtn?.addEventListener("click", () => downloadResultTable("pick_rows", downloadPickRowsBtn));
+downloadTradeRowsBtn?.addEventListener("click", () => downloadResultTable("trade_rows", downloadTradeRowsBtn));
+
+exportBtn?.addEventListener("click", async () => {
   if (getBacktestMode() === "signal_quality") {
-    setStatus("信号质量回测暂不支持导出；请切换到实盘账户回测后导出表格压缩包。", true);
+    setStatus("信号质量回测暂不支持压缩包导出；请使用明细表上的Excel下载按钮。", true);
     return;
   }
   let payload;

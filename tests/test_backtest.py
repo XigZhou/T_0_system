@@ -105,7 +105,7 @@ class BacktestEngineTest(unittest.TestCase):
             )
             self.assertEqual(result["summary"]["blocked_buy_count"], 1)
             self.assertEqual(result["summary"]["buy_count"], 0)
-            self.assertTrue(any(row["action"] == "BUY_BLOCKED" for row in result["trade_rows"]))
+            self.assertEqual(result["trade_rows"], [])
 
     def test_strict_mode_blocks_buy_on_entry_open_down_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -139,8 +139,7 @@ class BacktestEngineTest(unittest.TestCase):
             )
             self.assertEqual(result["summary"]["blocked_buy_count"], 1)
             self.assertEqual(result["summary"]["buy_count"], 0)
-            blocked = next(row for row in result["trade_rows"] if row["action"] == "BUY_BLOCKED")
-            self.assertEqual(blocked["trade_date"], "20240103")
+            self.assertEqual(result["trade_rows"], [])
 
     def test_strict_mode_blocked_sell_rolls_to_next_available_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

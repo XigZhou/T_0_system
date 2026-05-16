@@ -108,7 +108,7 @@
               <span>买入偏移</span>
               <input id="entryOffset" type="number" value="1" min="1" max="5" />
             </label>
-            <label>
+            <label id="exitOffsetField">
               <span>固定卖出偏移天数</span>
               <input id="exitOffset" type="number" value="5" min="2" max="20" />
             </label>
@@ -128,8 +128,12 @@
               <input id="maxHoldDays" type="number" value="15" min="0" max="20" />
             </label>
             <label>
-              <span>退出逻辑说明</span>
-              <input type="text" value="卖出条件触发则次日开盘卖，否则按固定或最大持有退出" readonly />
+              <span>退出模式</span>
+              <select id="exitMode">
+                <option value="sell_condition_with_fallback" selected>卖出条件优先 + 固定兜底</option>
+                <option value="fixed">固定持有退出</option>
+                <option value="sell_condition_only">仅卖出条件退出</option>
+              </select>
             </label>
           </div>
 
@@ -176,7 +180,7 @@
 
           <div class="actions">
             <button id="runBtn" type="submit">运行回测</button>
-            <button id="exportBtn" type="button" class="secondary">下载表格压缩包</button>
+            <button id="exportBtn" type="button" class="secondary" hidden>下载表格压缩包</button>
           </div>
           <p id="status" class="status">默认运行信号质量回测，先判断条件本身是否有效。</p>
         </form>
@@ -335,6 +339,9 @@
                     <p class="eyebrow">选股记录</p>
                     <h3>每日选股明细</h3>
                   </div>
+                  <div class="panel-actions">
+                    <button id="downloadPickRowsBtn" type="button" class="secondary table-download-btn">下载Excel</button>
+                  </div>
                 </div>
                 <div class="table-wrap">
                   <table id="pickTable"></table>
@@ -346,6 +353,9 @@
                   <div>
                     <p class="eyebrow">交易记录</p>
                     <h3>交易流水</h3>
+                  </div>
+                  <div class="panel-actions">
+                    <button id="downloadTradeRowsBtn" type="button" class="secondary table-download-btn">下载Excel</button>
                   </div>
                 </div>
                 <div class="table-wrap">

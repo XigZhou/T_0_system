@@ -533,6 +533,24 @@ button:hover,
   margin-bottom: 18px;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-download-btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.muted-field {
+  opacity: 0.62;
+}
+
 .chart-box {
   min-height: 300px;
   border-radius: 22px;

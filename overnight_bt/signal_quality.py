@@ -12,17 +12,20 @@ from .backtest import (
     _compute_position_runtime_metrics,
     _count_holding_days,
     _effective_max_exit_offset,
+    _exit_mode,
     _effective_shares,
     _fmt_count,
     _fmt_num,
     _fmt_pct,
     _future_row,
+    _PRICE_BASIS_RAW_OPEN,
     _max_drawdown_from_equity,
     _median,
     _period_key,
     _profit_factor,
     _score_required_offset,
     _within_range,
+    _uses_fixed_exit,
     load_backtest_input,
     load_processed_folder,
 )
@@ -486,12 +489,10 @@ def run_signal_quality_loaded(
     diagnostics: dict[str, Any],
     req: SignalQualityRequest,
 ) -> dict[str, Any]:
-    if req.exit_offset <= req.entry_offset:
-        raise ValueError("exit_offset must be greater than entry_offset")
-
     diagnostics = dict(diagnostics)
+    exit_mode = _exit_mode(req)
     buy_rules = parse_condition_expr(req.buy_condition)
-    sell_rules = parse_condition_expr(req.sell_condition) if str(req.sell_condition or "").strip() else []
+    sell_rules = [] if exit_mode == "fixed" else parse_condition_expr(req.sell_condition) if str(req.sell_condition or "").strip() else []
     score_tree, _ = compile_score_expression(req.score_expression)
     max_offset = max(
         max_required_offset(buy_rules),
@@ -513,6 +514,7 @@ def run_signal_quality_loaded(
             rows_by_date.setdefault(date, []).append((item, idx))
 
     signal_rows: list[dict] = []
+    trade_rows: list[dict] = []
     daily_rows: list[dict] = []
     candidate_day_count = 0
     picked_day_count = 0
@@ -575,7 +577,8 @@ def run_signal_quality_loaded(
             idx = int(candidate["idx"])
             signal_row = candidate["signal_row"]
             entry = _future_row(item, idx, int(req.entry_offset))
-            max_exit_idx = idx + _effective_max_exit_offset(req)
+            uses_fixed_exit = _uses_fixed_exit(req)
+            max_exit_idx = idx + _effective_max_exit_offset(req) if uses_fixed_exit else len(item.df) - 1
             signal_base = {
                 "signal_date": signal_date,
                 "symbol": item.symbol,
@@ -658,11 +661,21 @@ def run_signal_quality_loaded(
                 )
                 continue
 
-            latest_exit_idx = min(max_exit_idx, len(item.df) - 1)
-            planned_exit_date = str(item.df.iloc[latest_exit_idx]["trade_date"]).strip()
-            planned_exit_after_cutoff = bool(cutoff_mode and planned_exit_date > cutoff_date)
-            if planned_exit_after_cutoff:
-                latest_exit_idx = item.idx_by_date.get(cutoff_date, latest_exit_idx)
+            if uses_fixed_exit:
+                latest_exit_idx = min(max_exit_idx, len(item.df) - 1)
+                planned_exit_date = str(item.df.iloc[latest_exit_idx]["trade_date"]).strip()
+                planned_exit_after_cutoff = bool(cutoff_mode and planned_exit_date > cutoff_date)
+                if planned_exit_after_cutoff:
+                    latest_exit_idx = item.idx_by_date.get(cutoff_date, latest_exit_idx)
+            else:
+                if cutoff_mode:
+                    eligible_exit_indices = [row_idx for row_date, row_idx in item.idx_by_date.items() if row_date <= cutoff_date]
+                    latest_exit_idx = max(eligible_exit_indices) if eligible_exit_indices else entry_idx
+                else:
+                    latest_exit_idx = len(item.df) - 1
+                latest_exit_idx = max(entry_idx, latest_exit_idx)
+                planned_exit_date = "仅卖出条件"
+                planned_exit_after_cutoff = False
 
             pos = Position(
                 symbol=item.symbol,
@@ -677,6 +690,23 @@ def run_signal_quality_loaded(
                 buy_net_amount=float(buy_price) * (1.0 + float(req.buy_fee_rate)),
                 buy_adj_factor=to_float(entry_row.get("adj_factor")),
                 score=float(candidate["score"]),
+                rank=rank,
+            )
+            buy_fee_for_row = buy_price * float(req.buy_fee_rate)
+            trade_rows.append(
+                {
+                    **signal_base,
+                    "trade_date": entry_date,
+                    "planned_entry_date": entry_date,
+                    "planned_exit_date": planned_exit_date,
+                    "action": "BUY",
+                    "price": round(buy_price, 4),
+                    "price_basis": _PRICE_BASIS_RAW_OPEN,
+                    "shares": 1,
+                    "pnl": None,
+                    "fees": round(buy_fee_for_row, 6),
+                    "execution_note": "信号质量样本买入，不使用账户现金；成交价为未复权开盘价",
+                }
             )
 
             exit_idx: int | None = None
@@ -720,6 +750,26 @@ def run_signal_quality_loaded(
                     break
 
             if exit_idx is None:
+                if not uses_fixed_exit:
+                    open_signal_count += 1
+                    valuation_row = item.df.iloc[latest_exit_idx]
+                    active_release_by_symbol[item.symbol] = "99991231"
+                    valuation_close = to_float(valuation_row.get("raw_close"))
+                    unrealized_return = valuation_close / buy_price - 1.0 if valuation_close and buy_price > 0 else None
+                    signal_rows.append(
+                        {
+                            **signal_base,
+                            "status": "截止日估值" if cutoff_mode else "未完成",
+                            "planned_entry_date": entry_date,
+                            "planned_exit_date": planned_exit_date,
+                            "entry_raw_open": round(float(to_float(entry_row.get("raw_open")) or 0.0), 4),
+                            "entry_price": round(buy_price, 4),
+                            "valuation_date": str(valuation_row["trade_date"]).strip(),
+                            "unrealized_return": round(unrealized_return, 6) if unrealized_return is not None else None,
+                            "execution_note": "仅卖出条件退出，未触发卖出条件；不做固定卖出，只按可用收盘价估值",
+                        }
+                    )
+                    continue
                 if planned_exit_after_cutoff:
                     open_signal_count += 1
                     valuation_row = item.df.iloc[latest_exit_idx]
@@ -791,6 +841,8 @@ def run_signal_quality_loaded(
             holding_days = _count_holding_days(date_index, entry_date, exit_date)
             buy_fee = buy_price * float(req.buy_fee_rate)
             sell_fee = sell_price * sell_shares * (float(req.sell_fee_rate) + float(req.stamp_tax_sell))
+            buy_net_amount = buy_price + buy_fee
+            sell_net_amount = sell_price * sell_shares - sell_fee
             active_release_by_symbol[item.symbol] = exit_date
             completed_signal_count += 1
             completed_returns_today.append(trade_return)
@@ -808,13 +860,32 @@ def run_signal_quality_loaded(
                     "shares": round(float(sell_shares), 6),
                     "buy_fee": round(buy_fee, 6),
                     "sell_fee": round(sell_fee, 6),
-                    "buy_net_amount": round(buy_price + buy_fee, 6),
-                    "sell_net_amount": round(sell_price * sell_shares - sell_fee, 6),
+                    "buy_net_amount": round(buy_net_amount, 6),
+                    "sell_net_amount": round(sell_net_amount, 6),
                     "trade_return": round(trade_return, 6),
                     "holding_days": holding_days,
                     "exit_type": exit_type,
                     "exit_signal_date": exit_signal_date,
                     "execution_note": "信号质量样本，不使用账户现金；同一股票持仓期内不重复买入",
+                }
+            )
+            trade_rows.append(
+                {
+                    **signal_base,
+                    "trade_date": exit_date,
+                    "planned_entry_date": entry_date,
+                    "planned_exit_date": planned_exit_date,
+                    "action": "SELL",
+                    "price": round(sell_price, 4),
+                    "price_basis": _PRICE_BASIS_RAW_OPEN,
+                    "shares": round(float(sell_shares), 6),
+                    "pnl": round(sell_net_amount - buy_net_amount, 6),
+                    "fees": round(sell_fee, 6),
+                    "trade_return": round(trade_return, 6),
+                    "holding_days": holding_days,
+                    "exit_type": exit_type,
+                    "exit_signal_date": exit_signal_date,
+                    "execution_note": f"{exit_type}，按未复权开盘价卖出",
                 }
             )
 
@@ -854,10 +925,15 @@ def run_signal_quality_loaded(
         "start_date": signal_dates[0],
         "end_date": signal_dates[-1],
         "settlement_mode": "截止日估值" if cutoff_mode else "完整结算",
+        "exit_mode": {
+            "fixed": "固定持有退出",
+            "sell_condition_with_fallback": "卖出条件优先+固定兜底",
+            "sell_condition_only": "仅卖出条件退出",
+        }.get(_exit_mode(req), _exit_mode(req)),
         "trade_days": len(signal_dates),
         "top_n": int(req.top_n),
         "entry_offset": int(req.entry_offset),
-        "exit_offset": int(req.exit_offset),
+        "exit_offset": int(req.exit_offset) if req.exit_offset is not None else None,
         "min_hold_days": int(req.min_hold_days),
         "max_hold_days": int(req.max_hold_days),
         "sell_condition": req.sell_condition,
@@ -902,11 +978,21 @@ def run_signal_quality_loaded(
         topk_rows=topk_rows,
         year_rows=year_rows,
     )
+    action_order = {"BUY": 0, "SELL": 1}
+    trade_rows.sort(
+        key=lambda row: (
+            str(row.get("trade_date") or ""),
+            action_order.get(str(row.get("action") or ""), 9),
+            str(row.get("signal_date") or ""),
+            int(row.get("rank") or 0),
+            str(row.get("symbol") or ""),
+        )
+    )
     return {
         "summary": summary,
         "daily_rows": daily_rows,
         "pick_rows": signal_rows,
-        "trade_rows": completed_rows,
+        "trade_rows": trade_rows,
         "contribution_rows": contribution_rows,
         "condition_rows": condition_rows,
         "topk_rows": topk_rows,

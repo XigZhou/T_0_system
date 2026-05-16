@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .backtest import export_backtest_zip, run_portfolio_backtest
+from .backtest import export_backtest_table_excel, export_backtest_zip, run_portfolio_backtest
 from .daily_plan import build_daily_plan
 from .models import (
     BacktestRequest,
@@ -378,6 +378,29 @@ def sector_overview_api(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/run-backtest-table-export")
+def export_backtest_table_api(req: BacktestRequest, mode: str = "account", table: str = "trade_rows"):
+    try:
+        if mode == "signal_quality":
+            result = run_signal_quality(SignalQualityRequest(**req.model_dump()))
+        else:
+            result = run_portfolio_backtest(req)
+        payload = export_backtest_table_excel(result, table)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    filename = "daily_picks.xlsx" if table == "pick_rows" else "trade_flows.xlsx"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 
 @app.post("/api/run-backtest-export")
