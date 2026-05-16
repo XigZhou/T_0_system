@@ -119,6 +119,38 @@ const PERCENT_KEYS = new Set([
   "sector_strongest_theme_positive_m20_ratio",
 ]);
 
+const MONEY_KEYS = new Set([
+  "buy_fee",
+  "buy_net_amount",
+  "buy_price",
+  "cash",
+  "cash_after",
+  "current_raw_close",
+  "ending_cash",
+  "ending_equity",
+  "ending_market_value",
+  "entry_price",
+  "entry_raw_open",
+  "exit_price",
+  "exit_raw_open",
+  "fees",
+  "gross_amount",
+  "initial_cash",
+  "market_value",
+  "net_amount",
+  "pending_order_amount",
+  "per_trade_budget",
+  "pnl",
+  "price",
+  "price_pnl",
+  "realized_pnl",
+  "sell_fee",
+  "sell_net_amount",
+  "signal_raw_close",
+  "total_fees",
+  "unrealized_pnl",
+]);
+
 const COLUMN_LABELS = {
   action: "动作",
   avg_holding_days: "平均持有天数",
@@ -512,6 +544,9 @@ function formatCellValue(key, value) {
   }
   if (PERCENT_KEYS.has(key) && typeof value === "number") {
     return `${(value * 100).toFixed(2)}%`;
+  }
+  if (MONEY_KEYS.has(key) && typeof value === "number") {
+    return value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   return formatValue(value);
 }

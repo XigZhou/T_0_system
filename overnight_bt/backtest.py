@@ -1530,6 +1530,37 @@ _EXPORT_TABLE_COLUMNS = {
 }
 
 
+_EXPORT_MONEY_COLUMNS = {
+    "buy_fee",
+    "buy_net_amount",
+    "buy_price",
+    "cash",
+    "cash_after",
+    "current_raw_close",
+    "ending_cash",
+    "ending_equity",
+    "ending_market_value",
+    "entry_price",
+    "entry_raw_open",
+    "exit_price",
+    "exit_raw_open",
+    "fees",
+    "gross_amount",
+    "initial_cash",
+    "market_value",
+    "net_amount",
+    "pnl",
+    "price",
+    "price_pnl",
+    "realized_pnl",
+    "sell_fee",
+    "sell_net_amount",
+    "signal_raw_close",
+    "total_fees",
+    "unrealized_pnl",
+}
+
+
 def export_backtest_table_excel(result: dict[str, Any], table_key: str) -> bytes:
     table_names = {
         "pick_rows": "每日选股明细",
@@ -1543,6 +1574,8 @@ def export_backtest_table_excel(result: dict[str, Any], table_key: str) -> bytes
         frame = frame.reindex(columns=preferred_columns)
     if table_key == "trade_rows" and "action" in frame.columns:
         frame["action"] = frame["action"].map({"BUY": "买", "SELL": "卖"}).fillna(frame["action"])
+    for column in _EXPORT_MONEY_COLUMNS.intersection(frame.columns):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").round(2)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         _localize_export_frame(frame).to_excel(writer, index=False, sheet_name=table_names[table_key])

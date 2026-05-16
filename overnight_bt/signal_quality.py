@@ -104,16 +104,37 @@ def _execution_price(row: pd.Series, side: str, req: SignalQualityRequest) -> fl
 
 def _net_return(
     *,
-    buy_price: float,
     sell_price: float,
     sell_shares: float,
+    buy_net_amount: float,
     req: SignalQualityRequest,
 ) -> float:
-    buy_gross = float(buy_price)
-    buy_net = buy_gross * (1.0 + float(req.buy_fee_rate))
+    buy_net = float(buy_net_amount)
     sell_gross = float(sell_price) * float(sell_shares)
-    sell_net = sell_gross * (1.0 - float(req.sell_fee_rate) - float(req.stamp_tax_sell))
+    sell_fee = _signal_quality_fee(sell_gross, float(req.sell_fee_rate) + float(req.stamp_tax_sell), req)
+    sell_net = sell_gross - sell_fee
     return sell_net / buy_net - 1.0 if buy_net > 0 else 0.0
+
+
+def _signal_quality_fee(gross_amount: float, fee_rate: float, req: SignalQualityRequest) -> float:
+    fee = float(gross_amount) * float(fee_rate)
+    if req.realistic_execution and gross_amount > 0:
+        fee = max(fee, float(req.min_commission))
+    return fee
+
+
+def _estimate_signal_quality_shares(buy_price: float, req: SignalQualityRequest) -> int:
+    lot_size = max(1, int(req.lot_size))
+    price = float(buy_price)
+    if price <= 0:
+        return 0
+    per_lot_gross = price * lot_size
+    per_lot_fee = _signal_quality_fee(per_lot_gross, float(req.buy_fee_rate), req)
+    total_one_lot = per_lot_gross + per_lot_fee
+    if total_one_lot <= 0:
+        return 0
+    lots = int(float(req.per_trade_budget) // total_one_lot)
+    return max(0, lots * lot_size)
 
 
 def _next_sellable_idx(
@@ -680,19 +701,35 @@ def run_signal_quality_loaded(
             pos = Position(
                 symbol=item.symbol,
                 name=item.name,
-                shares=1,
+                shares=_estimate_signal_quality_shares(buy_price, req),
                 signal_date=signal_date,
                 planned_entry_date=entry_date,
                 buy_date=entry_date,
                 planned_exit_date=planned_exit_date,
                 max_exit_date=planned_exit_date,
                 buy_price=float(buy_price),
-                buy_net_amount=float(buy_price) * (1.0 + float(req.buy_fee_rate)),
+                buy_net_amount=0.0,
                 buy_adj_factor=to_float(entry_row.get("adj_factor")),
                 score=float(candidate["score"]),
                 rank=rank,
             )
-            buy_fee_for_row = buy_price * float(req.buy_fee_rate)
+            if pos.shares <= 0:
+                blocked_entry_count += 1
+                signal_rows.append(
+                    {
+                        **signal_base,
+                        "status": "买入阻塞",
+                        "planned_entry_date": entry_date,
+                        "planned_exit_date": "未成交",
+                        "entry_can_buy_open": True,
+                        "execution_note": "每笔目标资金不足以买入一手",
+                    }
+                )
+                continue
+            buy_gross = float(buy_price) * float(pos.shares)
+            buy_fee_for_row = _signal_quality_fee(buy_gross, float(req.buy_fee_rate), req)
+            buy_net_amount = buy_gross + buy_fee_for_row
+            pos.buy_net_amount = float(buy_net_amount)
             trade_rows.append(
                 {
                     **signal_base,
@@ -702,10 +739,12 @@ def run_signal_quality_loaded(
                     "action": "BUY",
                     "price": round(buy_price, 4),
                     "price_basis": _PRICE_BASIS_RAW_OPEN,
-                    "shares": 1,
+                    "shares": int(pos.shares),
+                    "gross_amount": round(buy_gross, 2),
+                    "fees": round(buy_fee_for_row, 2),
+                    "net_amount": round(buy_net_amount, 2),
                     "pnl": None,
-                    "fees": round(buy_fee_for_row, 6),
-                    "execution_note": "信号质量样本买入，不使用账户现金；成交价为未复权开盘价",
+                    "execution_note": "信号质量样本买入，不使用账户现金；股数按每笔目标资金和每手股数估算",
                 }
             )
 
@@ -837,12 +876,17 @@ def run_signal_quality_loaded(
                 open_signal_count += 1
                 continue
             sell_shares = _effective_shares(pos, exit_row)
-            trade_return = _net_return(buy_price=buy_price, sell_price=sell_price, sell_shares=sell_shares, req=req)
+            trade_return = _net_return(
+                sell_price=sell_price,
+                sell_shares=sell_shares,
+                buy_net_amount=float(pos.buy_net_amount),
+                req=req,
+            )
             holding_days = _count_holding_days(date_index, entry_date, exit_date)
-            buy_fee = buy_price * float(req.buy_fee_rate)
-            sell_fee = sell_price * sell_shares * (float(req.sell_fee_rate) + float(req.stamp_tax_sell))
-            buy_net_amount = buy_price + buy_fee
-            sell_net_amount = sell_price * sell_shares - sell_fee
+            buy_fee = float(pos.buy_net_amount) - float(pos.buy_price) * float(pos.shares)
+            sell_gross = sell_price * sell_shares
+            sell_fee = _signal_quality_fee(sell_gross, float(req.sell_fee_rate) + float(req.stamp_tax_sell), req)
+            sell_net_amount = sell_gross - sell_fee
             active_release_by_symbol[item.symbol] = exit_date
             completed_signal_count += 1
             completed_returns_today.append(trade_return)
@@ -857,11 +901,11 @@ def run_signal_quality_loaded(
                     "exit_raw_open": round(float(to_float(exit_row.get("raw_open")) or 0.0), 4),
                     "entry_price": round(buy_price, 4),
                     "exit_price": round(sell_price, 4),
-                    "shares": round(float(sell_shares), 6),
-                    "buy_fee": round(buy_fee, 6),
-                    "sell_fee": round(sell_fee, 6),
-                    "buy_net_amount": round(buy_net_amount, 6),
-                    "sell_net_amount": round(sell_net_amount, 6),
+                    "shares": round(float(sell_shares), 4),
+                    "buy_fee": round(buy_fee, 2),
+                    "sell_fee": round(sell_fee, 2),
+                    "buy_net_amount": round(float(pos.buy_net_amount), 2),
+                    "sell_net_amount": round(sell_net_amount, 2),
                     "trade_return": round(trade_return, 6),
                     "holding_days": holding_days,
                     "exit_type": exit_type,
@@ -878,9 +922,11 @@ def run_signal_quality_loaded(
                     "action": "SELL",
                     "price": round(sell_price, 4),
                     "price_basis": _PRICE_BASIS_RAW_OPEN,
-                    "shares": round(float(sell_shares), 6),
-                    "pnl": round(sell_net_amount - buy_net_amount, 6),
-                    "fees": round(sell_fee, 6),
+                    "shares": round(float(sell_shares), 4),
+                    "gross_amount": round(sell_gross, 2),
+                    "fees": round(sell_fee, 2),
+                    "net_amount": round(sell_net_amount, 2),
+                    "pnl": round(sell_net_amount - float(pos.buy_net_amount), 2),
                     "trade_return": round(trade_return, 6),
                     "holding_days": holding_days,
                     "exit_type": exit_type,

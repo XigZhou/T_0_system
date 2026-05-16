@@ -88,6 +88,8 @@ class SignalQualityRequest(_ExitModeMixin):
     sell_condition: str = Field("", description="Optional exit filters evaluated after minimum hold days")
     score_expression: str = Field(..., description="Arithmetic score expression for TopN ranking")
     top_n: int = Field(5, ge=1, le=500)
+    per_trade_budget: float = Field(10_000.0, gt=0, description="Only used to display auditable trade cash amount in signal quality rows")
+    lot_size: int = Field(100, ge=1)
     buy_fee_rate: float = Field(0.00003, ge=0)
     sell_fee_rate: float = Field(0.00003, ge=0)
     stamp_tax_sell: float = Field(0.0, ge=0)
@@ -97,6 +99,7 @@ class SignalQualityRequest(_ExitModeMixin):
     )
     realistic_execution: bool = Field(True)
     slippage_bps: float = Field(0.0, ge=0)
+    min_commission: float = Field(0.0, ge=0)
 
 
 class SignalQualityResponse(BaseModel):
