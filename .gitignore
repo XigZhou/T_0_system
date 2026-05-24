@@ -29,3 +29,6 @@ data_bundle/
 research_runs/
 sector_research/data/
 sector_research/reports/
+
+# Local backup files
+*.orig

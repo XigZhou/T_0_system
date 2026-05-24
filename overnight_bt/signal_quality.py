@@ -27,7 +27,6 @@ from .backtest import (
     _within_range,
     _uses_fixed_exit,
     load_backtest_input,
-    load_processed_folder,
 )
 from .expressions import (
     compile_score_expression,
@@ -37,7 +36,6 @@ from .expressions import (
     parse_condition_expr,
 )
 from .models import Position, SignalQualityRequest
-from .sector_features import SECTOR_CATEGORICAL_COLUMNS, SECTOR_NUMERIC_COLUMNS, resolve_data_profile, validate_sector_feature_set
 from .utils import to_float
 
 
@@ -66,21 +64,6 @@ _SIGNAL_FEATURE_COLUMNS = (
     "hs300_m60",
     "hs300_m120",
     "hs300_pct_chg",
-    "industry_m20",
-    "industry_m60",
-    "industry_rank_m20",
-    "industry_rank_m60",
-    "industry_up_ratio",
-    "industry_strong_ratio",
-    "industry_amount",
-    "industry_amount20",
-    "industry_amount_ratio",
-    "industry_stock_count",
-    "industry_valid_m20_count",
-    "stock_vs_industry_m20",
-    "stock_vs_industry_m60",
-    *tuple(SECTOR_NUMERIC_COLUMNS),
-    *tuple(SECTOR_CATEGORICAL_COLUMNS),
 )
 
 
@@ -117,24 +100,12 @@ def _net_return(
 
 
 def _signal_quality_fee(gross_amount: float, fee_rate: float, req: SignalQualityRequest) -> float:
-    fee = float(gross_amount) * float(fee_rate)
-    if req.realistic_execution and gross_amount > 0:
-        fee = max(fee, float(req.min_commission))
-    return fee
+    return float(gross_amount) * float(fee_rate)
 
 
-def _estimate_signal_quality_shares(buy_price: float, req: SignalQualityRequest) -> int:
-    lot_size = max(1, int(req.lot_size))
+def _estimate_signal_quality_shares(buy_price: float, req: SignalQualityRequest) -> float:
     price = float(buy_price)
-    if price <= 0:
-        return 0
-    per_lot_gross = price * lot_size
-    per_lot_fee = _signal_quality_fee(per_lot_gross, float(req.buy_fee_rate), req)
-    total_one_lot = per_lot_gross + per_lot_fee
-    if total_one_lot <= 0:
-        return 0
-    lots = int(float(req.per_trade_budget) // total_one_lot)
-    return max(0, lots * lot_size)
+    return 100.0 if price > 0 else 0.0
 
 
 def _next_sellable_idx(
@@ -494,7 +465,7 @@ def _build_quality_condition_rows(
             "category": "口径说明",
             "metric": "资金约束",
             "value": "不使用现金",
-            "reading": "信号质量回测不模拟账户现金和仓位金额，但会按单股虚拟持仓去重，避免同一股票持仓期重复买入。",
+            "reading": "信号质量回测不模拟账户现金、每笔目标资金、每手股数和最低佣金；收益按固定100股计算，并按100股虚拟持仓去重。"
         },
         {
             "category": "数据诊断",
@@ -722,7 +693,7 @@ def run_signal_quality_loaded(
                         "planned_entry_date": entry_date,
                         "planned_exit_date": "未成交",
                         "entry_can_buy_open": True,
-                        "execution_note": "每笔目标资金不足以买入一手",
+                        "execution_note": "买入价格无效，无法计算固定100股收益",
                     }
                 )
                 continue
@@ -739,12 +710,12 @@ def run_signal_quality_loaded(
                     "action": "BUY",
                     "price": round(buy_price, 4),
                     "price_basis": _PRICE_BASIS_RAW_OPEN,
-                    "shares": int(pos.shares),
+                    "shares": round(float(pos.shares), 4),
                     "gross_amount": round(buy_gross, 2),
                     "fees": round(buy_fee_for_row, 2),
                     "net_amount": round(buy_net_amount, 2),
                     "pnl": None,
-                    "execution_note": "信号质量样本买入，不使用账户现金；股数按每笔目标资金和每手股数估算",
+                    "execution_note": "信号质量样本买入，不使用账户现金；股数固定为100股",
                 }
             )
 
@@ -1052,14 +1023,5 @@ def run_signal_quality_loaded(
 
 def run_signal_quality(req: SignalQualityRequest) -> dict[str, Any]:
     loaded, diagnostics = load_backtest_input(req)
-    data_profile = resolve_data_profile(
-        requested_profile=req.data_profile,
-        processed_dir=diagnostics["processed_dir"],
-        buy_condition=req.buy_condition,
-        sell_condition=req.sell_condition,
-        score_expression=req.score_expression,
-    )
-    diagnostics["data_profile"] = data_profile
-    if data_profile == "sector":
-        diagnostics.update(validate_sector_feature_set(loaded_items=loaded, processed_dir=diagnostics["processed_dir"]))
+    diagnostics["data_profile"] = "base"
     return run_signal_quality_loaded(loaded, diagnostics, req)

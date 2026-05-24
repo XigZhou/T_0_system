@@ -19,9 +19,9 @@ from .expressions import (
     parse_condition_expr,
 )
 from .models import BacktestRequest, PendingOrder, Position
-from .rotation_features import ROTATION_NUMERIC_COLUMNS
-from .sector_features import SECTOR_NUMERIC_COLUMNS, resolve_data_profile, sector_display_values, validate_sector_feature_set
-from .stock_pool_templates import DEFAULT_DB_PATH, DEFAULT_USERNAME, _connect, init_stock_pool_db
+from .sqlite_only_guard import assert_sqlite_only_allowed, is_sqlite_only_enabled
+from .market_data_store import DISABLE_LEGACY_FALLBACK, read_feature_rows
+from .stock_pool_templates import DEFAULT_DB_PATH, DEFAULT_USERNAME, read_template_symbols
 from .utils import to_float
 
 
@@ -39,7 +39,6 @@ _CUTOFF_EXIT_LABEL = "截止日后估值"
 _PRICE_BASIS_RAW_OPEN = "未复权开盘价（除权价格）"
 PROCESSED_METADATA_CSV_NAMES = {
     "processing_manifest.csv",
-    "sector_feature_manifest.csv",
     "rotation_feature_manifest.csv",
 }
 
@@ -96,8 +95,6 @@ def _normalize_processed_frame(df: pd.DataFrame, source_name: str, start_date: s
     for col in df.columns:
         if (
             col in NUMERIC_PROCESSED_COLUMNS
-            or col in SECTOR_NUMERIC_COLUMNS
-            or col in ROTATION_NUMERIC_COLUMNS
             or col.startswith(("avg5m", "avg10m", "high_", "low_", "sh_", "hs300_", "cyb_"))
             or (col.startswith("m") and col[1:].isdigit())
         ):
@@ -116,35 +113,7 @@ def _loaded_symbol_from_frame(df: pd.DataFrame) -> LoadedSymbol:
 
 
 def load_processed_folder(folder_path: str, start_date: str = "", end_date: str = "") -> tuple[list[LoadedSymbol], dict]:
-    folder = _normalize_folder(folder_path)
-    if not folder.exists() or not folder.is_dir():
-        raise FileNotFoundError(f"processed_dir not found: {folder}")
-    files = sorted(
-        p
-        for p in folder.iterdir()
-        if p.is_file()
-        and p.suffix.lower() == ".csv"
-        and p.name not in PROCESSED_METADATA_CSV_NAMES
-    )
-    if not files:
-        raise FileNotFoundError(f"no csv found under processed_dir: {folder}")
-
-    loaded: list[LoadedSymbol] = []
-    for file_path in files:
-        df = pd.read_csv(file_path, dtype=str, encoding="utf-8-sig")
-        df = _normalize_processed_frame(df, file_path.name, start_date=start_date, end_date=end_date)
-        if df.empty:
-            continue
-        loaded.append(_loaded_symbol_from_frame(df))
-
-    if not loaded:
-        raise ValueError("no data available in selected date range")
-    diagnostics = {
-        "data_source": "csv",
-        "processed_dir": str(folder),
-        "file_count": len(loaded),
-    }
-    return loaded, diagnostics
+    raise RuntimeError("processed CSV input has been removed; use stock pool SQLite data instead")
 
 
 def load_stock_pool_template_data(
@@ -152,61 +121,54 @@ def load_stock_pool_template_data(
     username: str = DEFAULT_USERNAME,
     template_name: str,
     db_path: str | Path | None = None,
+    market_db_path: str | Path | None = None,
     start_date: str = "",
     end_date: str = "",
+    legacy_feature_fallback: bool = True,
 ) -> tuple[list[LoadedSymbol], dict]:
     clean_username = str(username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
     clean_template = str(template_name or "").strip()
     if not clean_template:
         raise ValueError("请选择股票池模板")
-    init_stock_pool_db(db_path)
-    with _connect(db_path) as conn:
-        template = conn.execute(
-            "SELECT * FROM stock_pool_templates WHERE username=? AND template_name=?",
-            (clean_username, clean_template),
-        ).fetchone()
-        if template is None:
-            raise FileNotFoundError(f"股票池模板不存在: {clean_username}/{clean_template}")
-        stocks = conn.execute(
-            """
-            SELECT symbol, ts_code, stock_name, display_order
-            FROM stock_pool_template_stocks
-            WHERE username=? AND template_name=?
-            ORDER BY display_order, symbol
-            """,
-            (clean_username, clean_template),
-        ).fetchall()
-        if not stocks:
-            raise ValueError(f"股票池模板没有股票: {clean_template}")
 
-        loaded: list[LoadedSymbol] = []
-        missing_feature_symbols: list[str] = []
-        empty_range_symbols: list[str] = []
-        for stock in stocks:
-            symbol = str(stock["symbol"] or "").strip().zfill(6)
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM stock_daily_features
-                WHERE symbol=?
-                ORDER BY trade_date
-                """,
-                (symbol,),
-            ).fetchall()
-            if not rows:
-                missing_feature_symbols.append(symbol)
-                continue
-            df = pd.DataFrame([dict(row) for row in rows])
-            if "adj_factor" not in df.columns:
-                df["adj_factor"] = pd.NA
-            stock_name = str(stock["stock_name"] or "").strip()
-            if stock_name:
+    stocks = read_template_symbols(clean_username, clean_template, db_path=db_path)
+    stock_by_symbol = {str(stock["symbol"]).zfill(6): stock for stock in stocks}
+    rows = read_feature_rows(
+        list(stock_by_symbol),
+        start_date=start_date,
+        end_date=end_date,
+        db_path=market_db_path,
+        legacy_db_path=db_path if legacy_feature_fallback else DISABLE_LEGACY_FALLBACK,
+    )
+
+    rows_by_symbol: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in stock_by_symbol}
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip().zfill(6)
+        if symbol in rows_by_symbol:
+            rows_by_symbol[symbol].append(row)
+
+    loaded: list[LoadedSymbol] = []
+    missing_feature_symbols: list[str] = []
+    empty_range_symbols: list[str] = []
+    for symbol, stock in stock_by_symbol.items():
+        symbol_rows = rows_by_symbol.get(symbol) or []
+        if not symbol_rows:
+            missing_feature_symbols.append(symbol)
+            continue
+        df = pd.DataFrame(symbol_rows)
+        if "adj_factor" not in df.columns:
+            df["adj_factor"] = pd.NA
+        stock_name = str(stock.get("stock_name") or "").strip()
+        if stock_name:
+            if "name" not in df.columns:
+                df["name"] = stock_name
+            else:
                 df["name"] = df["name"].fillna("").replace("", stock_name)
-            df = _normalize_processed_frame(df, f"{symbol}.sqlite", start_date=start_date, end_date=end_date)
-            if df.empty:
-                empty_range_symbols.append(symbol)
-                continue
-            loaded.append(_loaded_symbol_from_frame(df))
+        df = _normalize_processed_frame(df, f"{symbol}.sqlite", start_date=start_date, end_date=end_date)
+        if df.empty:
+            empty_range_symbols.append(symbol)
+            continue
+        loaded.append(_loaded_symbol_from_frame(df))
 
     if not loaded:
         raise ValueError(f"股票池模板 {clean_template} 在所选日期范围内没有可回测数据")
@@ -227,15 +189,18 @@ def load_stock_pool_template_data(
 
 
 def load_backtest_input(req: BacktestRequest) -> tuple[list[LoadedSymbol], dict]:
-    if str(getattr(req, "data_source", "csv") or "csv") == "stock_pool":
-        return load_stock_pool_template_data(
-            username=getattr(req, "stock_pool_username", DEFAULT_USERNAME),
-            template_name=getattr(req, "stock_pool_template_name", ""),
-            db_path=getattr(req, "stock_pool_db_path", "") or None,
-            start_date="",
-            end_date="",
-        )
-    return load_processed_folder(req.processed_dir)
+    data_source = str(getattr(req, "data_source", "stock_pool") or "stock_pool")
+    if data_source != "stock_pool":
+        raise RuntimeError("legacy CSV data_source has been removed; use stock pool SQLite data instead")
+    return load_stock_pool_template_data(
+        username=getattr(req, "stock_pool_username", DEFAULT_USERNAME),
+        template_name=getattr(req, "stock_pool_template_name", ""),
+        db_path=getattr(req, "stock_pool_db_path", "") or None,
+        market_db_path=getattr(req, "stock_pool_market_db_path", "") or None,
+        start_date="",
+        end_date="",
+        legacy_feature_fallback=False,
+    )
 
 
 def _build_eval_row(df: pd.DataFrame, idx: int, max_offset: int) -> dict[str, Any]:
@@ -1065,7 +1030,6 @@ def run_portfolio_backtest_loaded(
                         "exit_raw_open": to_float(exit_row.get("raw_open")) if exit_row is not None else None,
                         "exit_can_sell_open": bool(exit_row.get("can_sell_t", False)) if exit_row is not None else False,
                         "execution_note": "截止日预测，不在本次回测内成交" if is_cutoff_signal else "信号日入选，按计划买入日成交",
-                        **sector_display_values(signal_row),
                     }
                 )
 
@@ -1105,7 +1069,6 @@ def run_portfolio_backtest_loaded(
                         "exit_can_sell_open": candidate["exit_can_sell_open"],
                         "sell_condition_enabled": bool(sell_rules),
                         "execution_note": candidate["execution_note"],
-                        **sector_display_values(candidate),
                     }
                 )
 
@@ -1375,16 +1338,7 @@ def run_portfolio_backtest_loaded(
 
 def run_portfolio_backtest(req: BacktestRequest) -> dict[str, Any]:
     loaded, diagnostics = load_backtest_input(req)
-    data_profile = resolve_data_profile(
-        requested_profile=req.data_profile,
-        processed_dir=diagnostics["processed_dir"],
-        buy_condition=req.buy_condition,
-        sell_condition=req.sell_condition,
-        score_expression=req.score_expression,
-    )
-    diagnostics["data_profile"] = data_profile
-    if data_profile == "sector":
-        diagnostics.update(validate_sector_feature_set(loaded_items=loaded, processed_dir=diagnostics["processed_dir"]))
+    diagnostics["data_profile"] = "base"
     return run_portfolio_backtest_loaded(loaded, diagnostics, req)
 
 
@@ -1474,13 +1428,6 @@ _EXPORT_COLUMN_LABELS = {
     "sell_count": "卖出次数",
     "sell_fee_rate": "卖出费率",
     "settlement_mode": "结束日处理方式",
-    "sector_exposure_score": "板块主题暴露分",
-    "sector_strongest_board": "最强板块",
-    "sector_strongest_theme": "最强主题",
-    "sector_strongest_theme_m20": "最强主题二十日动量",
-    "sector_strongest_theme_rank_pct": "最强主题排名百分位",
-    "sector_strongest_theme_score": "最强主题综合分",
-    "sector_theme_names": "命中主题",
     "shares": "股数",
     "signal_close": "信号日前复权收盘价",
     "signal_date": "信号日期",

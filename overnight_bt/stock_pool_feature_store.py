@@ -6,13 +6,15 @@ import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Literal
 
 import pandas as pd
 
 from .config import DEFAULT_INDEXES
+from .main_universe import DEFAULT_DB_PATH as DEFAULT_MARKET_DB_PATH, list_main_universe, ts_code_from_symbol
+from .market_data_store import upsert_feature_rows
 from .processing import build_market_context_from_indexes, build_processed_frame, validate_processed_frame
 from .stock_pool_templates import (
     DEFAULT_DB_PATH,
@@ -27,7 +29,7 @@ from .stock_pool_templates import (
 from .utils import ensure_dir, latest_open_trade_date, load_env, normalize_date_text
 
 
-StockPoolSource = Literal["active_templates", "template", "symbols", "all"]
+StockPoolSource = Literal["active_templates", "template", "symbols", "all", "main_universe"]
 
 
 @dataclass
@@ -41,6 +43,7 @@ class StockPoolFeatureUpdateConfig:
     start_date: str = "20220101"
     end_date: str = ""
     db_path: str | Path | None = None
+    market_db_path: str | Path | None = None
     env_path: str | Path = PROJECT_ROOT / ".env"
     log_dir: str | Path = PROJECT_ROOT / "logs" / "stock_pool_template_update"
     force_full_rebuild: bool = False
@@ -222,6 +225,11 @@ def _normalize_date(value: str, default: str = "") -> str:
     return normalize_date_text(text)
 
 
+def _lookback_start_date(start_date: str, calendar_days: int = 260) -> str:
+    parsed = datetime.strptime(start_date, "%Y%m%d")
+    return (parsed - timedelta(days=calendar_days)).strftime("%Y%m%d")
+
+
 def _setup_logger(log_dir: Path, job_id: str) -> tuple[logging.Logger, Path]:
     ensure_dir(log_dir)
     log_file = log_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{job_id}.log"
@@ -309,6 +317,49 @@ def _upsert_stock_basic(conn: sqlite3.Connection, rows: list[dict[str, Any]]) ->
         )
 
 
+def _load_active_main_universe_rows(market_db_path: str | Path | None = None) -> list[dict[str, Any]]:
+    rows = list_main_universe(db_path=market_db_path or DEFAULT_MARKET_DB_PATH, include_inactive=False)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip().zfill(6)
+        if not symbol.isdigit() or len(symbol) != 6:
+            continue
+        result.append(
+            {
+                "symbol": symbol,
+                "ts_code": str(row.get("ts_code") or "").strip() or ts_code_from_symbol(symbol),
+                "name": str(row.get("name") or "").strip(),
+                "industry": str(row.get("industry") or "").strip(),
+                "market": str(row.get("market") or "").strip(),
+                "list_date": str(row.get("list_date") or "").strip(),
+            }
+        )
+    return result
+
+
+def _stock_basic_rows_from_symbol_rows(symbol_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in symbol_rows:
+        symbol = str(row.get("symbol") or "").strip().zfill(6)
+        if not symbol.isdigit() or len(symbol) != 6:
+            continue
+        rows.append(
+            {
+                "symbol": symbol,
+                "ts_code": str(row.get("ts_code") or "").strip() or ts_code_from_symbol(symbol),
+                "name": str(row.get("name") or "").strip(),
+                "industry": str(row.get("industry") or "").strip(),
+                "market": str(row.get("market") or "").strip(),
+                "list_date": str(row.get("list_date") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _is_main_universe_source(source: str) -> bool:
+    return source in {"all", "main_universe"}
+
+
 def _load_active_template_rows(
     conn: sqlite3.Connection,
     username: str,
@@ -348,6 +399,7 @@ def _resolve_symbol_rows(
     config: StockPoolFeatureUpdateConfig,
     data_source: Any,
     logger: logging.Logger,
+    market_db_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     source = config.source
     username = str(config.username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
@@ -360,10 +412,12 @@ def _resolve_symbol_rows(
         rows = _load_active_template_rows(conn, username=username, template_name=template_name)
     elif source == "active_templates":
         rows = _load_active_template_rows(conn, username=username)
+    elif source == "main_universe":
+        logger.info("读取主股票池作为股票范围")
+        rows = _load_active_main_universe_rows(market_db_path)
     elif source == "all":
-        logger.info("读取 Tushare stock_basic 作为全市场初始化股票范围")
-        rows = _rows_from_stock_basic_frame(data_source.load_stock_basic())
-        _upsert_stock_basic(conn, rows)
+        logger.info("source=all 已映射为主股票池范围，不再代表全市场股票")
+        rows = _load_active_main_universe_rows(market_db_path)
     else:
         raise ValueError(f"未知股票池数据来源：{source}")
 
@@ -467,9 +521,38 @@ def _upsert_feature_frame(conn: sqlite3.Connection, frame: pd.DataFrame) -> int:
     return len(records)
 
 
+def _upsert_market_feature_frame(frame: pd.DataFrame, db_path: str | Path | None) -> int:
+    if db_path is None:
+        return 0
+    records = [
+        {key: _coerce_db_value(value) for key, value in row.items()}
+        for row in frame.to_dict(orient="records")
+    ]
+    result = upsert_feature_rows(records, db_path=db_path)
+    return int(result.get("rows_written", 0) or 0)
+
+
+def _resolve_market_db_path(
+    stock_pool_db_path: str | Path,
+    configured_market_db_path: str | Path | None,
+) -> Path | None:
+    if configured_market_db_path is not None:
+        path = Path(configured_market_db_path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+    if Path(stock_pool_db_path).resolve() == _db_path(DEFAULT_DB_PATH).resolve():
+        return DEFAULT_MARKET_DB_PATH
+    return None
+
+
 def _latest_dates(conn: sqlite3.Connection) -> dict[str, str]:
     rows = conn.execute(
-        "SELECT symbol, MAX(trade_date) AS latest_trade_date FROM stock_daily_features GROUP BY symbol"
+        """
+        SELECT symbol, MAX(trade_date) AS latest_trade_date
+        FROM stock_daily_features
+        WHERE raw_close IS NOT NULL AND raw_close>0
+            AND close IS NOT NULL AND close>0
+        GROUP BY symbol
+        """
     ).fetchall()
     return {str(row["symbol"]): str(row["latest_trade_date"] or "") for row in rows}
 
@@ -766,6 +849,7 @@ def run_stock_pool_feature_update(
     data_source: Any | None = None,
 ) -> dict[str, Any]:
     db_path = _db_path(config.db_path or DEFAULT_DB_PATH)
+    market_db_path = _resolve_market_db_path(db_path, config.market_db_path)
     init_stock_pool_db(db_path)
     log_dir = Path(config.log_dir)
     if not log_dir.is_absolute():
@@ -775,6 +859,7 @@ def run_stock_pool_feature_update(
 
     start_date = _normalize_date(config.start_date, default="20220101")
     as_of = _normalize_date(config.end_date, default=_today_text())
+    fetch_start_date = _lookback_start_date(start_date)
     config.start_date = start_date
     config.retry_attempts = max(1, _positive_int(config.retry_attempts, default=1))
     config.retry_sleep_seconds = _positive_float(config.retry_sleep_seconds)
@@ -789,13 +874,15 @@ def run_stock_pool_feature_update(
 
     items: list[StockPoolSyncItem] = []
     logger.info(
-        "股票池数据任务启动：job_id=%s source=%s job_type=%s start=%s end=%s db=%s only_missing=%s batch_size=%s batch_index=%s offset=%s resume_after=%s retry=%s",
+        "股票池数据任务启动：job_id=%s source=%s job_type=%s start=%s fetch_start=%s end=%s db=%s market_db=%s only_missing=%s batch_size=%s batch_index=%s offset=%s resume_after=%s retry=%s",
         job_id,
         config.source,
         config.job_type,
         start_date,
+        fetch_start_date,
         end_date,
         db_path,
+        market_db_path or "",
         config.only_missing,
         config.batch_size,
         config.batch_index,
@@ -806,7 +893,7 @@ def run_stock_pool_feature_update(
 
     counts: dict[str, Any] = {}
     with _connect(db_path) as conn:
-        resolved_rows = _resolve_symbol_rows(conn, config, data_source, logger)
+        resolved_rows = _resolve_symbol_rows(conn, config, data_source, logger, market_db_path=market_db_path)
         counts["resolved_stock_count"] = len(resolved_rows)
         if not resolved_rows:
             _create_job(conn, config, job_id, 0, end_date)
@@ -869,24 +956,31 @@ def run_stock_pool_feature_update(
             prefilter_skipped_count,
         )
 
-        try:
-            stock_basic_frame = data_source.load_stock_basic()
-            stock_basic_rows = _rows_from_stock_basic_frame(stock_basic_frame)
+        if _is_main_universe_source(config.source):
+            stock_basic_rows = _stock_basic_rows_from_symbol_rows(resolved_rows)
             _upsert_stock_basic(conn, stock_basic_rows)
-            stock_basic_map = _build_stock_basic_map(stock_basic_frame)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("读取 stock_basic 失败，将使用模板内基础信息继续：%s", exc)
-            stock_basic_map = {row["symbol"]: row for row in resolved_rows}
+            if market_db_path is not None:
+                upsert_stock_basic_rows(stock_basic_rows, db_path=market_db_path)
+            stock_basic_map = {row["symbol"]: row for row in stock_basic_rows}
+        else:
+            try:
+                stock_basic_frame = data_source.load_stock_basic()
+                stock_basic_rows = _rows_from_stock_basic_frame(stock_basic_frame)
+                _upsert_stock_basic(conn, stock_basic_rows)
+                stock_basic_map = _build_stock_basic_map(stock_basic_frame)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("读取 stock_basic 失败，将使用模板内基础信息继续：%s", exc)
+                stock_basic_map = {row["symbol"]: row for row in resolved_rows}
         daily_basic_map = _build_daily_basic_map(data_source.load_daily_basic_snapshot(end_date))
-        trade_calendar = data_source.load_trade_calendar(start_date, end_date)
-        market_context = data_source.load_market_context(start_date, end_date)
+        trade_calendar = data_source.load_trade_calendar(fetch_start_date, end_date)
+        market_context = data_source.load_market_context(fetch_start_date, end_date)
 
         for index, symbol_row in enumerate(selected_rows, start=1):
             symbol = str(symbol_row["symbol"]).zfill(6)
             ts_code = str(symbol_row.get("ts_code") or _symbol_to_ts_code(symbol)).strip()
             latest = latest_map.get(symbol, "")
             logger.info("[%s/%s] 处理 %s %s，库内最新=%s", index, len(selected_rows), symbol, ts_code, latest or "无")
-            if latest and latest >= end_date and not config.force_full_rebuild:
+            if config.only_missing and latest and latest >= end_date and not config.force_full_rebuild:
                 item = StockPoolSyncItem(
                     symbol=symbol,
                     ts_code=ts_code,
@@ -905,7 +999,7 @@ def run_stock_pool_feature_update(
                 raw_df, adj_df, limit_df, suspend_df = _load_symbol_inputs_with_retry(
                     data_source=data_source,
                     ts_code=ts_code,
-                    start_date=start_date,
+                    start_date=fetch_start_date,
                     end_date=end_date,
                     logger=logger,
                     retry_attempts=config.retry_attempts,
@@ -919,11 +1013,13 @@ def run_stock_pool_feature_update(
                     limit_df=limit_df,
                     suspend_df=suspend_df,
                     market_context=market_context,
-                    start_date=start_date,
+                    start_date=fetch_start_date,
                     end_date=end_date,
                 )
                 validate_processed_frame(frame)
+                frame = frame[(frame["trade_date"].astype(str) >= start_date) & (frame["trade_date"].astype(str) <= end_date)].copy()
                 rows_written = _upsert_feature_frame(conn, frame)
+                market_rows_written = _upsert_market_feature_frame(frame, market_db_path)
                 item = StockPoolSyncItem(
                     symbol=symbol,
                     ts_code=ts_code,
@@ -935,7 +1031,7 @@ def run_stock_pool_feature_update(
                 )
                 _write_job_item(conn, job_id, item)
                 items.append(item)
-                logger.info("%s 完成：upsert %s 行", symbol, rows_written)
+                logger.info("%s 完成：旧模板库 upsert %s 行，主行情库 upsert %s 行", symbol, rows_written, market_rows_written)
                 if config.sleep_seconds > 0:
                     time.sleep(config.sleep_seconds)
             except Exception as exc:  # noqa: BLE001
@@ -1049,3 +1145,426 @@ def read_stock_pool_update_job(
         data = dict(job)
         data["items"] = [dict(row) for row in items]
         return data
+
+# --- Split raw collection / feature computation tasks ---------------------------
+from .market_data_store import (  # noqa: E402
+    latest_daily_raw_dates,
+    read_adj_factor_rows,
+    read_daily_basic_snapshot,
+    read_daily_raw_rows,
+    read_market_context_rows,
+    read_stock_basic_rows,
+    read_stk_limit_rows,
+    read_suspend_rows,
+    read_trade_calendar_rows,
+    upsert_adj_factor_rows,
+    upsert_daily_basic_rows,
+    upsert_daily_raw_rows,
+    upsert_market_context_rows,
+    upsert_stk_limit_rows,
+    upsert_stock_basic_rows,
+    upsert_suspend_rows,
+    upsert_trade_calendar_rows,
+)
+
+
+def _summary_from_items(
+    config: StockPoolFeatureUpdateConfig,
+    job_id: str,
+    log_file: Path,
+    log_dir: Path,
+    start_date: str,
+    end_date: str,
+    resolved_rows: list[dict[str, Any]],
+    due_rows: list[dict[str, Any]],
+    selected_rows: list[dict[str, Any]],
+    prefilter_skipped_count: int,
+    counts: dict[str, Any],
+    items: list[StockPoolSyncItem],
+    message_prefix: str,
+) -> dict[str, Any]:
+    item_dicts = [item.__dict__ for item in items]
+    failed_count = sum(1 for item in items if item.status == "failed")
+    skipped_count = sum(1 for item in items if item.status == "skipped")
+    success_count = sum(1 for item in items if item.status in {"success", "skipped"})
+    status = "success" if failed_count == 0 else "failed"
+    message = (
+        f"{message_prefix}: resolved {len(resolved_rows)} symbols, due {len(due_rows)}, executed {len(items)}, "
+        f"success_or_skipped {success_count}, failed {failed_count}, prefilter_skipped {prefilter_skipped_count}."
+    )
+    summary_obj = StockPoolSyncSummary(
+        job_id=job_id,
+        job_type=config.job_type,
+        source=config.source,
+        username=str(config.username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME,
+        template_name=str(config.template_name or "").strip(),
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        stock_count=len(items),
+        success_count=success_count,
+        failed_count=failed_count,
+        skipped_count=skipped_count,
+        log_file=str(log_file),
+        item_csv="",
+        summary_json="",
+        message=message,
+        resolved_stock_count=len(resolved_rows),
+        due_stock_count=len(due_rows),
+        prefilter_skipped_count=prefilter_skipped_count,
+        selected_stock_count=len(selected_rows),
+        resume_skipped_count=int(counts.get("resume_skipped_count", 0) or 0),
+        batch_start=int(counts.get("batch_start", 0) or 0),
+        batch_end=int(counts.get("batch_end", 0) or 0),
+        batch_size=config.batch_size,
+        batch_index=config.batch_index,
+        offset=config.offset,
+        resume_after_symbol=str(counts.get("resume_after_symbol", "") or ""),
+        retry_attempts=config.retry_attempts,
+        retry_sleep_seconds=config.retry_sleep_seconds,
+        only_missing=bool(config.only_missing),
+        items=item_dicts,
+    )
+    summary = summary_obj.to_dict()
+    item_csv, summary_json = _write_runtime_outputs(log_dir, job_id, summary, item_dicts)
+    summary["item_csv"] = str(item_csv)
+    summary["summary_json"] = str(summary_json)
+    summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary
+
+
+def _prepare_split_task(
+    config: StockPoolFeatureUpdateConfig,
+    data_source: Any | None,
+) -> tuple[Path, Path | None, Path, str, logging.Logger, Path, str, str, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, dict[str, Any], Any]:
+    db_path = _db_path(config.db_path or DEFAULT_DB_PATH)
+    market_db_path = _resolve_market_db_path(db_path, config.market_db_path)
+    init_stock_pool_db(db_path)
+    log_dir = Path(config.log_dir)
+    if not log_dir.is_absolute():
+        log_dir = PROJECT_ROOT / log_dir
+    job_id = str(uuid.uuid4())
+    logger, log_file = _setup_logger(log_dir, job_id)
+
+    start_date = _normalize_date(config.start_date, default="20220101")
+    as_of = _normalize_date(config.end_date, default=_today_text())
+    config.start_date = start_date
+    config.retry_attempts = max(1, _positive_int(config.retry_attempts, default=1))
+    config.retry_sleep_seconds = _positive_float(config.retry_sleep_seconds)
+    config.batch_size = _positive_int(config.batch_size)
+    config.batch_index = _positive_int(config.batch_index)
+    config.offset = _positive_int(config.offset)
+    config.max_symbols = _positive_int(config.max_symbols)
+    if data_source is None:
+        data_source = TushareStockPoolDataSource(config.env_path)
+    end_date = data_source.latest_trade_date(as_of) if hasattr(data_source, "latest_trade_date") else as_of
+    end_date = _normalize_date(end_date, default=as_of)
+
+    with _connect(db_path) as conn:
+        resolved_rows = _resolve_symbol_rows(conn, config, data_source, logger, market_db_path=market_db_path)
+        latest_map = latest_daily_raw_dates([str(row.get("symbol") or "") for row in resolved_rows], market_db_path)
+        due_rows, prefilter_skipped_count = _filter_due_symbol_rows(
+            resolved_rows,
+            latest_map=latest_map,
+            end_date=end_date,
+            config=config,
+            logger=logger,
+        )
+        window_rows, counts = _apply_batch_window(resolved_rows, config, logger)
+        if config.only_missing and not config.force_full_rebuild:
+            selected_rows = [
+                row for row in window_rows
+                if not latest_map.get(str(row.get("symbol") or "").strip().zfill(6), "")
+                or latest_map.get(str(row.get("symbol") or "").strip().zfill(6), "") < end_date
+            ]
+        else:
+            selected_rows = window_rows
+        counts["due_stock_count"] = len(due_rows)
+        counts["prefilter_skipped_count"] = prefilter_skipped_count
+        counts["selected_stock_count"] = len(selected_rows)
+        _create_job(conn, config, job_id, len(selected_rows), end_date)
+    return (
+        db_path,
+        market_db_path,
+        log_dir,
+        job_id,
+        logger,
+        log_file,
+        start_date,
+        end_date,
+        resolved_rows,
+        due_rows,
+        selected_rows,
+        prefilter_skipped_count,
+        counts,
+        data_source,
+    )
+
+
+def _finish_split_task(db_path: Path, job_id: str, log_file: Path, summary: dict[str, Any], logger: logging.Logger) -> dict[str, Any]:
+    with _connect(db_path) as conn:
+        _finish_job(
+            conn,
+            job_id,
+            str(summary.get("status") or "failed"),
+            int(summary.get("success_count") or 0),
+            int(summary.get("failed_count") or 0),
+            str(summary.get("message") or ""),
+        )
+        _set_job_output_paths(conn, job_id, log_file, str(summary.get("item_csv") or ""), str(summary.get("summary_json") or ""))
+    logger.info(str(summary.get("message") or ""))
+    return summary
+
+
+def _frame_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
+    return [
+        {key: _coerce_db_value(value) for key, value in row.items()}
+        for row in frame.to_dict(orient="records")
+    ]
+
+
+def run_stock_daily_raw_collection(
+    config: StockPoolFeatureUpdateConfig,
+    data_source: Any | None = None,
+) -> dict[str, Any]:
+    (
+        db_path,
+        market_db_path,
+        log_dir,
+        job_id,
+        logger,
+        log_file,
+        start_date,
+        end_date,
+        resolved_rows,
+        due_rows,
+        selected_rows,
+        prefilter_skipped_count,
+        counts,
+        data_source,
+    ) = _prepare_split_task(config, data_source)
+    target_db = market_db_path or db_path
+    fetch_start_date = _lookback_start_date(start_date)
+    items: list[StockPoolSyncItem] = []
+    if not selected_rows:
+        summary = _summary_from_items(config, job_id, log_file, log_dir, start_date, end_date, resolved_rows, due_rows, [], prefilter_skipped_count, counts, [], "raw collection")
+        return _finish_split_task(db_path, job_id, log_file, summary, logger)
+
+    try:
+        if _is_main_universe_source(config.source):
+            stock_basic_rows = _stock_basic_rows_from_symbol_rows(resolved_rows)
+        else:
+            stock_basic_frame = data_source.load_stock_basic()
+            stock_basic_rows = _rows_from_stock_basic_frame(stock_basic_frame)
+        with _connect(db_path) as conn:
+            _upsert_stock_basic(conn, stock_basic_rows)
+        upsert_stock_basic_rows(stock_basic_rows, db_path=target_db)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("load stock_basic failed; continue raw collection: %s", exc)
+    try:
+        trade_calendar = data_source.load_trade_calendar(fetch_start_date, end_date)
+        market_context = data_source.load_market_context(fetch_start_date, end_date)
+        daily_basic = data_source.load_daily_basic_snapshot(end_date)
+        upsert_trade_calendar_rows(_frame_rows(trade_calendar), db_path=target_db)
+        upsert_market_context_rows(_frame_rows(market_context), db_path=target_db)
+        daily_basic_rows = _frame_rows(daily_basic)
+        for row in daily_basic_rows:
+            row.setdefault("trade_date", end_date)
+        upsert_daily_basic_rows(daily_basic_rows, db_path=target_db)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("common raw input collection failed: %s", exc)
+        items = [
+            StockPoolSyncItem(
+                symbol=str(row.get("symbol") or "").zfill(6),
+                ts_code=str(row.get("ts_code") or ""),
+                status="failed",
+                start_date=start_date,
+                end_date=end_date,
+                rows_written=0,
+                message=str(exc)[:1000],
+            )
+            for row in selected_rows
+        ]
+        summary = _summary_from_items(config, job_id, log_file, log_dir, start_date, end_date, resolved_rows, due_rows, selected_rows, prefilter_skipped_count, counts, items, "raw collection")
+        with _connect(db_path) as conn:
+            for item in items:
+                _write_job_item(conn, job_id, item)
+        return _finish_split_task(db_path, job_id, log_file, summary, logger)
+
+    with _connect(db_path) as conn:
+        for index, symbol_row in enumerate(selected_rows, start=1):
+            symbol = str(symbol_row["symbol"]).zfill(6)
+            ts_code = str(symbol_row.get("ts_code") or _symbol_to_ts_code(symbol)).strip()
+            logger.info("[%s/%s] collect raw inputs %s %s", index, len(selected_rows), symbol, ts_code)
+            try:
+                raw_df, adj_df, limit_df, suspend_df = _load_symbol_inputs_with_retry(
+                    data_source=data_source,
+                    ts_code=ts_code,
+                    start_date=fetch_start_date,
+                    end_date=end_date,
+                    logger=logger,
+                    retry_attempts=config.retry_attempts,
+                    retry_sleep_seconds=config.retry_sleep_seconds,
+                )
+                raw_written = int(upsert_daily_raw_rows(_frame_rows(raw_df), db_path=target_db).get("rows_written") or 0)
+                upsert_adj_factor_rows(_frame_rows(adj_df), db_path=target_db)
+                upsert_stk_limit_rows(_frame_rows(limit_df), db_path=target_db)
+                upsert_suspend_rows(_frame_rows(suspend_df), db_path=target_db)
+                item = StockPoolSyncItem(symbol=symbol, ts_code=ts_code, status="success", start_date=start_date, end_date=end_date, rows_written=raw_written, message="raw inputs stored")
+                _write_job_item(conn, job_id, item)
+                items.append(item)
+                if config.sleep_seconds > 0:
+                    time.sleep(config.sleep_seconds)
+            except Exception as exc:  # noqa: BLE001
+                item = StockPoolSyncItem(symbol=symbol, ts_code=ts_code, status="failed", start_date=start_date, end_date=end_date, rows_written=0, message=str(exc)[:1000])
+                _write_job_item(conn, job_id, item)
+                items.append(item)
+                logger.exception("%s raw input collection failed: %s", symbol, exc)
+    summary = _summary_from_items(config, job_id, log_file, log_dir, start_date, end_date, resolved_rows, due_rows, selected_rows, prefilter_skipped_count, counts, items, "raw collection")
+    return _finish_split_task(db_path, job_id, log_file, summary, logger)
+
+
+def _stock_basic_map_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(row.get("symbol") or "").zfill(6): dict(row) for row in rows if str(row.get("symbol") or "").strip()}
+
+
+def _daily_basic_map_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    mapping: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ts_code = str(row.get("ts_code") or "").strip()
+        if ts_code:
+            mapping[ts_code] = row
+    return mapping
+
+
+def run_stock_daily_feature_computation(
+    config: StockPoolFeatureUpdateConfig,
+    data_source: Any | None = None,
+) -> dict[str, Any]:
+    (
+        db_path,
+        market_db_path,
+        log_dir,
+        job_id,
+        logger,
+        log_file,
+        start_date,
+        end_date,
+        resolved_rows,
+        due_rows,
+        selected_rows,
+        prefilter_skipped_count,
+        counts,
+        data_source,
+    ) = _prepare_split_task(config, data_source)
+    target_db = market_db_path or db_path
+    fetch_start_date = _lookback_start_date(start_date)
+    items: list[StockPoolSyncItem] = []
+    trade_calendar = pd.DataFrame(read_trade_calendar_rows(fetch_start_date, end_date, db_path=target_db))
+    market_context = pd.DataFrame(read_market_context_rows(fetch_start_date, end_date, db_path=target_db))
+    stock_basic_map = _stock_basic_map_from_rows(read_stock_basic_rows(db_path=target_db))
+    daily_basic_map = _daily_basic_map_from_rows(read_daily_basic_snapshot(end_date, db_path=target_db))
+    with _connect(db_path) as conn:
+        for index, symbol_row in enumerate(selected_rows, start=1):
+            symbol = str(symbol_row["symbol"]).zfill(6)
+            ts_code = str(symbol_row.get("ts_code") or _symbol_to_ts_code(symbol)).strip()
+            logger.info("[%s/%s] compute features from SQLite raw inputs %s %s", index, len(selected_rows), symbol, ts_code)
+            try:
+                raw_df = pd.DataFrame(read_daily_raw_rows(symbol, fetch_start_date, end_date, db_path=target_db))
+                adj_df = pd.DataFrame(read_adj_factor_rows(symbol, fetch_start_date, end_date, db_path=target_db))
+                limit_df = pd.DataFrame(read_stk_limit_rows(symbol, fetch_start_date, end_date, db_path=target_db))
+                suspend_df = pd.DataFrame(read_suspend_rows(symbol, fetch_start_date, end_date, db_path=target_db))
+                if raw_df.empty:
+                    raise RuntimeError(f"SQLite raw daily missing: {symbol}")
+                if adj_df.empty:
+                    raise RuntimeError(f"SQLite raw daily missing: {symbol}")
+                if trade_calendar.empty:
+                    raise RuntimeError(f"SQLite trade calendar missing: {fetch_start_date}-{end_date}")
+                if market_context.empty:
+                    raise RuntimeError(f"SQLite market context missing: {fetch_start_date}-{end_date}")
+                frame = build_processed_frame(
+                    raw_df=raw_df,
+                    adj_df=adj_df,
+                    snapshot_row=_snapshot_row(symbol_row, stock_basic_map, daily_basic_map),
+                    trade_calendar=trade_calendar,
+                    limit_df=limit_df,
+                    suspend_df=suspend_df,
+                    market_context=market_context,
+                    start_date=fetch_start_date,
+                    end_date=end_date,
+                )
+                validate_processed_frame(frame)
+                frame = frame[(frame["trade_date"].astype(str) >= start_date) & (frame["trade_date"].astype(str) <= end_date)].copy()
+                rows_written = _upsert_feature_frame(conn, frame)
+                market_rows_written = _upsert_market_feature_frame(frame, target_db)
+                item = StockPoolSyncItem(symbol=symbol, ts_code=ts_code, status="success", start_date=start_date, end_date=end_date, rows_written=rows_written, message=f"features stored; market db wrote {market_rows_written} rows")
+                _write_job_item(conn, job_id, item)
+                items.append(item)
+                if config.sleep_seconds > 0:
+                    time.sleep(config.sleep_seconds)
+            except Exception as exc:  # noqa: BLE001
+                item = StockPoolSyncItem(symbol=symbol, ts_code=ts_code, status="failed", start_date=start_date, end_date=end_date, rows_written=0, message=str(exc)[:1000])
+                _write_job_item(conn, job_id, item)
+                items.append(item)
+                logger.exception("%s SQLite feature computation failed: %s", symbol, exc)
+    summary = _summary_from_items(config, job_id, log_file, log_dir, start_date, end_date, resolved_rows, due_rows, selected_rows, prefilter_skipped_count, counts, items, "SQLite feature computation")
+    return _finish_split_task(db_path, job_id, log_file, summary, logger)
+
+class SQLiteFeatureComputationDataSource:
+    def __init__(self, db_path: str | Path | None) -> None:
+        self.db_path = db_path
+
+    def latest_trade_date(self, end_date: str) -> str:
+        rows = read_trade_calendar_rows("", end_date, db_path=self.db_path)
+        open_dates = [str(row.get("trade_date") or "") for row in rows if str(row.get("is_open") or "1") == "1"]
+        return max(open_dates) if open_dates else end_date
+
+    def load_stock_basic(self) -> pd.DataFrame:
+        return pd.DataFrame(read_stock_basic_rows(db_path=self.db_path))
+
+
+_previous_run_stock_daily_feature_computation = run_stock_daily_feature_computation
+
+
+def run_stock_daily_feature_computation(
+    config: StockPoolFeatureUpdateConfig,
+    data_source: Any | None = None,
+) -> dict[str, Any]:  # type: ignore[no-redef]
+    if data_source is None:
+        db_path = _db_path(config.db_path or DEFAULT_DB_PATH)
+        market_db_path = _resolve_market_db_path(db_path, config.market_db_path)
+        data_source = SQLiteFeatureComputationDataSource(market_db_path or db_path)
+    return _previous_run_stock_daily_feature_computation(config, data_source=data_source)
+
+class SQLiteFeatureComputationDataSource:
+    def __init__(self, db_path: str | Path | None, start_date: str = "", end_date: str = "") -> None:
+        self.db_path = db_path
+        self.start_date = _lookback_start_date(_normalize_date(start_date, default="20220101")) if start_date else ""
+        self.end_date = _normalize_date(end_date, default="99999999") if end_date else "99999999"
+
+    def latest_trade_date(self, end_date: str) -> str:
+        rows = read_trade_calendar_rows("", end_date, db_path=self.db_path)
+        open_dates = [str(row.get("trade_date") or "") for row in rows if str(row.get("is_open") or "1") == "1"]
+        return max(open_dates) if open_dates else end_date
+
+    def load_stock_basic(self) -> pd.DataFrame:
+        basic_rows = read_stock_basic_rows(db_path=self.db_path)
+        if not basic_rows:
+            return pd.DataFrame()
+        raw_latest = latest_daily_raw_dates([str(row.get("symbol") or "") for row in basic_rows], db_path=self.db_path)
+        raw_symbols = {symbol for symbol, latest in raw_latest.items() if latest and latest >= self.start_date}
+        filtered = [row for row in basic_rows if str(row.get("symbol") or "").zfill(6) in raw_symbols]
+        return pd.DataFrame(filtered)
+
+
+def run_stock_daily_feature_computation(
+    config: StockPoolFeatureUpdateConfig,
+    data_source: Any | None = None,
+) -> dict[str, Any]:  # type: ignore[no-redef]
+    if data_source is None:
+        db_path = _db_path(config.db_path or DEFAULT_DB_PATH)
+        market_db_path = _resolve_market_db_path(db_path, config.market_db_path)
+        data_source = SQLiteFeatureComputationDataSource(market_db_path or db_path, config.start_date, config.end_date)
+    return _previous_run_stock_daily_feature_computation(config, data_source=data_source)

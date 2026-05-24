@@ -56,6 +56,17 @@ def _connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def _connect_readonly(db_path: str | Path | None = None) -> sqlite3.Connection:
+    path = _db_path(db_path)
+    if not path.exists():
+        raise FileNotFoundError(f"stock pool db not found: {path}")
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+
 def _ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
     existing = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
     for column_name, column_definition in columns.items():
@@ -66,6 +77,47 @@ def _ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
+
+
+def read_template_symbols(
+    username: str,
+    template_name: str,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    clean_username = str(username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
+    clean_template = str(template_name or "").strip()
+    if not clean_template:
+        raise ValueError("请选择股票池模板")
+    with _connect_readonly(db_path) as conn:
+        template = conn.execute(
+            "SELECT 1 FROM stock_pool_templates WHERE username=? AND template_name=?",
+            (clean_username, clean_template),
+        ).fetchone()
+        if template is None:
+            raise FileNotFoundError(f"股票池模板不存在: {clean_username}/{clean_template}")
+        rows = conn.execute(
+            """
+            SELECT symbol, ts_code, stock_name, display_order
+            FROM stock_pool_template_stocks
+            WHERE username=? AND template_name=?
+            ORDER BY display_order, symbol
+            """,
+            (clean_username, clean_template),
+        ).fetchall()
+    if not rows:
+        raise ValueError(f"股票池模板没有股票: {clean_template}")
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row["symbol"] or "").strip().zfill(6)
+        result.append(
+            {
+                "symbol": symbol,
+                "ts_code": str(row["ts_code"] or _symbol_to_ts_code(symbol)).strip(),
+                "stock_name": str(row["stock_name"] or "").strip(),
+                "display_order": int(row["display_order"] or 0),
+            }
+        )
+    return result
 
 def init_stock_pool_db(db_path: str | Path | None = None) -> None:
     with _connect(db_path) as conn:
@@ -316,24 +368,41 @@ def init_stock_pool_db(db_path: str | Path | None = None) -> None:
         )
 
 
-def parse_stock_list(text: str) -> StockParseResult:
+def parse_stock_list(text: str, db_path: str | Path | None = None) -> StockParseResult:
     raw_items = [item.strip() for item in re.split(r"[\s,，;；]+", str(text or "")) if item.strip()]
+    name_lookup = _load_stock_name_lookup(db_path)
+    name_reverse = _build_stock_name_reverse_lookup(name_lookup)
     seen: set[str] = set()
     valid: list[dict[str, Any]] = []
     duplicates: list[str] = []
     invalid: list[str] = []
     for item in raw_items:
+        stock_name = ""
         match = SYMBOL_PATTERN.fullmatch(item.upper())
-        if not match:
-            invalid.append(item)
-            continue
-        symbol = match.group(1)
+        if match:
+            symbol = match.group(1)
+            stock_name = name_lookup.get(symbol, "")
+        else:
+            name_key = _normalize_stock_name(item)
+            if not name_key:
+                invalid.append(item)
+                continue
+            candidates = name_reverse.get(name_key, [])
+            if not candidates:
+                invalid.append(f"{item}(名称未匹配)")
+                continue
+            if len(candidates) > 1:
+                hint = ",".join(candidates[:3])
+                invalid.append(f"{item}(名称重复:{hint})")
+                continue
+            symbol = candidates[0]
+            stock_name = name_lookup.get(symbol, str(item).strip())
         if symbol in seen:
             if symbol not in duplicates:
                 duplicates.append(symbol)
             continue
         seen.add(symbol)
-        valid.append({"symbol": symbol, "ts_code": _symbol_to_ts_code(symbol), "stock_name": ""})
+        valid.append({"symbol": symbol, "ts_code": _symbol_to_ts_code(symbol), "stock_name": stock_name})
     return StockParseResult(valid_stocks=valid, duplicate_symbols=duplicates, invalid_items=invalid)
 
 
@@ -351,6 +420,11 @@ def _normalize_stock_symbol(value: Any) -> str:
     text = str(value or "").strip().upper()
     match = SYMBOL_PATTERN.search(text)
     return match.group(1) if match else ""
+
+
+def _normalize_stock_name(value: Any) -> str:
+    text = str(value or "").strip()
+    return text.replace(" ", "").replace("　", "")
 
 
 def _row_symbol(row: dict[str, Any]) -> str:
@@ -410,6 +484,18 @@ def _load_stock_name_lookup(db_path: str | Path | None = None) -> dict[str, str]
         for symbol, name in _read_csv_name_lookup(path).items():
             _merge_name(mapping, symbol, name)
     return mapping
+
+
+def _build_stock_name_reverse_lookup(name_lookup: dict[str, str]) -> dict[str, list[str]]:
+    reverse: dict[str, list[str]] = {}
+    for symbol, name in name_lookup.items():
+        key = _normalize_stock_name(name)
+        if not key:
+            continue
+        reverse.setdefault(key, []).append(symbol)
+    return reverse
+
+
 
 
 def _enrich_stock_names(stocks: list[dict[str, Any]], db_path: str | Path | None = None) -> list[dict[str, Any]]:
@@ -505,9 +591,16 @@ def read_stock_pool_template(
         return data
 
 
-def validate_stock_pool_symbols(stock_text: str, db_path: str | Path | None = None) -> dict[str, Any]:
-    parsed = parse_stock_list(stock_text)
-    _enrich_stock_names(parsed.valid_stocks, db_path=db_path)
+def validate_stock_pool_symbols(
+    stock_text: str,
+    db_path: str | Path | None = None,
+    main_universe_db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    if main_universe_db_path is not None:
+        parsed = _parse_stock_list_against_main_universe(stock_text, main_universe_db_path)
+    else:
+        parsed = parse_stock_list(stock_text, db_path=db_path)
+        _enrich_stock_names(parsed.valid_stocks, db_path=db_path)
     return {
         "valid_stocks": parsed.valid_stocks,
         "valid_count": len(parsed.valid_stocks),
@@ -518,23 +611,131 @@ def validate_stock_pool_symbols(stock_text: str, db_path: str | Path | None = No
     }
 
 
-def save_stock_pool_template(req: Any, db_path: str | Path | None = None) -> dict[str, Any]:
-    init_stock_pool_db(db_path)
+MAIN_UNIVERSE_NOT_READY_MESSAGE = "\u4e3b\u80a1\u7968\u6c60\u5c1a\u672a\u521d\u59cb\u5316\uff0c\u8bf7\u5148\u5728\u7cfb\u7edf\u7ba1\u7406\u5458\u4e2d\u7ef4\u62a4\u4e3b\u80a1\u7968\u6c60"
+
+
+def _load_active_main_universe_rows_without_init(db_path: str | Path) -> list[dict[str, Any]]:
+    path = Path(db_path)
+    if not path.exists():
+        raise ValueError(MAIN_UNIVERSE_NOT_READY_MESSAGE)
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        raise ValueError(MAIN_UNIVERSE_NOT_READY_MESSAGE) from exc
+    conn.row_factory = sqlite3.Row
+    try:
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='main_stock_universe'"
+        ).fetchone()
+        if table is None:
+            raise ValueError(MAIN_UNIVERSE_NOT_READY_MESSAGE)
+        rows = conn.execute(
+            """
+            SELECT symbol, ts_code, name
+            FROM main_stock_universe
+            WHERE is_active = 1
+            ORDER BY name, symbol
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        raise ValueError(MAIN_UNIVERSE_NOT_READY_MESSAGE)
+
+    active_rows: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = _normalize_stock_symbol(row["symbol"] or row["ts_code"])
+        if not symbol:
+            continue
+        active_rows.append(
+            {
+                "symbol": symbol,
+                "ts_code": str(row["ts_code"] or _symbol_to_ts_code(symbol)).strip() or _symbol_to_ts_code(symbol),
+                "stock_name": str(row["name"] or "").strip(),
+            }
+        )
+    if not active_rows:
+        raise ValueError(MAIN_UNIVERSE_NOT_READY_MESSAGE)
+    return active_rows
+
+
+def _parse_stock_list_against_main_universe(
+    text: str,
+    main_universe_db_path: str | Path,
+) -> StockParseResult:
+    raw_items = [item.strip() for item in re.split(r"[\s,\uFF0C;\uFF1B]+", str(text or "")) if item.strip()]
+    active_rows = _load_active_main_universe_rows_without_init(main_universe_db_path)
+    by_symbol = {row["symbol"]: row for row in active_rows}
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for row in active_rows:
+        name_key = _normalize_stock_name(row.get("stock_name"))
+        if name_key:
+            by_name.setdefault(name_key, []).append(row)
+
+    seen: set[str] = set()
+    valid: list[dict[str, Any]] = []
+    duplicates: list[str] = []
+    invalid: list[str] = []
+    for item in raw_items:
+        match = SYMBOL_PATTERN.fullmatch(item.upper())
+        if match:
+            symbol = match.group(1)
+            row = by_symbol.get(symbol)
+            if row is None:
+                invalid.append(f"{item}(\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60)")
+                continue
+        else:
+            name_key = _normalize_stock_name(item)
+            if not name_key:
+                invalid.append(item)
+                continue
+            candidates = by_name.get(name_key, [])
+            if not candidates:
+                invalid.append(f"{item}(\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60)")
+                continue
+            if len(candidates) > 1:
+                hint = ",".join(row["symbol"] for row in candidates[:3])
+                invalid.append(f"{item}(\u540d\u79f0\u91cd\u590d:{hint})")
+                continue
+            row = candidates[0]
+            symbol = row["symbol"]
+        if symbol in seen:
+            if symbol not in duplicates:
+                duplicates.append(symbol)
+            continue
+        seen.add(symbol)
+        valid.append({"symbol": symbol, "ts_code": row["ts_code"], "stock_name": row.get("stock_name", "")})
+    return StockParseResult(valid_stocks=valid, duplicate_symbols=duplicates, invalid_items=invalid)
+
+
+def save_stock_pool_template(
+    req: Any,
+    db_path: str | Path | None = None,
+    main_universe_db_path: str | Path | None = None,
+) -> dict[str, Any]:
     username = str(getattr(req, "username", "") or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
     old_name = str(getattr(req, "original_template_name", "") or "").strip()
     name = str(getattr(req, "template_name", "") or "").strip()
     if not name:
-        raise ValueError("模板名称不能为空")
+        raise ValueError("\u6a21\u677f\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a")
     description = str(getattr(req, "description", "") or "").strip()
     is_active = True
     overwrite_existing = bool(getattr(req, "overwrite_existing", False))
-    parsed = parse_stock_list(str(getattr(req, "stock_text", "") or ""))
-    _enrich_stock_names(parsed.valid_stocks, db_path=db_path)
+    stock_text = str(getattr(req, "stock_text", "") or "")
+    if main_universe_db_path is not None:
+        parsed = _parse_stock_list_against_main_universe(stock_text, main_universe_db_path)
+    else:
+        init_stock_pool_db(db_path)
+        parsed = parse_stock_list(stock_text, db_path=db_path)
+        _enrich_stock_names(parsed.valid_stocks, db_path=db_path)
     if parsed.invalid_items:
-        raise ValueError(f"股票列表包含无法识别的代码: {', '.join(parsed.invalid_items[:10])}")
+        if main_universe_db_path is not None:
+            raise ValueError(f"\u80a1\u7968\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60\u6216\u672a\u542f\u7528: {', '.join(parsed.invalid_items[:10])}")
+        raise ValueError(f"\u80a1\u7968\u5217\u8868\u5305\u542b\u65e0\u6cd5\u8bc6\u522b\u7684\u4ee3\u7801: {', '.join(parsed.invalid_items[:10])}")
     if not parsed.valid_stocks:
-        raise ValueError("股票列表不能为空")
+        raise ValueError("\u80a1\u7968\u5217\u8868\u4e0d\u80fd\u4e3a\u7a7a")
 
+    init_stock_pool_db(db_path)
     now = _now_text()
     with _connect(db_path) as conn:
         conn.execute(
@@ -616,8 +817,8 @@ def save_stock_pool_template(req: Any, db_path: str | Path | None = None) -> dic
     data = read_stock_pool_template(name, username=username, db_path=db_path)
     return {
         "template": data,
-        "validation": validate_stock_pool_symbols(str(getattr(req, "stock_text", "") or "")),
-        "message": f"股票池模板已保存：{name}；第二阶段已支持行情与指标入库，请运行股票池数据更新任务补齐或刷新数据。",
+        "validation": validate_stock_pool_symbols(str(getattr(req, "stock_text", "") or ""), db_path=db_path),
+        "message": f"股票池模板已保存：{name}；模板只保存股票集合，行情与指标由主行情库和统一调度维护。",
     }
 
 
@@ -649,7 +850,7 @@ def delete_stock_pool_template(
         "deleted_template_name": name,
         "username": username,
         "stock_count": stock_count,
-        "message": f"股票池模板已删除：{name}；SQLite 日线数据保留不动。",
+        "message": f"股票池模板已删除：{name}；主行情库数据保留不动。",
     }
 
 

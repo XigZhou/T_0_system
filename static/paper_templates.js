@@ -52,16 +52,19 @@ const templateFields = {
 };
 
 const SUMMARY_LABELS = {
-  file_name: "模板文件",
   account_id: "账户编号",
   account_name: "账户名称",
   stock_pool_template_name: "股票池模板",
   top_n: "TopN",
-  ledger_path: "账本路径",
+  ledger_storage: "账本存储",
   ledger_exists: "账本状态",
   price_primary: "首选行情源",
   price_field: "价格字段",
 };
+
+function currentTemplateUsername() {
+  return window.T0Auth?.currentUsername?.() || DEFAULT_STOCK_POOL_USERNAME;
+}
 
 function setTemplateStatus(text, error = false) {
   templateStatus.textContent = text;
@@ -133,11 +136,11 @@ function sanitizeTemplatePart(value, fallback = "template") {
 function defaultTemplateValues() {
   const suffix = chinaDateStamp();
   return {
-    file_name: `new_paper_account_${suffix}.yaml`,
+    file_name: `new_paper_account_${suffix}`,
     account_id: `新账户_${suffix}`,
     account_name: `新模拟账户_${suffix}`,
     initial_cash: 100000,
-    stock_pool_username: DEFAULT_STOCK_POOL_USERNAME,
+    stock_pool_username: currentTemplateUsername(),
     stock_pool_template_name: "当前多账户模拟股票池",
     stock_pool_db_path: DEFAULT_STOCK_POOL_DB_PATH,
     buy_condition: "m20>0",
@@ -161,8 +164,9 @@ function defaultTemplateValues() {
     stamp_tax_sell: 0,
     slippage_bps: 3,
     min_commission: 0,
-    ledger_path: `paper_trading/accounts/新账户_${suffix}.xlsx`,
-    log_dir: "paper_trading/logs",
+    ledger_path: "data_store/paper_trading.sqlite",
+    log_dir: "SQLite运行日志",
+    ledger_storage: "SQLite",
     skip_if_holding: true,
     skip_if_pending_order: true,
     strict_execution: true,
@@ -179,10 +183,12 @@ function buildCopiedTemplateValues(source = {}) {
   const sourceName = String(source.account_name || source.account_id || "模拟账户").trim();
   return {
     ...source,
-    file_name: `${baseFileName}_${suffix}.yaml`,
+    file_name: `${baseFileName}_${suffix}`,
     account_id: nextAccountId,
     account_name: `${sourceName}_副本_${stamp}`,
-    ledger_path: `paper_trading/accounts/${nextAccountId}.xlsx`,
+    ledger_path: "data_store/paper_trading.sqlite",
+    log_dir: "SQLite运行日志",
+    ledger_storage: "SQLite",
     ledger_exists: false,
   };
 }
@@ -209,12 +215,11 @@ function formatSummaryValue(key, value) {
 function renderTemplateSummary(template = {}) {
   const merged = { ...defaultTemplateValues(), ...template };
   const summary = {
-    file_name: merged.file_name,
     account_id: merged.account_id,
     account_name: merged.account_name,
     stock_pool_template_name: merged.stock_pool_template_name,
     top_n: merged.top_n,
-    ledger_path: merged.ledger_path,
+    ledger_storage: merged.ledger_storage || "SQLite",
     ledger_exists: merged.ledger_exists,
     price_primary: merged.price_primary,
     price_field: merged.price_field,
@@ -226,7 +231,7 @@ function renderTemplateSummary(template = {}) {
 
 function populateTemplateEditor(data = {}) {
   const merged = { ...defaultTemplateValues(), ...data };
-  merged.stock_pool_username = merged.stock_pool_username || DEFAULT_STOCK_POOL_USERNAME;
+  merged.stock_pool_username = merged.stock_pool_username || currentTemplateUsername();
   merged.stock_pool_db_path = merged.stock_pool_db_path || DEFAULT_STOCK_POOL_DB_PATH;
   Object.entries(templateFields).forEach(([key, el]) => {
     if (!el) {
@@ -244,14 +249,15 @@ function populateTemplateEditor(data = {}) {
 
 function collectTemplatePayload(overwriteExisting) {
   return {
+    username: currentTemplateUsername(),
     config_dir: configDirInput.value.trim() || "configs/paper_accounts",
-    config_path: configPathInput.value.trim(),
+    config_path: "",
     file_name: templateFields.file_name.value.trim(),
     overwrite_existing: overwriteExisting,
     account_id: templateFields.account_id.value.trim(),
     account_name: templateFields.account_name.value.trim(),
     initial_cash: numberValue(templateFields.initial_cash.value, 100000),
-    stock_pool_username: DEFAULT_STOCK_POOL_USERNAME,
+    stock_pool_username: currentTemplateUsername(),
     stock_pool_template_name: templateFields.stock_pool_template_name.value.trim(),
     stock_pool_db_path: templateFields.stock_pool_db_path.value.trim() || DEFAULT_STOCK_POOL_DB_PATH,
     buy_condition: templateFields.buy_condition.value.trim(),
@@ -278,8 +284,8 @@ function collectTemplatePayload(overwriteExisting) {
     stamp_tax_sell: numberValue(templateFields.stamp_tax_sell.value, 0),
     slippage_bps: numberValue(templateFields.slippage_bps.value, 3),
     min_commission: numberValue(templateFields.min_commission.value, 0),
-    ledger_path: templateFields.ledger_path.value.trim(),
-    log_dir: templateFields.log_dir.value.trim() || "paper_trading/logs",
+    ledger_path: "",
+    log_dir: "",
   };
 }
 
@@ -292,7 +298,7 @@ function setTemplateButtonsDisabled(disabled) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "same-origin", ...options });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.detail || `请求失败：${response.status}`);
@@ -302,7 +308,7 @@ async function fetchJson(url, options = {}) {
 
 async function loadStockPoolTemplates(selectedName = "") {
   if (poolUserLabel) {
-    poolUserLabel.textContent = DEFAULT_STOCK_POOL_USERNAME;
+    poolUserLabel.textContent = currentTemplateUsername();
   }
   if (templateFields.stock_pool_db_path) {
     templateFields.stock_pool_db_path.value = templateFields.stock_pool_db_path.value || DEFAULT_STOCK_POOL_DB_PATH;
@@ -311,7 +317,7 @@ async function loadStockPoolTemplates(selectedName = "") {
   if (!select) {
     return;
   }
-  const data = await fetchJson(`/api/stock-pools/templates?username=${encodeURIComponent(DEFAULT_STOCK_POOL_USERNAME)}`);
+  const data = await fetchJson(`/api/stock-pools/templates?username=${encodeURIComponent(currentTemplateUsername())}`);
   select.innerHTML = "";
   if (!data.templates.length) {
     select.appendChild(new Option("没有可用股票池模板", ""));
@@ -329,12 +335,12 @@ async function loadStockPoolTemplates(selectedName = "") {
 function buildPaperHref() {
   const params = new URLSearchParams();
   const configDir = configDirInput.value.trim();
-  const configPath = configPathInput.value.trim();
+  const accountId = configPathInput.value.trim();
   if (configDir) {
     params.set("config_dir", configDir);
   }
-  if (configPath) {
-    params.set("config_path", configPath);
+  if (accountId) {
+    params.set("account_id", accountId);
   }
   const query = params.toString();
   return query ? `/paper?${query}` : "/paper";
@@ -343,12 +349,12 @@ function buildPaperHref() {
 function syncNavigationState() {
   const params = new URLSearchParams();
   const configDir = configDirInput.value.trim();
-  const configPath = configPathInput.value.trim();
+  const accountId = configPathInput.value.trim();
   if (configDir) {
     params.set("config_dir", configDir);
   }
-  if (configPath) {
-    params.set("config_path", configPath);
+  if (accountId) {
+    params.set("account_id", accountId);
   }
   const pathName = typeof window !== "undefined" && window.location ? window.location.pathname : "/paper/templates";
   const nextUrl = `${pathName}${params.toString() ? `?${params.toString()}` : ""}`;
@@ -362,11 +368,11 @@ function syncNavigationState() {
 
 async function loadTemplates() {
   const configDir = encodeURIComponent(configDirInput.value.trim() || "configs/paper_accounts");
-  const requestedPath = configPathInput.value.trim();
-  const data = await fetchJson(`/api/paper/templates?config_dir=${configDir}`);
+  const requestedAccountId = configPathInput.value.trim();
+  const data = await fetchJson(`/api/paper/templates?config_dir=${configDir}&username=${encodeURIComponent(currentTemplateUsername())}`);
   templateSelect.innerHTML = "";
   if (!data.templates.length) {
-    templateSelect.appendChild(new Option("没有找到模板，可手动填写路径", ""));
+    templateSelect.appendChild(new Option("没有找到模板，请先新建", ""));
     configPathInput.value = "";
     populateTemplateEditor();
     syncNavigationState();
@@ -375,19 +381,19 @@ async function loadTemplates() {
   }
   data.templates.forEach((item) => {
     const label = item.error ? `${item.account_id}：读取失败` : `${item.account_name}（${item.account_id}）`;
-    templateSelect.appendChild(new Option(label, item.config_path || ""));
+    templateSelect.appendChild(new Option(label, item.account_id || ""));
   });
-  const hasRequestedPath = requestedPath && Array.from(templateSelect.options).some((option) => option.value === requestedPath);
-  templateSelect.value = hasRequestedPath ? requestedPath : templateSelect.options[0].value;
+  const hasRequestedAccount = requestedAccountId && Array.from(templateSelect.options).some((option) => option.value === requestedAccountId);
+  templateSelect.value = hasRequestedAccount ? requestedAccountId : templateSelect.options[0].value;
   configPathInput.value = templateSelect.value;
   syncNavigationState();
   await loadCurrentTemplate(false);
 }
 
 async function loadCurrentTemplate(showStatus = true) {
-  const configPath = configPathInput.value.trim();
+  const accountId = configPathInput.value.trim();
   syncNavigationState();
-  if (!configPath) {
+  if (!accountId) {
     populateTemplateEditor();
     setTemplateStatus("未选择模板，可以新建一个模板。");
     return;
@@ -396,12 +402,13 @@ async function loadCurrentTemplate(showStatus = true) {
     setTemplateStatus("正在载入模板...");
   }
   const params = new URLSearchParams({
-    config_path: configPath,
+    account_id: accountId,
+    username: currentTemplateUsername(),
     config_dir: configDirInput.value.trim() || "configs/paper_accounts",
   });
   const data = await fetchJson(`/api/paper/template?${params.toString()}`);
   populateTemplateEditor(data);
-  setTemplateStatus(`模板已载入：${data.config_path}；账本${data.ledger_exists ? "已存在" : "尚未创建"}。`);
+  setTemplateStatus(`模板已载入：${data.account_name}（${data.account_id}）；SQLite账本${data.ledger_exists ? "已有记录" : "尚未创建"}。`);
 }
 
 async function saveTemplate(overwriteExisting) {
@@ -415,14 +422,14 @@ async function saveTemplate(overwriteExisting) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const savedPath = data.template.config_path;
-    configPathInput.value = savedPath;
+    const savedAccountId = data.template.account_id;
+    configPathInput.value = savedAccountId;
     await loadTemplates();
-    templateSelect.value = savedPath;
-    configPathInput.value = savedPath;
+    templateSelect.value = savedAccountId;
+    configPathInput.value = savedAccountId;
     populateTemplateEditor(data.template);
     syncNavigationState();
-    setTemplateStatus(data.message || "模板已保存；Excel 账本未被修改。");
+    setTemplateStatus(data.message || "模板已保存到SQLite；账本未被修改。");
   } catch (error) {
     setTemplateStatus(`保存失败：${error.message}`, true);
   } finally {
@@ -462,7 +469,7 @@ newTemplateBtn.addEventListener("click", () => {
   configPathInput.value = "";
   populateTemplateEditor();
   syncNavigationState();
-  setTemplateStatus("已初始化新模板。保存前请确认账户编号、文件名和账本路径不会与旧模板冲突。");
+  setTemplateStatus("已初始化新模板。保存前请确认账户编号和账户名称不会与旧模板冲突。");
 });
 
 copyTemplateBtn.addEventListener("click", () => {
@@ -471,22 +478,22 @@ copyTemplateBtn.addEventListener("click", () => {
   configPathInput.value = "";
   populateTemplateEditor(buildCopiedTemplateValues(source));
   syncNavigationState();
-  setTemplateStatus("已复制当前模板为新草稿。可以小改配置后点击保存模板；保存前不会写入 YAML，也不会修改 Excel 账本。");
+  setTemplateStatus("已复制当前模板为新草稿。可以小改配置后点击保存模板；保存前不会写入SQLite。");
 });
 
 saveTemplateBtn.addEventListener("click", () => saveTemplate(true));
 saveAsTemplateBtn.addEventListener("click", () => saveTemplate(false));
 
 deleteTemplateBtn.addEventListener("click", async () => {
-  const configPath = configPathInput.value.trim();
-  if (!configPath) {
+  const accountId = configPathInput.value.trim();
+  if (!accountId) {
     setTemplateStatus("请先选择要删除的模板。", true);
     return;
   }
   const confirmed =
     typeof window === "undefined" || typeof window.confirm !== "function"
       ? true
-      : window.confirm("只删除 YAML 模板，不删除 Excel 账本。确认删除当前模板吗？");
+      : window.confirm("只停用当前SQLite模板，不删除SQLite账本记录。确认删除当前模板吗？");
   if (!confirmed) {
     return;
   }
@@ -494,14 +501,15 @@ deleteTemplateBtn.addEventListener("click", async () => {
   setTemplateStatus("正在删除模板...");
   try {
     const params = new URLSearchParams({
-      config_path: configPath,
+      account_id: accountId,
+      username: currentTemplateUsername(),
       config_dir: configDirInput.value.trim() || "configs/paper_accounts",
     });
     const data = await fetchJson(`/api/paper/template?${params.toString()}`, { method: "DELETE" });
     configPathInput.value = "";
     await loadTemplates();
     syncNavigationState();
-    setTemplateStatus(data.message || "模板已删除；Excel 账本保留不动。");
+    setTemplateStatus(data.message || "模板已删除；SQLite账本保留不动。");
   } catch (error) {
     setTemplateStatus(`删除失败：${error.message}`, true);
   } finally {
@@ -517,11 +525,14 @@ const urlParams = new URLSearchParams(templateLocationSearch);
 if (urlParams.get("config_dir")) {
   configDirInput.value = urlParams.get("config_dir");
 }
-if (urlParams.get("config_path")) {
+if (urlParams.get("account_id")) {
+  configPathInput.value = urlParams.get("account_id");
+} else if (urlParams.get("config_path")) {
   configPathInput.value = urlParams.get("config_path");
 }
 
 populateTemplateEditor();
 syncNavigationState();
-loadStockPoolTemplates().catch((error) => setTemplateStatus(`读取股票池模板失败：${error.message}`, true));
-loadTemplates().catch((error) => setTemplateStatus(`读取模板失败：${error.message}`, true));
+window.T0Auth?.loadCurrentUser?.()
+  .then(() => Promise.all([loadStockPoolTemplates(), loadTemplates()]))
+  .catch((error) => setTemplateStatus(`读取模板失败：${error.message}`, true));

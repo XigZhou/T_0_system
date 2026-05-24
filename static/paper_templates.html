@@ -15,30 +15,28 @@
             <h1>账户模板管理</h1>
           </div>
           <div class="brand-actions">
-            <p class="subtle">模板管理只会修改 YAML 配置，不直接改 Excel 账本；删除模板时也只删除模板文件。</p>
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
+            <p class="subtle">模板和账本统一保存在 SQLite；当前先默认按 admin 用户加载可见模板。</p>
             <p class="subtle">
               <a id="openPaperLink" href="/paper">返回多账户模拟</a>
               · <a href="/">组合回测</a>
               · <a href="/daily">每日收盘选股</a>
               · <a href="/single">单股表格回测</a>
-            </p>
+             · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a></p>
           </div>
         </div>
 
         <form id="templatePickerForm" class="form-grid compact-form">
-          <label class="field-wide">
-            <span>模板目录</span>
-            <input id="configDir" type="text" value="configs/paper_accounts" />
-          </label>
+          <input id="configDir" type="hidden" value="configs/paper_accounts" />
+          <input id="configPath" type="hidden" value="" />
 
-          <label class="field-dates">
+          <label class="field-dates field-wide">
             <span>选择模板</span>
             <select id="templateSelect"></select>
-          </label>
-
-          <label class="field-wide">
-            <span>模板路径</span>
-            <input id="configPath" type="text" placeholder="可手动填写单个 YAML 模板路径" />
           </label>
 
           <div class="actions template-page-actions">
@@ -60,7 +58,7 @@
           <div class="summary-intro">
             <p class="eyebrow">模板摘要</p>
             <h2>当前模板信息</h2>
-            <p class="panel-note">通过上面的下拉框切换模板后，会自动载入当前 YAML 内容；保存时会检查模板名、账户名和账本路径冲突。</p>
+            <p class="panel-note">通过上面的下拉框切换模板后，会自动载入当前 SQLite 模板；保存时会检查账户编号和账户名冲突。</p>
           </div>
           <div id="templateSummaryGrid" class="summary-grid"></div>
         </section>
@@ -71,14 +69,11 @@
               <p class="eyebrow">模板字段</p>
               <h3>编辑账户模板</h3>
             </div>
-            <p class="panel-note">建议新策略使用新的模板文件名和新的账本路径，避免历史账本与新策略混在一起。</p>
+            <p class="panel-note">账本和运行日志由系统按当前用户和账户编号写入 SQLite，不需要手动填写路径。</p>
           </div>
 
           <div class="template-editor-grid">
-            <label>
-              <span>模板文件名</span>
-              <input id="tplFileName" type="text" placeholder="例如 sector_l2_top500_v1.yaml" />
-            </label>
+            <input id="tplFileName" type="hidden" />
             <label>
               <span>账户编号</span>
               <input id="tplAccountId" type="text" />
@@ -93,17 +88,14 @@
             </label>
             <div class="readonly-field">
               <span>股票池用户</span>
-              <strong id="paperTemplatePoolUser">admin</strong>
+              <strong id="paperTemplatePoolUser">未登录</strong>
               <small>登录系统接入后自动获取</small>
             </div>
             <label class="field-wide">
               <span>股票池模板</span>
               <select id="tplStockPoolTemplateName"></select>
             </label>
-            <label class="field-wide">
-              <span>股票池数据库</span>
-              <input id="tplStockPoolDbPath" type="text" value="data_store/stock_pool_templates.sqlite" readonly />
-            </label>
+            <input id="tplStockPoolDbPath" type="hidden" value="data_store/stock_pool_templates.sqlite" />
             <label>
               <span>买入排名数量</span>
               <input id="tplTopN" type="number" min="1" max="500" step="1" />
@@ -179,14 +171,8 @@
               <span>最低佣金</span>
               <input id="tplMinCommission" type="number" min="0" step="0.01" />
             </label>
-            <label class="field-wide">
-              <span>账本路径</span>
-              <input id="tplLedgerPath" type="text" />
-            </label>
-            <label>
-              <span>日志目录</span>
-              <input id="tplLogDir" type="text" />
-            </label>
+            <input id="tplLedgerPath" type="hidden" />
+            <input id="tplLogDir" type="hidden" />
             <label class="field-expression">
               <span>买入条件</span>
               <textarea id="tplBuyCondition"></textarea>
@@ -216,6 +202,7 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/paper_templates.js"></script>
   </body>
 </html>

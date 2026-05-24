@@ -8,6 +8,8 @@ from typing import Any
 
 import pandas as pd
 
+from overnight_bt.sector_dashboard_store import upsert_sector_dashboard_rows
+
 from .config import ThemeConfig, load_theme_config
 from .providers import AkshareSectorDataProvider, SectorDataProvider
 
@@ -276,6 +278,7 @@ def run_sector_research(
     report_dir: str | Path = "sector_research/reports",
     provider: SectorDataProvider | None = None,
     fetch_constituents: bool = True,
+    market_db_path: str | Path | None = None,
 ) -> SectorResearchResult:
     config_path = Path(config_path)
     config = load_theme_config(config_path)
@@ -373,6 +376,27 @@ def run_sector_research(
         errors=errors,
     )
     _write_excel_summary(report_dir, theme_strength, board_strength, mapping, constituents_frame, stock_exposure)
+
+    summary = {
+        "config_path": str(config_path),
+        "start_date": start_date,
+        "end_date": end_date,
+        "latest_trade_date": latest_date,
+        "mapping_count": len(mapping),
+        "board_daily_rows": len(board_strength),
+        "theme_daily_rows": len(theme_strength),
+        "stock_exposure_rows": len(stock_exposure),
+        "error_count": len(errors),
+    }
+    upsert_sector_dashboard_rows(
+        db_path=market_db_path,
+        theme_strength_rows=theme_strength.astype(object).where(pd.notna(theme_strength), None).to_dict("records"),
+        board_strength_rows=board_strength.astype(object).where(pd.notna(board_strength), None).to_dict("records"),
+        stock_exposure_rows=stock_exposure.astype(object).where(pd.notna(stock_exposure), None).to_dict("records"),
+        mapping_rows=mapping.astype(object).where(pd.notna(mapping), None).to_dict("records"),
+        error_rows=pd.DataFrame(errors).astype(object).where(pd.notna(pd.DataFrame(errors)), None).to_dict("records") if errors else [],
+        summary=summary,
+    )
 
     return SectorResearchResult(
         config_path=str(config_path),

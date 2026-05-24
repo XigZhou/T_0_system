@@ -4,14 +4,19 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
 from overnight_bt.models import StockPoolTemplateSaveRequest
+from overnight_bt.market_data_store import read_stock_basic_rows, upsert_stock_basic_rows
+from overnight_bt.main_universe import MainUniverseSaveRequest, init_main_universe_db, save_main_universe
 from overnight_bt.stock_pool_feature_store import (
     StockPoolFeatureUpdateConfig,
     list_stock_pool_update_jobs,
     read_stock_pool_update_job,
+    run_stock_daily_feature_computation,
+    run_stock_daily_raw_collection,
     run_stock_pool_feature_update,
 )
 from overnight_bt.stock_pool_templates import (
@@ -20,6 +25,7 @@ from overnight_bt.stock_pool_templates import (
     init_stock_pool_db,
     list_stock_pool_templates,
     read_stock_pool_template,
+    read_template_symbols,
     save_stock_pool_template,
     seed_default_stock_pool_templates,
     validate_stock_pool_symbols,
@@ -124,12 +130,52 @@ class FakeStockPoolDataSource:
 
 
 class StockPoolTemplateTest(unittest.TestCase):
+    def _insert_stock_basic(
+        self,
+        db_path: Path,
+        symbol: str,
+        name: str,
+        ts_code: str | None = None,
+    ) -> None:
+        init_stock_pool_db(db_path)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO stock_basic(symbol, ts_code, name, updated_at)
+                VALUES (?, ?, ?, '2024-01-01 00:00:00')
+                ON CONFLICT(symbol) DO UPDATE SET
+                    ts_code=excluded.ts_code,
+                    name=excluded.name,
+                    updated_at=excluded.updated_at
+                """,
+                (symbol, ts_code or f"{symbol}.SZ", name),
+            )
+
     def test_validate_stock_list_normalizes_and_reports_errors(self) -> None:
         result = validate_stock_pool_symbols("300750\n600941.SH, 300750  abc 688981")
         self.assertEqual([row["symbol"] for row in result["valid_stocks"]], ["300750", "600941", "688981"])
         self.assertEqual(result["duplicate_symbols"], ["300750"])
-        self.assertEqual(result["invalid_items"], ["abc"])
+        self.assertEqual(result["invalid_items"], ["abc(名称未匹配)"])
         self.assertEqual(result["valid_count"], 3)
+
+    def test_validate_stock_list_against_main_universe_matches_save_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            market_db_path = Path(tmpdir) / "market_data.sqlite"
+            catl_name = "\u5b81\u5fb7\u65f6\u4ee3"
+            missing_name = "\u4e0d\u5b58\u5728\u516c\u53f8"
+            save_main_universe(
+                MainUniverseSaveRequest(mode="append", rows=[{"symbol": "300750", "name": catl_name}]),
+                db_path=market_db_path,
+            )
+
+            result = validate_stock_pool_symbols(
+                f"{catl_name}\n{missing_name}\n{catl_name}",
+                main_universe_db_path=market_db_path,
+            )
+
+        self.assertEqual([row["symbol"] for row in result["valid_stocks"]], ["300750"])
+        self.assertEqual(result["duplicate_symbols"], ["300750"])
+        self.assertEqual(result["invalid_items"], [f"{missing_name}(\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60)"])
 
     def test_save_read_delete_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -144,7 +190,7 @@ class StockPoolTemplateTest(unittest.TestCase):
                 ),
                 db_path=db_path,
             )
-            self.assertIn("第二阶段已支持行情与指标入库", saved["message"])
+            self.assertIn("模板只保存股票集合", saved["message"])
             loaded = read_stock_pool_template("手工测试股票池", db_path=db_path)
             self.assertEqual(loaded["stock_count"], 3)
             self.assertEqual([row["symbol"] for row in loaded["stocks"]], ["300750", "600941", "688981"])
@@ -155,8 +201,182 @@ class StockPoolTemplateTest(unittest.TestCase):
             self.assertEqual(listed[0]["template_name"], "手工测试股票池")
 
             deleted = delete_stock_pool_template("手工测试股票池", db_path=db_path)
-            self.assertIn("日线数据保留", deleted["message"])
+            self.assertIn("主行情库数据保留", deleted["message"])
             self.assertEqual(list_stock_pool_templates(db_path=db_path), [])
+
+    def test_read_template_symbols_missing_db_is_read_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "missing" / "stock_pool.sqlite"
+
+            with self.assertRaises(FileNotFoundError):
+                read_template_symbols(DEFAULT_USERNAME, "missing_template", db_path=db_path)
+
+            self.assertFalse(db_path.exists())
+            self.assertFalse(db_path.parent.exists())
+
+    def test_save_template_rejects_stock_missing_from_main_universe_without_partial_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            catl_name = "\u5b81\u5fb7\u65f6\u4ee3"
+            missing_name = "\u4e0d\u5b58\u5728\u516c\u53f8"
+            self._insert_stock_basic(db_path, "300750", catl_name)
+            self._insert_stock_basic(db_path, "000001", missing_name)
+            save_main_universe(
+                MainUniverseSaveRequest(mode="append", rows=[{"symbol": "300750", "name": catl_name}]),
+                db_path=market_db_path,
+            )
+
+            with self.assertRaises(ValueError) as ctx:
+                save_stock_pool_template(
+                    StockPoolTemplateSaveRequest(
+                        username=DEFAULT_USERNAME,
+                        template_name="main_universe_validation_failed",
+                        description="contains stock outside main universe",
+                        stock_text=f"{catl_name}\n{missing_name}",
+                    ),
+                    db_path=db_path,
+                    main_universe_db_path=market_db_path,
+                )
+
+            self.assertIn("\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60", str(ctx.exception))
+            with self.assertRaises(FileNotFoundError):
+                read_stock_pool_template("main_universe_validation_failed", db_path=db_path)
+
+    def test_save_template_accepts_active_main_universe_name_and_writes_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            catl_name = "\u5b81\u5fb7\u65f6\u4ee3"
+            self._insert_stock_basic(db_path, "300750", catl_name)
+            save_main_universe(
+                MainUniverseSaveRequest(mode="append", rows=[{"symbol": "300750", "name": catl_name}]),
+                db_path=market_db_path,
+            )
+
+            saved = save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="main_universe_validation_success",
+                    description="only active main universe stock",
+                    stock_text=catl_name,
+                ),
+                db_path=db_path,
+                main_universe_db_path=market_db_path,
+            )
+
+            self.assertEqual([row["symbol"] for row in saved["template"]["stocks"]], ["300750"])
+
+    def test_save_template_rejects_inactive_main_universe_stock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            vanke_name = "\u4e07\u79d1A"
+            self._insert_stock_basic(db_path, "000002", vanke_name)
+            save_main_universe(
+                MainUniverseSaveRequest(
+                    mode="append",
+                    rows=[
+                        {"symbol": "300750", "name": "CATL"},
+                        {"symbol": "000002", "name": vanke_name},
+                    ],
+                ),
+                db_path=market_db_path,
+            )
+            with sqlite3.connect(market_db_path) as conn:
+                conn.execute("UPDATE main_stock_universe SET is_active=0 WHERE symbol='000002'")
+
+            with self.assertRaises(ValueError) as ctx:
+                save_stock_pool_template(
+                    StockPoolTemplateSaveRequest(
+                        username=DEFAULT_USERNAME,
+                        template_name="inactive_stock_pool",
+                        description="contains inactive main universe stock",
+                        stock_text=vanke_name,
+                    ),
+                    db_path=db_path,
+                    main_universe_db_path=market_db_path,
+                )
+
+            self.assertIn("\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60", str(ctx.exception))
+            with self.assertRaises(FileNotFoundError):
+                read_stock_pool_template("inactive_stock_pool", db_path=db_path)
+
+    def test_strict_validation_failure_does_not_create_missing_template_db(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            save_main_universe(
+                MainUniverseSaveRequest(mode="append", rows=[{"symbol": "300750", "name": "CATL"}]),
+                db_path=market_db_path,
+            )
+
+            with self.assertRaises(ValueError) as ctx:
+                save_stock_pool_template(
+                    StockPoolTemplateSaveRequest(
+                        username=DEFAULT_USERNAME,
+                        template_name="strict_no_partial_db",
+                        description="strict validation should fail before template db init",
+                        stock_text="000001",
+                    ),
+                    db_path=db_path,
+                    main_universe_db_path=market_db_path,
+                )
+
+            self.assertIn("\u4e0d\u5728\u4e3b\u80a1\u7968\u6c60", str(ctx.exception))
+            self.assertFalse(db_path.exists())
+
+    def test_strict_validation_missing_main_universe_db_does_not_create_any_db(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "missing_market_data.sqlite"
+
+            with self.assertRaises(ValueError) as ctx:
+                save_stock_pool_template(
+                    StockPoolTemplateSaveRequest(
+                        username=DEFAULT_USERNAME,
+                        template_name="missing_main_universe",
+                        description="strict validation should not initialize databases",
+                        stock_text="300750",
+                    ),
+                    db_path=db_path,
+                    main_universe_db_path=market_db_path,
+                )
+
+            message = str(ctx.exception)
+            self.assertTrue("\u4e3b\u80a1\u7968\u6c60\u5c1a\u672a\u521d\u59cb\u5316" in message or "\u7ef4\u62a4\u4e3b\u80a1\u7968\u6c60" in message)
+            self.assertFalse(db_path.exists())
+            self.assertFalse(market_db_path.exists())
+
+    def test_strict_validation_resolves_name_from_main_universe_without_stock_basic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            main_only_name = "\u53ea\u9760\u4e3b\u6c60\u516c\u53f8"
+            save_main_universe(
+                MainUniverseSaveRequest(mode="append", rows=[{"symbol": "123456", "name": main_only_name}]),
+                db_path=market_db_path,
+            )
+
+            saved = save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="main_universe_name_only",
+                    description="name is resolved from main universe only",
+                    stock_text=main_only_name,
+                ),
+                db_path=db_path,
+                main_universe_db_path=market_db_path,
+            )
+
+            self.assertEqual([row["symbol"] for row in saved["template"]["stocks"]], ["123456"])
+            self.assertEqual(saved["template"]["stocks"][0]["stock_name"], main_only_name)
 
     def test_rename_template_rewrites_stock_relations(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -207,10 +427,248 @@ class StockPoolTemplateTest(unittest.TestCase):
             }
             self.assertTrue(names.issubset(expected))
 
+
+    def test_raw_collection_and_feature_computation_are_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="split_pipeline_pool",
+                    description="split raw and feature computation",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+            collect_source = FakeStockPoolDataSource()
+            collect = run_stock_daily_raw_collection(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="raw_daily_collect",
+                    username=DEFAULT_USERNAME,
+                    template_name="split_pipeline_pool",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    market_db_path=market_db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=collect_source,
+            )
+            self.assertEqual(collect["status"], "success")
+            self.assertEqual(collect_source.daily_calls, ["300750.SZ"])
+
+            compute_source = FakeStockPoolDataSource()
+            compute_source.load_daily = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("compute must read raw daily from SQLite"))
+            compute = run_stock_daily_feature_computation(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="feature_compute",
+                    username=DEFAULT_USERNAME,
+                    template_name="split_pipeline_pool",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    market_db_path=market_db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=compute_source,
+            )
+            self.assertEqual(compute["status"], "success")
+            with sqlite3.connect(market_db_path) as conn:
+                raw_count = conn.execute("SELECT COUNT(*) FROM stock_daily_raw WHERE symbol='300750'").fetchone()[0]
+                feature_row = conn.execute(
+                    "SELECT raw_close, close, m5 FROM stock_daily_features WHERE symbol='300750' AND trade_date='20240108'"
+                ).fetchone()
+            self.assertGreater(raw_count, 0)
+            self.assertIsNotNone(feature_row)
+            self.assertEqual(feature_row[0], 105.0)
+            self.assertEqual(feature_row[1], 105.0)
+            self.assertEqual(feature_row[2], 0.05)
+
+
+    def test_raw_collection_all_source_uses_only_active_main_universe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            save_main_universe(
+                MainUniverseSaveRequest(
+                    mode="replace",
+                    source="unit_test",
+                    rows=[
+                        {"symbol": "300750", "ts_code": "300750.SZ", "name": "宁德时代"},
+                        {"symbol": "000002", "ts_code": "000002.SZ", "name": "万科A"},
+                    ],
+                ),
+                db_path=market_db_path,
+            )
+            with sqlite3.connect(market_db_path) as conn:
+                conn.execute("UPDATE main_stock_universe SET is_active=0 WHERE symbol='000002'")
+
+            source = FakeStockPoolDataSource()
+            stock_basic_calls = {"count": 0}
+
+            def fail_stock_basic() -> pd.DataFrame:
+                stock_basic_calls["count"] += 1
+                raise AssertionError("source=all must not load full-market stock_basic")
+
+            source.load_stock_basic = fail_stock_basic
+            summary = run_stock_daily_raw_collection(
+                StockPoolFeatureUpdateConfig(
+                    source="all",
+                    job_type="raw_daily_collect",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    market_db_path=market_db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=source,
+            )
+
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["resolved_stock_count"], 1)
+            self.assertEqual(summary["stock_count"], 1)
+            self.assertEqual(source.daily_calls, ["300750.SZ"])
+            self.assertEqual(stock_basic_calls["count"], 0)
+
+
+    def test_raw_collection_all_source_preserves_existing_stock_basic_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            save_main_universe(
+                MainUniverseSaveRequest(
+                    mode="replace",
+                    source="unit_test",
+                    rows=[{"symbol": "300750", "ts_code": "300750.SZ", "name": "宁德时代"}],
+                ),
+                db_path=market_db_path,
+            )
+            upsert_stock_basic_rows(
+                [
+                    {
+                        "symbol": "300750",
+                        "ts_code": "300750.SZ",
+                        "name": "宁德时代",
+                        "industry": "电池",
+                        "market": "创业板",
+                        "list_date": "20180611",
+                    }
+                ],
+                db_path=market_db_path,
+            )
+
+            source = FakeStockPoolDataSource()
+            source.load_stock_basic = lambda: (_ for _ in ()).throw(AssertionError("source=all must not refresh full-market stock_basic"))
+            summary = run_stock_daily_raw_collection(
+                StockPoolFeatureUpdateConfig(
+                    source="all",
+                    job_type="raw_daily_collect",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    market_db_path=market_db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=source,
+            )
+
+            self.assertEqual(summary["status"], "success")
+            row = {item["symbol"]: item for item in read_stock_basic_rows(db_path=market_db_path)}["300750"]
+            self.assertEqual(row["industry"], "电池")
+            self.assertEqual(row["market"], "创业板")
+            self.assertEqual(row["list_date"], "20180611")
+
+
+    def test_feature_computation_all_source_uses_active_main_universe_from_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="all_source_sqlite_compute_pool",
+                    description="collect through template, compute all source from SQLite stock_basic",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+            collect = run_stock_daily_raw_collection(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="raw_daily_collect",
+                    username=DEFAULT_USERNAME,
+                    template_name="all_source_sqlite_compute_pool",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    market_db_path=market_db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=FakeStockPoolDataSource(),
+            )
+            self.assertEqual(collect["status"], "success")
+            save_main_universe(
+                MainUniverseSaveRequest(
+                    mode="replace",
+                    source="unit_test",
+                    rows=[{"symbol": "300750", "ts_code": "300750.SZ", "name": "宁德时代"}],
+                ),
+                db_path=market_db_path,
+            )
+
+            compute = run_stock_daily_feature_computation(
+                StockPoolFeatureUpdateConfig(
+                    source="all",
+                    job_type="feature_compute",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    market_db_path=market_db_path,
+                    log_dir=base / "logs",
+                    max_symbols=1,
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=None,
+            )
+
+            self.assertEqual(compute["status"], "success")
+            self.assertEqual(compute["stock_count"], 1)
+            with sqlite3.connect(market_db_path) as conn:
+                feature_row = conn.execute(
+                    "SELECT raw_close, m5 FROM stock_daily_features WHERE symbol='300750' AND trade_date='20240108'"
+                ).fetchone()
+            self.assertEqual(feature_row[0], 105.0)
+            self.assertEqual(feature_row[1], 0.05)
+
     def test_feature_store_update_writes_daily_features_and_job_logs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             db_path = base / "stock_pool.sqlite"
+            market_db_path = base / "market_data.sqlite"
             log_dir = base / "logs"
             save_stock_pool_template(
                 StockPoolTemplateSaveRequest(
@@ -231,6 +689,7 @@ class StockPoolTemplateTest(unittest.TestCase):
                     start_date="20240102",
                     end_date="20240108",
                     db_path=db_path,
+                    market_db_path=market_db_path,
                     log_dir=log_dir,
                     sleep_seconds=0.0,
                 ),
@@ -274,6 +733,61 @@ class StockPoolTemplateTest(unittest.TestCase):
             self.assertEqual(detail["status"], "success")
             self.assertEqual(detail["items"][0]["status"], "success")
             self.assertEqual(detail["items"][0]["rows_written"], 5)
+
+            with sqlite3.connect(market_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    """
+                    SELECT symbol, trade_date, name, close, raw_close, m5, ma5, can_buy_t
+                    FROM stock_daily_features
+                    WHERE symbol='300750' AND trade_date='20240108'
+                    """
+                ).fetchone()
+                self.assertIsNotNone(row)
+                self.assertEqual(row["name"], "宁德时代")
+                self.assertAlmostEqual(row["close"], 105.0)
+                self.assertAlmostEqual(row["raw_close"], 105.0)
+                self.assertAlmostEqual(row["m5"], 0.05)
+                self.assertAlmostEqual(row["ma5"], 102.2)
+                self.assertEqual(row["can_buy_t"], 1)
+
+    def test_feature_store_update_same_day_writes_only_target_date(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="单日测试池",
+                    description="单日采集测试",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+            source = FakeStockPoolDataSource()
+            summary = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="单日测试池",
+                    start_date="20240108",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    force_full_rebuild=True,
+                    only_missing=False,
+                ),
+                data_source=source,
+            )
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(summary["items"][0]["rows_written"], 1)
+            with sqlite3.connect(db_path) as conn:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM stock_daily_features WHERE symbol='300750'"
+                ).fetchone()[0]
+                self.assertEqual(count, 1)
 
     def test_feature_store_update_supports_batch_window(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -367,6 +881,203 @@ class StockPoolTemplateTest(unittest.TestCase):
             self.assertEqual(second["prefilter_skipped_count"], 3)
             self.assertEqual(second["due_stock_count"], 0)
             self.assertEqual(second_source.daily_calls, [])
+
+    def test_feature_store_update_include_up_to_date_refetches_latest_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="强制刷新测试池",
+                    description="已最新仍需重采",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+            first = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="强制刷新测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                ),
+                data_source=FakeStockPoolDataSource(),
+            )
+            self.assertEqual(first["status"], "success")
+
+            source = FakeStockPoolDataSource()
+            second = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="强制刷新测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                    only_missing=False,
+                ),
+                data_source=source,
+            )
+
+            self.assertEqual(second["status"], "success")
+            self.assertEqual(second["stock_count"], 1)
+            self.assertEqual(second["skipped_count"], 0)
+            self.assertEqual(second["items"][0]["status"], "success")
+            self.assertEqual(source.daily_calls, ["300750.SZ"])
+
+    def test_feature_store_update_can_use_main_universe_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            template_db = base / "stock_pool.sqlite"
+            market_db = base / "market_data.sqlite"
+            init_stock_pool_db(template_db)
+            init_main_universe_db(market_db)
+            save_main_universe(
+                MainUniverseSaveRequest(
+                    mode="replace",
+                    rows=[
+                        {"symbol": "300750", "ts_code": "300750.SZ", "name": "CATL"},
+                        {"symbol": "000002", "ts_code": "000002.SZ", "name": "VankeA"},
+                    ],
+                    source="test",
+                ),
+                db_path=market_db,
+            )
+            with sqlite3.connect(market_db) as conn:
+                conn.execute("UPDATE main_stock_universe SET is_active=0 WHERE symbol='000002'")
+
+            source = FakeStockPoolDataSource()
+            summary = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="main_universe",
+                    job_type="manual_refresh",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=template_db,
+                    market_db_path=market_db,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                ),
+                data_source=source,
+            )
+
+            self.assertEqual(summary["status"], "success")
+            self.assertEqual(source.daily_calls, ["300750.SZ"])
+            with sqlite3.connect(market_db) as conn:
+                active_count = conn.execute(
+                    "SELECT COUNT(*) FROM stock_daily_features WHERE symbol='300750'"
+                ).fetchone()[0]
+                inactive_count = conn.execute(
+                    "SELECT COUNT(*) FROM stock_daily_features WHERE symbol='000002'"
+                ).fetchone()[0]
+            self.assertGreater(active_count, 0)
+            self.assertEqual(inactive_count, 0)
+
+    def test_feature_store_update_with_temp_db_does_not_write_default_market_db(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            default_market_db_path = base / "default_market_data.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="隔离测试池",
+                    description="临时库不写默认主库",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+
+            with patch("overnight_bt.stock_pool_feature_store.DEFAULT_MARKET_DB_PATH", default_market_db_path):
+                summary = run_stock_pool_feature_update(
+                    StockPoolFeatureUpdateConfig(
+                        source="template",
+                        job_type="manual_refresh",
+                        username=DEFAULT_USERNAME,
+                        template_name="隔离测试池",
+                        start_date="20240102",
+                        end_date="20240108",
+                        db_path=db_path,
+                        log_dir=base / "logs",
+                        sleep_seconds=0.0,
+                    ),
+                    data_source=FakeStockPoolDataSource(),
+                )
+
+            self.assertEqual(summary["status"], "success")
+            self.assertFalse(default_market_db_path.exists())
+
+    def test_feature_store_update_treats_empty_latest_row_as_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = base / "stock_pool.sqlite"
+            save_stock_pool_template(
+                StockPoolTemplateSaveRequest(
+                    username=DEFAULT_USERNAME,
+                    template_name="空行情补数测试池",
+                    description="最新日空行情需要重采",
+                    stock_text="300750",
+                ),
+                db_path=db_path,
+            )
+            run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="空行情补数测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                ),
+                data_source=FakeStockPoolDataSource(),
+            )
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    UPDATE stock_daily_features
+                    SET raw_open=NULL, raw_close=NULL, qfq_close=NULL, close=NULL, m20=NULL, m5=NULL, hs300_m5=NULL, can_buy_t=0, can_buy_open_t=0
+                    WHERE symbol='300750' AND trade_date='20240108'
+                    """
+                )
+
+            source = FakeStockPoolDataSource()
+            second = run_stock_pool_feature_update(
+                StockPoolFeatureUpdateConfig(
+                    source="template",
+                    job_type="manual_refresh",
+                    username=DEFAULT_USERNAME,
+                    template_name="空行情补数测试池",
+                    start_date="20240102",
+                    end_date="20240108",
+                    db_path=db_path,
+                    log_dir=base / "logs",
+                    sleep_seconds=0.0,
+                ),
+                data_source=source,
+            )
+
+            self.assertEqual(second["status"], "success")
+            self.assertEqual(second["stock_count"], 1)
+            self.assertEqual(second["prefilter_skipped_count"], 0)
+            self.assertEqual(source.daily_calls, ["300750.SZ"])
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT raw_close, m5 FROM stock_daily_features WHERE symbol='300750' AND trade_date='20240108'"
+                ).fetchone()
+            self.assertEqual(row[0], 105.0)
+            self.assertEqual(row[1], 0.05)
 
     def test_feature_store_update_retries_single_stock_fetch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

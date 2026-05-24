@@ -16,28 +16,12 @@ const dailyReloadPoolsBtn = document.getElementById("dailyReloadPoolsBtn");
 const DEFAULT_DAILY_POOL_USERNAME = "admin";
 const BASE_BUY_CONDITION = "m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02";
 const BASE_SCORE_EXPRESSION = "m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30";
-const SECTOR_FILTER_CONDITION = `${BASE_BUY_CONDITION},sector_exposure_score>0,sector_strongest_theme_score>=0.6,sector_strongest_theme_rank_pct<=0.5`;
-const SECTOR_SCORE_EXPRESSION = `${BASE_SCORE_EXPRESSION} + sector_strongest_theme_score * 30 + sector_exposure_score * 10 - sector_strongest_theme_rank_pct * 15`;
 const STRATEGY_PRESETS = {
   base: {
     buyCondition: BASE_BUY_CONDITION,
     scoreExpression: BASE_SCORE_EXPRESSION,
-    dataProfile: "auto",
-    note: "已切换为基准动量预设，数据来自所选股票池模板。",
-  },
-  sector_filter: {
-    buyCondition: SECTOR_FILTER_CONDITION,
-    scoreExpression: BASE_SCORE_EXPRESSION,
-    dataProfile: "sector",
-    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
-    disabled: true,
-  },
-  sector_score: {
-    buyCondition: SECTOR_FILTER_CONDITION,
-    scoreExpression: SECTOR_SCORE_EXPRESSION,
-    dataProfile: "sector",
-    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
-    disabled: true,
+    dataProfile: "base",
+    note: "???????????????????????",
   },
 };
 
@@ -45,10 +29,6 @@ const PERCENT_KEYS = new Set([
   "holding_return",
   "best_return_since_entry",
   "drawdown_from_peak",
-  "sector_exposure_score",
-  "sector_strongest_theme_score",
-  "sector_strongest_theme_rank_pct",
-  "sector_strongest_theme_m20",
 ]);
 
 const COLUMN_LABELS = {
@@ -71,11 +51,6 @@ const COLUMN_LABELS = {
   reason: "说明",
   score: "评分",
   sell_reason: "卖出原因",
-  sector_exposure_score: "板块主题暴露分",
-  sector_strongest_theme: "最强主题",
-  sector_strongest_theme_m20: "最强主题二十日动量",
-  sector_strongest_theme_rank_pct: "最强主题排名百分位",
-  sector_strongest_theme_score: "最强主题综合分",
   shares: "股数",
   signal_date: "信号日期",
   signal_raw_close: "信号日未复权收盘价",
@@ -117,7 +92,7 @@ function setDailyStatus(text, error = false) {
 }
 
 function currentDailyPoolUsername() {
-  return DEFAULT_DAILY_POOL_USERNAME;
+  return window.T0Auth?.currentUsername?.() || DEFAULT_DAILY_POOL_USERNAME;
 }
 
 function selectedDailyPoolTemplate() {
@@ -125,7 +100,7 @@ function selectedDailyPoolTemplate() {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "same-origin", ...options });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.detail || `请求失败：${response.status}`);
@@ -306,6 +281,7 @@ function renderSummary(summary = {}) {
 async function postJson(url, payload) {
   const response = await fetch(url, {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -318,7 +294,7 @@ async function postJson(url, payload) {
 
 function applyResult(result) {
   renderSummary(result.summary);
-  renderTable(dailyBuyTable, result.buy_rows, ["signal_date", "planned_buy_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "signal_raw_close", "estimated_shares", "estimated_budget", "open_check"]);
+  renderTable(dailyBuyTable, result.buy_rows, ["signal_date", "planned_buy_date", "symbol", "name", "rank", "score", "signal_raw_close", "estimated_shares", "estimated_budget", "open_check"]);
   renderTable(dailySellTable, result.sell_rows, ["signal_date", "planned_sell_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_reason", "open_check"]);
   renderTable(dailyHoldingTable, result.holding_rows, ["signal_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_days", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_reason", "condition_note"]);
   const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
@@ -330,7 +306,9 @@ dailyReloadPoolsBtn?.addEventListener("click", () => {
   loadDailyPoolTemplates(true).catch((error) => setDailyStatus(`读取股票池模板失败: ${error.message}`, true));
 });
 applyStrategyPreset(strategyPreset?.value || "base", false);
-loadDailyPoolTemplates(false).catch((error) => setDailyStatus(`读取股票池模板失败: ${error.message}`, true));
+window.T0Auth?.loadCurrentUser?.()
+  .then(() => loadDailyPoolTemplates(false))
+  .catch((error) => setDailyStatus(`读取股票池模板失败: ${error.message}`, true));
 
 dailyForm.addEventListener("submit", async (event) => {
   event.preventDefault();

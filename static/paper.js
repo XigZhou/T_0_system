@@ -95,8 +95,8 @@ const SUMMARY_LABELS = {
   total_equity: "总资产",
   market_status: "行情状态",
   quote_source: "行情源",
-  ledger_path: "账本路径",
-  ledger_exists: "账本存在",
+  ledger_storage: "账本存储",
+  ledger_exists: "账本状态",
   order_count: "订单总数",
   trade_count: "成交总数",
   holding_count: "持仓数量",
@@ -116,12 +116,12 @@ function setPaperStatus(text, error = false) {
 function buildTemplateManagerHref() {
   const params = new URLSearchParams();
   const configDir = configDirInput.value.trim();
-  const configPath = configPathInput.value.trim();
+  const accountId = configPathInput.value.trim();
   if (configDir) {
     params.set("config_dir", configDir);
   }
-  if (configPath) {
-    params.set("config_path", configPath);
+  if (accountId) {
+    params.set("account_id", accountId);
   }
   const query = params.toString();
   return query ? `/paper/templates?${query}` : "/paper/templates";
@@ -248,8 +248,12 @@ function renderTable(el, rows) {
   `;
 }
 
+function currentPaperUsername() {
+  return window.T0Auth?.currentUsername?.() || "admin";
+}
+
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "same-origin", ...options });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.detail || `请求失败：${response.status}`);
@@ -260,18 +264,18 @@ async function fetchJson(url, options = {}) {
 async function loadTemplates() {
   const configDir = encodeURIComponent(configDirInput.value.trim() || "configs/paper_accounts");
   const previousValue = configPathInput.value.trim();
-  const data = await fetchJson(`/api/paper/templates?config_dir=${configDir}`);
+  const data = await fetchJson(`/api/paper/templates?config_dir=${configDir}&username=${encodeURIComponent(currentPaperUsername())}`);
   templateSelect.innerHTML = "";
   if (!data.templates.length) {
-    templateSelect.appendChild(new Option("没有找到模板，可手动填写路径", ""));
+    templateSelect.appendChild(new Option("没有找到模板，请先在模板管理创建", ""));
     configPathInput.value = "";
     syncTemplateManagerLinks();
-    setPaperStatus("没有找到模板，请检查模板目录或手动填写模板路径。", true);
+    setPaperStatus("没有找到模板，请先到模板管理创建模拟账户模板。", true);
     return;
   }
   data.templates.forEach((item) => {
     const label = item.error ? `${item.account_id}：读取失败` : `${item.account_name}（${item.account_id}）`;
-    templateSelect.appendChild(new Option(label, item.config_path || ""));
+    templateSelect.appendChild(new Option(label, item.account_id || ""));
   });
   if (previousValue && Array.from(templateSelect.options).some((option) => option.value === previousValue)) {
     templateSelect.value = previousValue;
@@ -296,11 +300,11 @@ function renderResult(result, statusText, preferredTab = "") {
 }
 
 async function loadLedger(showStatus = true) {
-  const configPath = configPathInput.value.trim();
+  const accountId = configPathInput.value.trim();
   syncTemplateManagerLinks();
-  if (!configPath) {
+  if (!accountId) {
     if (showStatus) {
-      setPaperStatus("请先选择或填写模拟账户模板。", true);
+      setPaperStatus("请先选择模拟账户模板。", true);
     }
     return;
   }
@@ -308,12 +312,13 @@ async function loadLedger(showStatus = true) {
     setPaperStatus("正在读取账本...");
   }
   const params = new URLSearchParams({
-    config_path: configPath,
+    account_id: accountId,
+    username: currentPaperUsername(),
     config_dir: configDirInput.value.trim() || "configs/paper_accounts",
   });
   const result = await fetchJson(`/api/paper/ledger?${params.toString()}`);
-  const existsText = result.summary.ledger_exists ? "账本读取完成" : "账本还不存在，先运行一次模拟账户会自动创建";
-  renderResult(result, `${existsText}：${result.summary.ledger_path}`, result.log_rows.length ? "paper-logs" : "paper-orders");
+  const existsText = result.summary.ledger_exists ? "SQLite账本读取完成" : "SQLite账本还没有记录，先运行一次模拟账户会自动创建";
+  renderResult(result, existsText, result.log_rows.length ? "paper-logs" : "paper-orders");
 }
 
 templateSelect.addEventListener("change", () => {
@@ -347,7 +352,8 @@ paperForm.addEventListener("submit", async (event) => {
   setPaperStatus("正在运行模拟账户...");
   try {
     const payload = {
-      config_path: configPathInput.value.trim(),
+      account_id: configPathInput.value.trim(),
+      username: currentPaperUsername(),
       config_dir: configDirInput.value.trim() || "configs/paper_accounts",
       action: document.getElementById("paperAction").value,
       trade_date: document.getElementById("tradeDate").value.trim(),
@@ -358,7 +364,7 @@ paperForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     const nextTab = result.log_rows.length ? "paper-logs" : "paper-orders";
-    renderResult(result, `运行完成，账本已写入：${result.summary.ledger_path}`, nextTab);
+    renderResult(result, "运行完成，结果已写入SQLite账本。", nextTab);
   } catch (error) {
     setPaperStatus(`运行失败：${error.message}`, true);
   } finally {
@@ -371,7 +377,8 @@ refreshQuotesBtn.addEventListener("click", async () => {
   setPaperStatus("正在获取当前持仓最新价格...");
   try {
     const payload = {
-      config_path: configPathInput.value.trim(),
+      account_id: configPathInput.value.trim(),
+      username: currentPaperUsername(),
       config_dir: configDirInput.value.trim() || "configs/paper_accounts",
       action: "refresh",
       trade_date: document.getElementById("tradeDate").value.trim(),
@@ -394,9 +401,13 @@ const urlParams = new URLSearchParams(locationSearch);
 if (urlParams.get("config_dir")) {
   configDirInput.value = urlParams.get("config_dir");
 }
-if (urlParams.get("config_path")) {
+if (urlParams.get("account_id")) {
+  configPathInput.value = urlParams.get("account_id");
+} else if (urlParams.get("config_path")) {
   configPathInput.value = urlParams.get("config_path");
 }
 
 syncTemplateManagerLinks();
-loadTemplates().catch((error) => setPaperStatus(`读取模板失败：${error.message}`, true));
+window.T0Auth?.loadCurrentUser?.()
+  .then(() => loadTemplates())
+  .catch((error) => setPaperStatus(`读取模板失败：${error.message}`, true));

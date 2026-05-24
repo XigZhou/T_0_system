@@ -193,3 +193,41 @@ def write_stock_pool_db(
                     list(payload.values()),
                 )
     return db_path
+
+
+def write_stock_pool_template_symbols_db(
+    db_path: Path,
+    template_name: str,
+    stocks: list[dict],
+    username: str = DEFAULT_USERNAME,
+) -> Path:
+    init_stock_pool_db(db_path)
+    now = "2024-01-01 00:00:00"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO users(username, password_hash, display_name, created_at, updated_at)
+            VALUES(?, '', ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET updated_at=excluded.updated_at
+            """,
+            (username, username, now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO stock_pool_templates(template_id, username, template_name, description, is_active, created_at, updated_at)
+            VALUES(?, ?, ?, '', 1, ?, ?)
+            """,
+            (f"test-{username}-{template_name}", username, template_name, now, now),
+        )
+        for order, stock in enumerate(stocks):
+            symbol = str(stock["symbol"]).zfill(6)
+            ts_code = str(stock.get("ts_code") or (f"{symbol}.SH" if symbol.startswith(("6", "9")) else f"{symbol}.SZ"))
+            name = str(stock.get("stock_name") or stock.get("name") or "")
+            conn.execute(
+                """
+                INSERT INTO stock_pool_template_stocks(username, template_name, symbol, ts_code, stock_name, display_order, created_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?)
+                """,
+                (username, template_name, symbol, ts_code, name, int(stock.get("display_order", order)), now),
+            )
+    return db_path

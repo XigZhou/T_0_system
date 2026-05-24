@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import math
+import os
+import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -22,7 +25,9 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on minimal server en
 
 from .daily_plan import build_daily_plan
 from .models import DailyHolding, DailyPlanRequest, PaperTemplateSaveRequest, PaperTradingRunRequest
-from .stock_pool_templates import DEFAULT_DB_PATH, DEFAULT_USERNAME, _connect, init_stock_pool_db, read_stock_pool_template
+from . import market_data_store
+from .sqlite_only_guard import is_sqlite_only_enabled
+from .stock_pool_templates import DEFAULT_DB_PATH, DEFAULT_USERNAME, _connect, init_stock_pool_db, read_stock_pool_template, read_template_symbols
 from .utils import to_float
 
 
@@ -30,6 +35,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DIR = PROJECT_ROOT / "configs" / "paper_accounts"
 DEFAULT_LEDGER_DIR = PROJECT_ROOT / "paper_trading" / "accounts"
 DEFAULT_LOG_DIR = PROJECT_ROOT / "paper_trading" / "logs"
+DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data_store" / "paper_trading.sqlite"
 
 PENDING_COLUMNS = [
     "订单编号",
@@ -114,6 +120,14 @@ ASSET_COLUMNS = [
 LOG_COLUMNS = ["时间", "账户编号", "账户名称", "动作", "级别", "信息"]
 CONFIG_COLUMNS = ["字段", "值"]
 SHEET_NAMES = ["配置快照", "待执行订单", "成交流水", "当前持仓", "每日资产", "运行日志"]
+LEDGER_TABLES: dict[str, tuple[str, list[str]]] = {
+    "配置快照": ("paper_config_snapshot", CONFIG_COLUMNS),
+    "待执行订单": ("paper_pending_orders", PENDING_COLUMNS),
+    "成交流水": ("paper_trades", TRADE_COLUMNS),
+    "当前持仓": ("paper_holdings", HOLDING_COLUMNS),
+    "每日资产": ("paper_assets", ASSET_COLUMNS),
+    "运行日志": ("paper_logs", LOG_COLUMNS),
+}
 
 
 @dataclass
@@ -151,6 +165,8 @@ class PaperAccountConfig:
     ledger_path: Path
     log_dir: Path
     raw_config: dict[str, Any]
+    username: str = DEFAULT_USERNAME
+    paper_db_path: Path = DEFAULT_PAPER_DB_PATH
 
 
 @dataclass
@@ -186,6 +202,498 @@ def _stock_pool_db_path_text(path_text: str | Path | None = None) -> str:
     return _relative_text(_stock_pool_db_path(path_text))
 
 
+def _market_data_db_path() -> Path | None:
+    path_text = os.environ.get("MARKET_DATA_DB_PATH", "").strip()
+    return _normalize_path(path_text) if path_text else None
+
+
+def _paper_db_path(path_text: str | Path | None = None) -> Path:
+    if path_text is None or str(path_text).strip() == "":
+        return DEFAULT_PAPER_DB_PATH
+    return _normalize_path(path_text)
+
+
+def _paper_db_path_text(path_text: str | Path | None = None) -> str:
+    return _relative_text(_paper_db_path(path_text))
+
+
+def _paper_context_db_path(config_dir: str | Path = DEFAULT_CONFIG_DIR, config_path: str | Path | None = None) -> Path:
+    path_text = str(config_path or "").strip()
+    if path_text:
+        candidate = Path(path_text).expanduser()
+        if candidate.suffix.lower() in {".yaml", ".yml"} and candidate.is_absolute():
+            folder = candidate.parent
+        else:
+            folder = _normalize_template_dir(config_dir)
+    else:
+        folder = _normalize_template_dir(config_dir)
+    if _is_relative_to(folder, PROJECT_ROOT):
+        return DEFAULT_PAPER_DB_PATH
+    if folder.name == "paper_accounts" and folder.parent.name == "configs":
+        root = folder.parent.parent
+    else:
+        root = folder.parent
+    return (root / "data_store" / "paper_trading.sqlite").resolve()
+
+
+def _paper_connect(db_path: str | Path | None = None) -> sqlite3.Connection:
+    path = _paper_db_path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _json_dumps(data: Any) -> str:
+    return json.dumps(data if data is not None else {}, ensure_ascii=False, sort_keys=True)
+
+
+def _json_loads(text: str | None, default: Any) -> Any:
+    if not text:
+        return default
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return default
+
+
+def _frame_to_json(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "[]"
+    clean = frame.astype(object).where(pd.notna(frame), None)
+    return _json_dumps(clean.to_dict(orient="records"))
+
+
+def _frame_from_json(text: str | None, columns: list[str]) -> pd.DataFrame:
+    rows = _json_loads(text, [])
+    if not isinstance(rows, list):
+        rows = []
+    frame = pd.DataFrame(rows)
+    for col in columns:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    return frame[columns]
+
+
+def init_paper_trading_db(db_path: str | Path | None = None) -> None:
+    with _paper_connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS paper_account_templates (
+                template_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                account_name TEXT NOT NULL,
+                initial_cash REAL NOT NULL DEFAULT 100000,
+                stock_pool_username TEXT NOT NULL DEFAULT 'admin',
+                stock_pool_template_name TEXT NOT NULL,
+                stock_pool_db_path TEXT NOT NULL DEFAULT '',
+                buy_condition TEXT NOT NULL,
+                sell_condition TEXT NOT NULL DEFAULT '',
+                score_expression TEXT NOT NULL DEFAULT 'm20',
+                top_n INTEGER NOT NULL DEFAULT 5,
+                entry_offset INTEGER NOT NULL DEFAULT 1,
+                min_hold_days INTEGER NOT NULL DEFAULT 0,
+                max_hold_days INTEGER NOT NULL DEFAULT 15,
+                buy_quantity_mode TEXT NOT NULL DEFAULT '固定股数',
+                buy_shares INTEGER NOT NULL DEFAULT 200,
+                buy_lot_size INTEGER NOT NULL DEFAULT 100,
+                min_buy_amount REAL NOT NULL DEFAULT 10000,
+                buy_min_close REAL NOT NULL DEFAULT 0,
+                buy_max_close REAL NOT NULL DEFAULT 150,
+                price_primary TEXT NOT NULL DEFAULT '东方财富',
+                price_fallback TEXT NOT NULL DEFAULT '腾讯股票',
+                price_field TEXT NOT NULL DEFAULT '开盘价',
+                skip_if_holding INTEGER NOT NULL DEFAULT 1,
+                skip_if_pending_order INTEGER NOT NULL DEFAULT 1,
+                strict_execution INTEGER NOT NULL DEFAULT 1,
+                buy_fee_rate REAL NOT NULL DEFAULT 0.00003,
+                sell_fee_rate REAL NOT NULL DEFAULT 0.00003,
+                stamp_tax_sell REAL NOT NULL DEFAULT 0,
+                slippage_bps REAL NOT NULL DEFAULT 3,
+                min_commission REAL NOT NULL DEFAULT 0,
+                raw_config_json TEXT NOT NULL DEFAULT '{}',
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(username, account_id),
+                UNIQUE(username, account_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_config_snapshot (
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                row_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(username, account_id, position)
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_pending_orders (
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                row_key TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                row_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(username, account_id, row_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_trades (
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                row_key TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                row_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(username, account_id, row_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_holdings (
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                row_key TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                row_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(username, account_id, row_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_assets (
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                row_key TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                row_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(username, account_id, row_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS paper_logs (
+                username TEXT NOT NULL DEFAULT 'admin',
+                account_id TEXT NOT NULL,
+                row_key TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                row_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(username, account_id, row_key)
+            );
+
+            CREATE VIEW IF NOT EXISTS paper_account_ledgers AS
+                SELECT username, account_id, '配置快照' AS sheet_name, COUNT(*) AS row_count FROM paper_config_snapshot GROUP BY username, account_id
+                UNION ALL
+                SELECT username, account_id, '待执行订单' AS sheet_name, COUNT(*) AS row_count FROM paper_pending_orders GROUP BY username, account_id
+                UNION ALL
+                SELECT username, account_id, '成交流水' AS sheet_name, COUNT(*) AS row_count FROM paper_trades GROUP BY username, account_id
+                UNION ALL
+                SELECT username, account_id, '当前持仓' AS sheet_name, COUNT(*) AS row_count FROM paper_holdings GROUP BY username, account_id
+                UNION ALL
+                SELECT username, account_id, '每日资产' AS sheet_name, COUNT(*) AS row_count FROM paper_assets GROUP BY username, account_id
+                UNION ALL
+                SELECT username, account_id, '运行日志' AS sheet_name, COUNT(*) AS row_count FROM paper_logs GROUP BY username, account_id;
+
+            CREATE INDEX IF NOT EXISTS idx_paper_templates_user_active
+                ON paper_account_templates(username, is_active, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_paper_pending_orders_position
+                ON paper_pending_orders(username, account_id, position);
+            CREATE INDEX IF NOT EXISTS idx_paper_trades_position
+                ON paper_trades(username, account_id, position);
+            CREATE INDEX IF NOT EXISTS idx_paper_holdings_position
+                ON paper_holdings(username, account_id, position);
+            CREATE INDEX IF NOT EXISTS idx_paper_assets_position
+                ON paper_assets(username, account_id, position);
+            CREATE INDEX IF NOT EXISTS idx_paper_logs_position
+                ON paper_logs(username, account_id, position);
+            """
+        )
+        existing = {str(row[1]) for row in conn.execute("PRAGMA table_info(paper_account_templates)").fetchall()}
+        migrations = {
+            "username": "TEXT NOT NULL DEFAULT 'admin'",
+            "raw_config_json": "TEXT NOT NULL DEFAULT '{}'",
+            "is_active": "INTEGER NOT NULL DEFAULT 1",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        for column_name, definition in migrations.items():
+            if column_name not in existing:
+                conn.execute(f"ALTER TABLE paper_account_templates ADD COLUMN {column_name} {definition}")
+        now = _now_text()
+        conn.execute("UPDATE paper_account_templates SET created_at=? WHERE created_at=''", (now,))
+        conn.execute("UPDATE paper_account_templates SET updated_at=? WHERE updated_at=''", (now,))
+        conn.commit()
+
+
+def _clean_username(username: str | None = None) -> str:
+    return str(username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
+
+
+def _ledger_storage_id(cfg: PaperAccountConfig | None = None) -> str:
+    if cfg is None:
+        return _paper_db_path_text()
+    return _paper_db_path_text(cfg.paper_db_path)
+
+
+def _ledger_exists(cfg: PaperAccountConfig) -> bool:
+    init_paper_trading_db(cfg.paper_db_path)
+    with _paper_connect(cfg.paper_db_path) as conn:
+        for table_name, _columns in LEDGER_TABLES.values():
+            row = conn.execute(
+                f"SELECT 1 FROM {table_name} WHERE username=? AND account_id=? LIMIT 1",
+                (_clean_username(cfg.username), cfg.account_id),
+            ).fetchone()
+            if row is not None:
+                return True
+    return False
+
+
+def _ledger_path_for_account(account_id: str) -> Path:
+    return _paper_db_path(DEFAULT_PAPER_DB_PATH)
+
+
+def _log_dir_for_account(username: str, account_id: str) -> Path:
+    return DEFAULT_LOG_DIR / _clean_username(username) / str(account_id or "default")
+
+
+def _template_id(username: str, account_id: str) -> str:
+    return f"{_clean_username(username)}:{str(account_id).strip()}"
+
+
+def _row_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return bool(int(value))
+
+
+def _template_row_values(cfg: PaperAccountConfig, now: str) -> tuple[Any, ...]:
+    return (
+        _template_id(cfg.username, cfg.account_id),
+        _clean_username(cfg.username),
+        cfg.account_id,
+        cfg.account_name,
+        cfg.initial_cash,
+        cfg.stock_pool_username,
+        cfg.stock_pool_template_name,
+        cfg.stock_pool_db_path,
+        cfg.buy_condition,
+        cfg.sell_condition,
+        cfg.score_expression,
+        cfg.top_n,
+        cfg.entry_offset,
+        cfg.min_hold_days,
+        cfg.max_hold_days,
+        cfg.buy_quantity_mode,
+        cfg.buy_shares,
+        cfg.buy_lot_size,
+        cfg.min_buy_amount,
+        cfg.buy_min_close,
+        cfg.buy_max_close,
+        cfg.price_primary,
+        cfg.price_fallback,
+        cfg.price_field,
+        1 if cfg.skip_if_holding else 0,
+        1 if cfg.skip_if_pending_order else 0,
+        1 if cfg.strict_execution else 0,
+        cfg.buy_fee_rate,
+        cfg.sell_fee_rate,
+        cfg.stamp_tax_sell,
+        cfg.slippage_bps,
+        cfg.min_commission,
+        _json_dumps(cfg.raw_config),
+        now,
+        now,
+    )
+
+
+def _template_config_from_row(row: sqlite3.Row) -> PaperAccountConfig:
+    data = dict(row)
+    username = _clean_username(data.get("username"))
+    account_id = str(data.get("account_id") or "").strip()
+    account_name = str(data.get("account_name") or account_id).strip()
+    raw_config = _json_loads(data.get("raw_config_json"), {})
+    if not isinstance(raw_config, dict):
+        raw_config = {}
+    stock_pool_db_path = _stock_pool_db_path_text(data.get("stock_pool_db_path") or "")
+    return PaperAccountConfig(
+        account_id=account_id,
+        account_name=account_name,
+        initial_cash=_as_float(data.get("initial_cash"), 100_000.0),
+        stock_pool_username=str(data.get("stock_pool_username") or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME,
+        stock_pool_template_name=str(data.get("stock_pool_template_name") or "").strip(),
+        stock_pool_db_path=stock_pool_db_path,
+        buy_condition=str(data.get("buy_condition") or "").strip(),
+        sell_condition=str(data.get("sell_condition") or "").strip(),
+        score_expression=str(data.get("score_expression") or "m20").strip() or "m20",
+        top_n=max(1, _as_int(data.get("top_n"), 5)),
+        entry_offset=max(1, _as_int(data.get("entry_offset"), 1)),
+        min_hold_days=max(0, _as_int(data.get("min_hold_days"), 0)),
+        max_hold_days=max(0, _as_int(data.get("max_hold_days"), 15)),
+        buy_quantity_mode=str(data.get("buy_quantity_mode") or "固定股数").strip(),
+        buy_shares=max(1, _as_int(data.get("buy_shares"), 200)),
+        buy_lot_size=max(1, _as_int(data.get("buy_lot_size"), 100)),
+        min_buy_amount=max(0.0, _as_float(data.get("min_buy_amount"), 0.0)),
+        buy_min_close=max(0.0, _as_float(data.get("buy_min_close"), 0.0)),
+        buy_max_close=max(0.0, _as_float(data.get("buy_max_close"), 0.0)),
+        price_primary=str(data.get("price_primary") or "东方财富").strip(),
+        price_fallback=str(data.get("price_fallback") or "腾讯股票").strip(),
+        price_field=str(data.get("price_field") or "开盘价").strip(),
+        skip_if_holding=_row_bool(data.get("skip_if_holding"), True),
+        skip_if_pending_order=_row_bool(data.get("skip_if_pending_order"), True),
+        strict_execution=_row_bool(data.get("strict_execution"), True),
+        buy_fee_rate=_as_float(data.get("buy_fee_rate"), 0.00003),
+        sell_fee_rate=_as_float(data.get("sell_fee_rate"), 0.00003),
+        stamp_tax_sell=_as_float(data.get("stamp_tax_sell"), 0.0),
+        slippage_bps=_as_float(data.get("slippage_bps"), 0.0),
+        min_commission=_as_float(data.get("min_commission"), 0.0),
+        ledger_path=_ledger_path_for_account(account_id),
+        log_dir=_log_dir_for_account(username, account_id),
+        raw_config=raw_config,
+        username=username,
+        paper_db_path=_paper_db_path(raw_config.get("_paper_db_path") or ""),
+    )
+
+
+def _read_template_by_account(account_id: str, username: str = DEFAULT_USERNAME, db_path: str | Path | None = None) -> PaperAccountConfig:
+    clean_user = _clean_username(username)
+    clean_account = str(account_id or "").strip()
+    if not clean_account:
+        raise ValueError("请先选择模拟账户模板")
+    init_paper_trading_db(db_path)
+    with _paper_connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM paper_account_templates
+            WHERE username=? AND account_id=? AND is_active=1
+            """,
+            (clean_user, clean_account),
+        ).fetchone()
+    if row is None:
+        raise FileNotFoundError(f"找不到模拟账户模板: {clean_user}/{clean_account}")
+    return _template_config_from_row(row)
+
+
+def _save_cfg_to_sqlite(cfg: PaperAccountConfig, overwrite_existing: bool, require_existing: bool = False, template_db_path: str | Path | None = None) -> PaperAccountConfig:
+    clean_user = _clean_username(cfg.username)
+    cfg.username = clean_user
+    cfg.paper_db_path = _paper_db_path(cfg.paper_db_path)
+    cfg.ledger_path = _ledger_path_for_account(cfg.account_id)
+    cfg.log_dir = _log_dir_for_account(clean_user, cfg.account_id)
+    template_db = _paper_db_path(template_db_path or cfg.paper_db_path)
+    init_paper_trading_db(template_db)
+    now = _now_text()
+    with _paper_connect(template_db) as conn:
+        duplicate = conn.execute(
+            """
+            SELECT account_id, account_name
+            FROM paper_account_templates
+            WHERE username=? AND is_active=1 AND (account_id=? OR account_name=?)
+            """,
+            (clean_user, cfg.account_id, cfg.account_name),
+        ).fetchone()
+        if duplicate is not None and str(duplicate["account_id"]) != cfg.account_id:
+            raise ValueError(f"账户名称已被其他模板使用: {cfg.account_name}")
+        if duplicate is not None and not overwrite_existing and str(duplicate["account_id"]) == cfg.account_id:
+            raise ValueError(f"账户编号已被其他模板使用: {cfg.account_id}")
+        if overwrite_existing:
+            existing = conn.execute(
+                """
+                SELECT account_id
+                FROM paper_account_templates
+                WHERE username=? AND account_id=? AND is_active=1
+                """,
+                (clean_user, cfg.account_id),
+            ).fetchone()
+            if require_existing and existing is None:
+                raise ValueError("覆盖保存必须选择当前已有账户模板；如需新模板请使用另存为")
+        conn.execute(
+            """
+            INSERT INTO paper_account_templates (
+                template_id, username, account_id, account_name, initial_cash,
+                stock_pool_username, stock_pool_template_name, stock_pool_db_path,
+                buy_condition, sell_condition, score_expression, top_n, entry_offset,
+                min_hold_days, max_hold_days, buy_quantity_mode, buy_shares, buy_lot_size,
+                min_buy_amount, buy_min_close, buy_max_close, price_primary, price_fallback,
+                price_field, skip_if_holding, skip_if_pending_order, strict_execution,
+                buy_fee_rate, sell_fee_rate, stamp_tax_sell, slippage_bps, min_commission,
+                raw_config_json, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(username, account_id) DO UPDATE SET
+                account_name=excluded.account_name,
+                initial_cash=excluded.initial_cash,
+                stock_pool_username=excluded.stock_pool_username,
+                stock_pool_template_name=excluded.stock_pool_template_name,
+                stock_pool_db_path=excluded.stock_pool_db_path,
+                buy_condition=excluded.buy_condition,
+                sell_condition=excluded.sell_condition,
+                score_expression=excluded.score_expression,
+                top_n=excluded.top_n,
+                entry_offset=excluded.entry_offset,
+                min_hold_days=excluded.min_hold_days,
+                max_hold_days=excluded.max_hold_days,
+                buy_quantity_mode=excluded.buy_quantity_mode,
+                buy_shares=excluded.buy_shares,
+                buy_lot_size=excluded.buy_lot_size,
+                min_buy_amount=excluded.min_buy_amount,
+                buy_min_close=excluded.buy_min_close,
+                buy_max_close=excluded.buy_max_close,
+                price_primary=excluded.price_primary,
+                price_fallback=excluded.price_fallback,
+                price_field=excluded.price_field,
+                skip_if_holding=excluded.skip_if_holding,
+                skip_if_pending_order=excluded.skip_if_pending_order,
+                strict_execution=excluded.strict_execution,
+                buy_fee_rate=excluded.buy_fee_rate,
+                sell_fee_rate=excluded.sell_fee_rate,
+                stamp_tax_sell=excluded.stamp_tax_sell,
+                slippage_bps=excluded.slippage_bps,
+                min_commission=excluded.min_commission,
+                raw_config_json=excluded.raw_config_json,
+                is_active=1,
+                updated_at=excluded.updated_at
+            """,
+            _template_row_values(cfg, now),
+        )
+        conn.commit()
+    return cfg
+
+
+def _has_paper_account_templates(db_path: str | Path, username: str = DEFAULT_USERNAME) -> bool:
+    init_paper_trading_db(db_path)
+    with _paper_connect(db_path) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM paper_account_templates WHERE username=?",
+            (_clean_username(username),),
+        ).fetchone()[0]
+    return int(count or 0) > 0
+
+
+def _legacy_templates_to_sqlite(config_dir: str | Path = DEFAULT_CONFIG_DIR, username: str = DEFAULT_USERNAME) -> None:
+    if is_sqlite_only_enabled():
+        return
+    folder = _normalize_path(config_dir)
+    if not folder.exists():
+        return
+    clean_user = _clean_username(username)
+    context_db = _paper_context_db_path(config_dir)
+    init_paper_trading_db(context_db)
+    for path in sorted(folder.glob("*.yaml")):
+        try:
+            cfg = load_paper_account_config(path)
+            cfg.username = clean_user
+            cfg.paper_db_path = context_db
+            with _paper_connect(context_db) as conn:
+                existing = conn.execute(
+                    "SELECT is_active FROM paper_account_templates WHERE username=? AND account_id=?",
+                    (clean_user, cfg.account_id),
+                ).fetchone()
+            if existing is not None:
+                continue
+            cfg.raw_config["_legacy_config_path"] = str(path)
+            cfg.raw_config["_paper_db_path"] = _paper_db_path_text(context_db)
+            _save_cfg_to_sqlite(cfg, overwrite_existing=True, require_existing=False, template_db_path=context_db)
+        except Exception:
+            continue
+
 def _daily_plan_source_kwargs(cfg: PaperAccountConfig) -> dict[str, Any]:
     return {
         "data_source": "stock_pool",
@@ -193,6 +701,8 @@ def _daily_plan_source_kwargs(cfg: PaperAccountConfig) -> dict[str, Any]:
         "stock_pool_username": cfg.stock_pool_username,
         "stock_pool_template_name": cfg.stock_pool_template_name,
         "stock_pool_db_path": cfg.stock_pool_db_path,
+        "stock_pool_market_db_path": str(_market_data_db_path() or ""),
+        "stock_pool_feature_legacy_fallback": False,
     }
 
 
@@ -379,11 +889,15 @@ def _resolve_template_path(config_path: str | Path, config_dir: str | Path) -> P
     return path
 
 
-def _template_payload_from_config(cfg: PaperAccountConfig, config_path: Path) -> dict[str, Any]:
+def _template_payload_from_config(cfg: PaperAccountConfig, config_path: Path | str | None = None) -> dict[str, Any]:
+    config_path_text = "" if config_path is None else str(config_path)
+    file_name = Path(config_path_text).name if config_path_text else f"{cfg.account_id}.sqlite"
     return {
-        "config_dir": _relative_text(config_path.parent),
-        "config_path": str(config_path),
-        "file_name": config_path.name,
+        "username": cfg.username,
+        "template_id": _template_id(cfg.username, cfg.account_id),
+        "config_dir": "",
+        "config_path": config_path_text,
+        "file_name": file_name,
         "account_id": cfg.account_id,
         "account_name": cfg.account_name,
         "initial_cash": cfg.initial_cash,
@@ -414,9 +928,11 @@ def _template_payload_from_config(cfg: PaperAccountConfig, config_path: Path) ->
         "stamp_tax_sell": cfg.stamp_tax_sell,
         "slippage_bps": cfg.slippage_bps,
         "min_commission": cfg.min_commission,
-        "ledger_path": _relative_text(cfg.ledger_path),
-        "log_dir": _relative_text(cfg.log_dir),
-        "ledger_exists": cfg.ledger_path.exists(),
+        "ledger_path": _ledger_storage_id(cfg),
+        "ledger_storage": "SQLite",
+        "ledger_exists": _ledger_exists(cfg),
+        "log_dir": "SQLite运行日志",
+        "paper_db_path": _paper_db_path_text(cfg.paper_db_path),
         "raw_config": cfg.raw_config,
     }
 
@@ -480,41 +996,165 @@ def load_paper_account_config(config_path: str | Path) -> PaperAccountConfig:
 
 
 
-def list_paper_account_templates(config_dir: str | Path = DEFAULT_CONFIG_DIR) -> list[dict[str, Any]]:
-    folder = _normalize_path(config_dir)
-    if not folder.exists():
-        return []
+def _request_username(req: PaperTemplateSaveRequest | PaperTradingRunRequest | None = None, username: str | None = None) -> str:
+    if username:
+        return _clean_username(username)
+    if req is not None and hasattr(req, "username"):
+        return _clean_username(getattr(req, "username"))
+    return DEFAULT_USERNAME
+
+
+def _paper_config_from_request(req: PaperTemplateSaveRequest, username: str | None = None) -> PaperAccountConfig:
+    clean_user = _request_username(req, username)
+    account_id = req.account_id.strip()
+    account_name = req.account_name.strip()
+    if not account_id:
+        raise ValueError("账户编号不能为空")
+    if not account_name:
+        raise ValueError("账户名称不能为空")
+    stock_pool_username = req.stock_pool_username.strip() or clean_user or DEFAULT_USERNAME
+    stock_pool_db_path = _stock_pool_db_path_text(req.stock_pool_db_path or "")
+    raw_config = _template_config_from_request(
+        req,
+        _ledger_path_for_account(account_id),
+        _log_dir_for_account(clean_user, account_id),
+    )
+    raw_config["_paper_db_path"] = _paper_db_path_text()
+    return PaperAccountConfig(
+        account_id=account_id,
+        account_name=account_name,
+        initial_cash=float(req.initial_cash),
+        stock_pool_username=stock_pool_username,
+        stock_pool_template_name=req.stock_pool_template_name.strip(),
+        stock_pool_db_path=stock_pool_db_path,
+        buy_condition=req.buy_condition.strip(),
+        sell_condition=req.sell_condition.strip(),
+        score_expression=req.score_expression.strip() or "m20",
+        top_n=max(1, int(req.top_n)),
+        entry_offset=max(1, int(req.entry_offset)),
+        min_hold_days=max(0, int(req.min_hold_days)),
+        max_hold_days=max(0, int(req.max_hold_days)),
+        buy_quantity_mode=req.buy_quantity_mode.strip() or "固定股数",
+        buy_shares=max(1, int(req.buy_shares)),
+        buy_lot_size=max(1, int(req.buy_lot_size)),
+        min_buy_amount=max(0.0, float(req.min_buy_amount)),
+        buy_min_close=max(0.0, float(req.buy_min_close)),
+        buy_max_close=max(0.0, float(req.buy_max_close)),
+        price_primary=req.price_primary.strip() or "东方财富",
+        price_fallback=req.price_fallback.strip(),
+        price_field=req.price_field.strip() or "开盘价",
+        skip_if_holding=bool(req.skip_if_holding),
+        skip_if_pending_order=bool(req.skip_if_pending_order),
+        strict_execution=bool(req.strict_execution),
+        buy_fee_rate=float(req.buy_fee_rate),
+        sell_fee_rate=float(req.sell_fee_rate),
+        stamp_tax_sell=float(req.stamp_tax_sell),
+        slippage_bps=float(req.slippage_bps),
+        min_commission=float(req.min_commission),
+        ledger_path=_ledger_path_for_account(account_id),
+        log_dir=_log_dir_for_account(clean_user, account_id),
+        raw_config=raw_config,
+        username=clean_user,
+        paper_db_path=_paper_db_path(),
+    )
+
+
+def list_paper_account_templates(
+    config_dir: str | Path = DEFAULT_CONFIG_DIR,
+    username: str = DEFAULT_USERNAME,
+) -> list[dict[str, Any]]:
+    clean_user = _clean_username(username)
+    context_db = _paper_context_db_path(config_dir)
+    if not _has_paper_account_templates(context_db, clean_user):
+        _legacy_templates_to_sqlite(config_dir, clean_user)
     rows: list[dict[str, Any]] = []
-    for path in sorted(folder.glob("*.yaml")):
-        try:
-            cfg = load_paper_account_config(path)
-            rows.append(
-                {
-                    "account_id": cfg.account_id,
-                    "account_name": cfg.account_name,
-                    "config_path": str(path),
-                    "ledger_path": str(cfg.ledger_path),
-                    "stock_pool_username": cfg.stock_pool_username,
-                    "stock_pool_template_name": cfg.stock_pool_template_name,
-                    "stock_pool_db_path": cfg.stock_pool_db_path,
-                    "top_n": cfg.top_n,
-                    "buy_shares": cfg.buy_shares,
-                    "buy_lot_size": cfg.buy_lot_size,
-                    "min_buy_amount": cfg.min_buy_amount,
-                    "buy_min_close": cfg.buy_min_close,
-                    "buy_max_close": cfg.buy_max_close,
-                    "price_primary": cfg.price_primary,
-                }
-            )
-        except Exception as exc:  # noqa: BLE001
-            rows.append({"account_id": path.stem, "account_name": "模板读取失败", "config_path": str(path), "error": str(exc)})
+    with _paper_connect(context_db) as conn:
+        db_rows = conn.execute(
+            """
+            SELECT *
+            FROM paper_account_templates
+            WHERE username=? AND is_active=1
+            ORDER BY updated_at DESC, account_id ASC
+            """,
+            (clean_user,),
+        ).fetchall()
+    for row in db_rows:
+        cfg = _template_config_from_row(row)
+        if is_sqlite_only_enabled() and cfg.raw_config.get("_legacy_config_path"):
+            continue
+        rows.append(
+            {
+                "username": cfg.username,
+                "template_id": _template_id(cfg.username, cfg.account_id),
+                "account_id": cfg.account_id,
+                "account_name": cfg.account_name,
+                "config_path": cfg.account_id,
+                "ledger_path": _ledger_storage_id(cfg),
+                "ledger_storage": "SQLite",
+                "ledger_exists": _ledger_exists(cfg),
+                "stock_pool_username": cfg.stock_pool_username,
+                "stock_pool_template_name": cfg.stock_pool_template_name,
+                "stock_pool_db_path": cfg.stock_pool_db_path,
+                "top_n": cfg.top_n,
+                "buy_shares": cfg.buy_shares,
+                "buy_lot_size": cfg.buy_lot_size,
+                "min_buy_amount": cfg.min_buy_amount,
+                "buy_min_close": cfg.buy_min_close,
+                "buy_max_close": cfg.buy_max_close,
+                "price_primary": cfg.price_primary,
+            }
+        )
     return rows
 
 
-def read_paper_account_template(config_path: str, config_dir: str | Path = DEFAULT_CONFIG_DIR) -> dict[str, Any]:
-    path = _resolve_template_path(config_path, config_dir)
-    cfg = load_paper_account_config(path)
-    return _template_payload_from_config(cfg, path)
+def _account_id_from_template_selector(
+    config_path: str = "",
+    account_id: str = "",
+    config_dir: str | Path = DEFAULT_CONFIG_DIR,
+    username: str = DEFAULT_USERNAME,
+) -> str:
+    if str(account_id or "").strip():
+        return str(account_id).strip()
+    text = str(config_path or "").strip()
+    if text:
+        candidate = Path(text).expanduser()
+        if candidate.suffix.lower() in {".yaml", ".yml"}:
+            path = candidate.resolve() if candidate.is_absolute() else _resolve_template_path(text, config_dir)
+            if not path.exists():
+                raise FileNotFoundError(f"模拟账户模板不存在: {path}")
+            context_db = _paper_context_db_path(config_dir, path)
+            cfg = load_paper_account_config(path)
+            cfg.username = _clean_username(username)
+            cfg.paper_db_path = context_db
+            init_paper_trading_db(context_db)
+            with _paper_connect(context_db) as conn:
+                existing = conn.execute(
+                    "SELECT is_active FROM paper_account_templates WHERE username=? AND account_id=?",
+                    (cfg.username, cfg.account_id),
+                ).fetchone()
+            if existing is not None:
+                return cfg.account_id
+            cfg.raw_config["_legacy_config_path"] = str(path)
+            cfg.raw_config["_paper_db_path"] = _paper_db_path_text(context_db)
+            _save_cfg_to_sqlite(cfg, overwrite_existing=True, require_existing=False, template_db_path=context_db)
+            return cfg.account_id
+        return text
+    templates = list_paper_account_templates(config_dir, username=username)
+    if not templates:
+        raise FileNotFoundError("没有找到任何模拟账户模板")
+    return str(templates[0]["account_id"])
+
+
+def read_paper_account_template(
+    config_path: str = "",
+    config_dir: str | Path = DEFAULT_CONFIG_DIR,
+    account_id: str = "",
+    username: str = DEFAULT_USERNAME,
+) -> dict[str, Any]:
+    context_db = _paper_context_db_path(config_dir, config_path)
+    resolved_account_id = _account_id_from_template_selector(config_path, account_id, config_dir, username)
+    cfg = _read_template_by_account(resolved_account_id, username, db_path=context_db)
+    return _template_payload_from_config(cfg, cfg.account_id)
 
 
 def _template_config_from_request(req: PaperTemplateSaveRequest, ledger_path: Path, log_dir: Path) -> dict[str, Any]:
@@ -566,8 +1206,8 @@ def _template_config_from_request(req: PaperTemplateSaveRequest, ledger_path: Pa
         },
         "费用": fees,
         "输出": {
-            "账本路径": _relative_text(ledger_path),
-            "日志目录": _relative_text(log_dir),
+            "账本路径": _paper_db_path_text(),
+            "日志目录": "SQLite运行日志",
         },
     }
 
@@ -589,80 +1229,101 @@ def _write_template_yaml(path: Path, data: dict[str, Any]) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def save_paper_account_template(req: PaperTemplateSaveRequest) -> dict[str, Any]:
-    folder = _normalize_template_dir(req.config_dir)
-    folder.mkdir(parents=True, exist_ok=True)
+def _config_from_request(req: PaperTemplateSaveRequest) -> PaperAccountConfig:
     account_id = req.account_id.strip()
     account_name = req.account_name.strip()
     if not account_id:
         raise ValueError("账户编号不能为空")
     if not account_name:
         raise ValueError("账户名称不能为空")
-
-    target_name = _normalize_template_file_name(req.file_name, account_id)
-    target_path = (folder / target_name).resolve()
-    current_path = _resolve_template_path(req.config_path, folder) if req.config_path.strip() else None
-    is_same_template = current_path is not None and target_path == current_path
-    old_cfg = load_paper_account_config(current_path) if current_path is not None and current_path.exists() else None
-    if target_path.exists() and not is_same_template:
-        raise ValueError(f"模板文件名已存在，请换一个文件名: {target_path.name}")
-    if target_path.exists() and not req.overwrite_existing:
-        raise ValueError("覆盖已有模板时必须使用保存模板操作")
-    if req.overwrite_existing and current_path is None:
-        raise ValueError("覆盖保存必须提供当前模板路径")
-    if req.overwrite_existing and not is_same_template:
-        raise ValueError("覆盖保存只能写回当前模板；如需新模板请使用另存为")
-    if req.overwrite_existing and not target_path.exists():
-        raise ValueError("当前模板文件不存在，请使用另存为新模板")
-
-    ledger_path = _normalize_path(req.ledger_path or DEFAULT_LEDGER_DIR / f"{account_id}.xlsx").resolve()
-    log_dir = _normalize_path(req.log_dir or DEFAULT_LOG_DIR).resolve()
-    read_stock_pool_template(
-        template_name=req.stock_pool_template_name.strip(),
-        username=req.stock_pool_username.strip() or DEFAULT_USERNAME,
-        db_path=req.stock_pool_db_path.strip() or None,
+    owner_username = _request_username(req)
+    stock_pool_username = _clean_username(req.stock_pool_username or owner_username)
+    context_db = _paper_context_db_path(req.config_dir, req.config_path)
+    stock_pool_db_path = _stock_pool_db_path_text(req.stock_pool_db_path)
+    raw_config = _template_config_from_request(req, _ledger_path_for_account(account_id), _log_dir_for_account(owner_username, account_id))
+    raw_config["_paper_db_path"] = _paper_db_path_text(context_db)
+    return PaperAccountConfig(
+        account_id=account_id,
+        account_name=account_name,
+        initial_cash=req.initial_cash,
+        stock_pool_username=stock_pool_username,
+        stock_pool_template_name=req.stock_pool_template_name.strip(),
+        stock_pool_db_path=stock_pool_db_path,
+        buy_condition=req.buy_condition.strip(),
+        sell_condition=req.sell_condition.strip(),
+        score_expression=req.score_expression.strip() or "m20",
+        top_n=req.top_n,
+        entry_offset=req.entry_offset,
+        min_hold_days=req.min_hold_days,
+        max_hold_days=req.max_hold_days,
+        buy_quantity_mode=req.buy_quantity_mode.strip() or "固定股数",
+        buy_shares=req.buy_shares,
+        buy_lot_size=req.buy_lot_size,
+        min_buy_amount=req.min_buy_amount,
+        buy_min_close=req.buy_min_close,
+        buy_max_close=req.buy_max_close,
+        price_primary=req.price_primary.strip() or "东方财富",
+        price_fallback=req.price_fallback.strip(),
+        price_field=req.price_field.strip() or "开盘价",
+        skip_if_holding=req.skip_if_holding,
+        skip_if_pending_order=req.skip_if_pending_order,
+        strict_execution=req.strict_execution,
+        buy_fee_rate=req.buy_fee_rate,
+        sell_fee_rate=req.sell_fee_rate,
+        stamp_tax_sell=req.stamp_tax_sell,
+        slippage_bps=req.slippage_bps,
+        min_commission=req.min_commission,
+        ledger_path=_ledger_path_for_account(account_id),
+        log_dir=_log_dir_for_account(owner_username, account_id),
+        raw_config=raw_config,
+        username=owner_username,
+        paper_db_path=context_db,
     )
-    for row in list_paper_account_templates(folder):
-        other_path = _normalize_path(row.get("config_path", "")).resolve()
-        if other_path == target_path:
-            continue
-        if row.get("error"):
-            continue
-        if str(row.get("account_id") or "").strip() == account_id:
-            raise ValueError(f"账户编号已被其他模板使用: {account_id}")
-        if str(row.get("account_name") or "").strip() == account_name:
-            raise ValueError(f"账户名称已被其他模板使用: {account_name}")
-        other_ledger = _normalize_path(row.get("ledger_path", "")).resolve()
-        if other_ledger == ledger_path:
-            raise ValueError(f"账本路径已被其他模板使用: {_relative_text(ledger_path)}")
 
-    if ledger_path.exists():
-        if not is_same_template:
-            raise ValueError(f"账本文件已存在，为避免新旧策略混用，请换一个账本路径: {_relative_text(ledger_path)}")
-        if old_cfg is not None and old_cfg.ledger_path.resolve() != ledger_path:
-            raise ValueError(f"覆盖保存不能切换到已有账本，请换一个新账本路径: {_relative_text(ledger_path)}")
 
-    data = _template_config_from_request(req, ledger_path, log_dir)
-    _write_template_yaml(target_path, data)
-    cfg = load_paper_account_config(target_path)
+def save_paper_account_template(req: PaperTemplateSaveRequest) -> dict[str, Any]:
+    cfg = _config_from_request(req)
+    read_stock_pool_template(
+        template_name=cfg.stock_pool_template_name,
+        username=cfg.stock_pool_username,
+        db_path=cfg.stock_pool_db_path or None,
+    )
+    overwrite_existing = bool(req.overwrite_existing)
+    if overwrite_existing and req.config_path.strip():
+        current_account_id = _account_id_from_template_selector(req.config_path, "", req.config_dir, cfg.username)
+        if current_account_id != cfg.account_id:
+            raise ValueError("覆盖保存不能切换账户编号；如需新账户请使用另存为新模板")
+    cfg = _save_cfg_to_sqlite(cfg, overwrite_existing=overwrite_existing, require_existing=overwrite_existing, template_db_path=cfg.paper_db_path)
     return {
-        "template": _template_payload_from_config(cfg, target_path),
-        "message": f"模板已保存：{_relative_text(target_path)}；Excel 账本未被修改。",
+        "template": _template_payload_from_config(cfg, cfg.account_id),
+        "message": f"模板已保存到 SQLite：{cfg.account_name}；账本数据未被修改。",
     }
 
 
-def delete_paper_account_template(config_path: str, config_dir: str | Path = DEFAULT_CONFIG_DIR) -> dict[str, Any]:
-    path = _resolve_template_path(config_path, config_dir)
-    if not path.exists():
-        raise FileNotFoundError(f"模板不存在: {path}")
-    cfg = load_paper_account_config(path)
-    ledger_path = cfg.ledger_path
-    path.unlink()
+def delete_paper_account_template(
+    config_path: str = "",
+    config_dir: str | Path = DEFAULT_CONFIG_DIR,
+    account_id: str = "",
+    username: str = DEFAULT_USERNAME,
+) -> dict[str, Any]:
+    clean_user = _clean_username(username)
+    context_db = _paper_context_db_path(config_dir, config_path)
+    resolved_account_id = _account_id_from_template_selector(config_path, account_id, config_dir, clean_user)
+    cfg = _read_template_by_account(resolved_account_id, clean_user, db_path=context_db)
+    init_paper_trading_db(context_db)
+    with _paper_connect(context_db) as conn:
+        conn.execute(
+            "UPDATE paper_account_templates SET is_active=0, updated_at=? WHERE username=? AND account_id=?",
+            (_now_text(), clean_user, resolved_account_id),
+        )
+        conn.commit()
     return {
-        "deleted_template_path": str(path),
-        "ledger_path": str(ledger_path),
-        "ledger_exists": ledger_path.exists(),
-        "message": f"模板已删除：{_relative_text(path)}；Excel 账本保留不动。",
+        "deleted_template_path": resolved_account_id,
+        "account_id": resolved_account_id,
+        "ledger_path": _ledger_storage_id(cfg),
+        "ledger_storage": "SQLite",
+        "ledger_exists": _ledger_exists(cfg),
+        "message": f"模板已删除：{cfg.account_name}；SQLite 账本数据保留不动。",
     }
 
 
@@ -677,7 +1338,43 @@ def _empty_ledger() -> dict[str, pd.DataFrame]:
     }
 
 
-def _read_ledger(path: Path) -> dict[str, pd.DataFrame]:
+def _row_key(row: dict[str, Any], index: int, columns: list[str]) -> str:
+    for key in ("订单编号", "交易编号"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value)
+    if "日期" in columns and row.get("日期"):
+        return str(row.get("日期"))
+    if "股票代码" in columns and row.get("股票代码"):
+        parts = [str(row.get("股票代码") or "")]
+        for key in ("买入日期", "来源订单编号", "最后估值日期"):
+            if row.get(key):
+                parts.append(str(row.get(key)))
+        return "|".join(parts)
+    if "时间" in columns:
+        return f"{index:08d}"
+    return f"{index:08d}"
+
+
+def _read_ledger(cfg_or_path: PaperAccountConfig | Path) -> dict[str, pd.DataFrame]:
+    if isinstance(cfg_or_path, PaperAccountConfig):
+        cfg = cfg_or_path
+        init_paper_trading_db(cfg.paper_db_path)
+        ledger = _empty_ledger()
+        with _paper_connect(cfg.paper_db_path) as conn:
+            for sheet_name, (table_name, columns) in LEDGER_TABLES.items():
+                rows = conn.execute(
+                    f"SELECT row_json FROM {table_name} WHERE username=? AND account_id=? ORDER BY position ASC",
+                    (_clean_username(cfg.username), cfg.account_id),
+                ).fetchall()
+                decoded = [_json_loads(row["row_json"], {}) for row in rows]
+                frame = pd.DataFrame([row for row in decoded if isinstance(row, dict)])
+                for col in columns:
+                    if col not in frame.columns:
+                        frame[col] = pd.NA
+                ledger[sheet_name] = frame[columns]
+        return ledger
+    path = Path(cfg_or_path)
     if not path.exists():
         return _empty_ledger()
     loaded = pd.read_excel(path, sheet_name=None, dtype=object)
@@ -691,7 +1388,43 @@ def _read_ledger(path: Path) -> dict[str, pd.DataFrame]:
     }
 
 
-def _write_ledger(path: Path, ledger: dict[str, pd.DataFrame]) -> None:
+def _write_ledger(cfg_or_path: PaperAccountConfig | Path, ledger: dict[str, pd.DataFrame]) -> None:
+    if isinstance(cfg_or_path, PaperAccountConfig):
+        cfg = cfg_or_path
+        init_paper_trading_db(cfg.paper_db_path)
+        now = _now_text()
+        with _paper_connect(cfg.paper_db_path) as conn:
+            for sheet_name, (table_name, columns) in LEDGER_TABLES.items():
+                frame = ledger.get(sheet_name, pd.DataFrame(columns=columns)).copy()
+                for col in columns:
+                    if col not in frame.columns:
+                        frame[col] = pd.NA
+                frame = frame[columns].astype(object).where(pd.notna(frame), None)
+                conn.execute(
+                    f"DELETE FROM {table_name} WHERE username=? AND account_id=?",
+                    (_clean_username(cfg.username), cfg.account_id),
+                )
+                for position, row in enumerate(frame.to_dict(orient="records")):
+                    if table_name == "paper_config_snapshot":
+                        conn.execute(
+                            f"""
+                            INSERT INTO {table_name} (username, account_id, position, row_json, updated_at)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (_clean_username(cfg.username), cfg.account_id, position, _json_dumps(row), now),
+                        )
+                    else:
+                        key = _row_key(row, position, columns)
+                        conn.execute(
+                            f"""
+                            INSERT INTO {table_name} (username, account_id, row_key, position, row_json, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (_clean_username(cfg.username), cfg.account_id, key, position, _json_dumps(row), now),
+                        )
+            conn.commit()
+        return
+    path = Path(cfg_or_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         for sheet_name in SHEET_NAMES:
@@ -730,8 +1463,8 @@ def _config_snapshot(cfg: PaperAccountConfig) -> pd.DataFrame:
         ("印花税", cfg.stamp_tax_sell),
         ("滑点bps", cfg.slippage_bps),
         ("最低佣金", cfg.min_commission),
-        ("账本路径", str(cfg.ledger_path)),
-        ("日志目录", str(cfg.log_dir)),
+        ("账本存储", _ledger_storage_id(cfg)),
+        ("日志存储", "SQLite运行日志"),
         ("最后更新时间", _now_text()),
     ]
     return pd.DataFrame(rows, columns=CONFIG_COLUMNS)
@@ -750,10 +1483,8 @@ def _append_log(ledger: dict[str, pd.DataFrame], cfg: PaperAccountConfig, action
 
 
 def _write_text_log(cfg: PaperAccountConfig, message: str) -> None:
-    cfg.log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = cfg.log_dir / f"{datetime.now():%Y%m%d}.log"
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(f"{_now_text()} [{cfg.account_id}] {message}\n")
+    # 多账户模拟交易的运行日志统一保存在 SQLite 账本表，保留函数名兼容既有调用点。
+    return None
 
 
 def _cash_balance(cfg: PaperAccountConfig, trades: pd.DataFrame) -> float:
@@ -823,23 +1554,8 @@ def _dedupe_append(base: pd.DataFrame, rows: list[dict[str, Any]], key: str, col
 
 
 def _resolve_signal_date(cfg: PaperAccountConfig, signal_date: str) -> str:
-    if signal_date:
-        return signal_date
-    result = build_daily_plan(
-        DailyPlanRequest(
-            **_daily_plan_source_kwargs(cfg),
-            signal_date="",
-            buy_condition=cfg.buy_condition,
-            sell_condition=cfg.sell_condition,
-            score_expression=cfg.score_expression,
-            top_n=1,
-            entry_offset=cfg.entry_offset,
-            min_hold_days=cfg.min_hold_days,
-            max_hold_days=cfg.max_hold_days,
-            holdings=[],
-        )
-    )
-    return str(result["summary"]["signal_date"])
+    requested = str(signal_date or "").strip()
+    return _latest_available_date(cfg, requested)
 
 
 def _planned_trade_date(cfg: PaperAccountConfig, planned_date: Any, signal_date: str) -> str:
@@ -995,37 +1711,38 @@ class StockPoolDailyPriceProvider:
         self.template_name = cfg.stock_pool_template_name
         self.db_path = _stock_pool_db_path(cfg.stock_pool_db_path)
         self.price_field = price_field
-        init_stock_pool_db(self.db_path)
+        self.template_by_symbol = {
+            str(item["symbol"]).zfill(6): item
+            for item in read_template_symbols(self.username, self.template_name, db_path=self.db_path)
+        }
 
     def quote(self, symbol: str, trade_date: str) -> PriceQuote:
         key = _symbol_key(symbol)
-        with _connect(self.db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT f.*
-                FROM stock_daily_features f
-                JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
-                WHERE s.username=? AND s.template_name=? AND f.symbol=? AND f.trade_date=?
-                """,
-                (self.username, self.template_name, key, str(trade_date)),
-            ).fetchone()
-        if row is None:
-            raise ValueError(f"{symbol} 没有 {trade_date} 的股票池SQLite日线数据")
-        data = dict(row)
+        template_stock = self.template_by_symbol.get(key)
+        if template_stock is None:
+            raise ValueError(f"{symbol} 不在股票池模板中: {self.username}/{self.template_name}")
+        data = market_data_store.read_feature_row(
+            key,
+            str(trade_date),
+            db_path=_market_data_db_path(),
+            legacy_db_path=market_data_store.DISABLE_LEGACY_FALLBACK,
+        )
+        if data is None:
+            raise ValueError(f"{symbol} 没有 {trade_date} 的market data日线数据")
         price_col = "raw_open" if "开盘" in self.price_field else "raw_close"
         price = to_float(data.get(price_col))
         if price is None or price <= 0:
             raise ValueError(f"{symbol} {trade_date} 缺少有效 {price_col}")
         close_price = to_float(data.get("raw_close"))
         return PriceQuote(
-            symbol=_ts_code(str(data.get("ts_code") or key)),
-            name=str(data.get("name") or ""),
+            symbol=_ts_code(str(data.get("ts_code") or template_stock.get("ts_code") or key)),
+            name=str(data.get("name") or template_stock.get("stock_name") or ""),
             trade_date=str(data.get("trade_date") or trade_date),
             price=float(price),
             close_price=close_price,
             can_buy=_truthy(data.get("can_buy_open_t"), True),
             can_sell=_truthy(data.get("can_sell_t"), True),
-            source="股票池SQLite",
+            source="market data SQLite",
         )
 
 
@@ -1296,19 +2013,35 @@ def _today_china_text() -> str:
     return _china_now().strftime("%Y%m%d")
 
 
+def _template_stock_by_symbol(cfg: PaperAccountConfig) -> dict[str, dict[str, Any]]:
+    rows = read_template_symbols(
+        cfg.stock_pool_username,
+        cfg.stock_pool_template_name,
+        db_path=_stock_pool_db_path(cfg.stock_pool_db_path),
+    )
+    return {str(row["symbol"]).zfill(6): row for row in rows}
+
+
+def _template_market_rows(cfg: PaperAccountConfig, start_date: str = "", end_date: str = "") -> list[dict[str, Any]]:
+    stock_by_symbol = _template_stock_by_symbol(cfg)
+    if not stock_by_symbol:
+        return []
+    return market_data_store.read_feature_rows(
+        list(stock_by_symbol),
+        start_date=start_date,
+        end_date=end_date,
+        db_path=_market_data_db_path(),
+        legacy_db_path=market_data_store.DISABLE_LEGACY_FALLBACK,
+    )
+
+
 def _stock_pool_has_trade_date(cfg: PaperAccountConfig, trade_date: str) -> bool:
-    with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
-        row = conn.execute(
-            """
-            SELECT 1
-            FROM stock_daily_features f
-            JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
-            WHERE s.username=? AND s.template_name=? AND f.trade_date=?
-            LIMIT 1
-            """,
-            (cfg.stock_pool_username, cfg.stock_pool_template_name, str(trade_date)),
-        ).fetchone()
-    return row is not None
+    for row in _template_market_rows(cfg, start_date=str(trade_date), end_date=str(trade_date)):
+        raw_close = to_float(row.get("raw_close"))
+        close = to_float(row.get("close"))
+        if raw_close is not None and raw_close > 0 and close is not None and close > 0:
+            return True
+    return False
 
 
 def _realtime_market_note(cfg: PaperAccountConfig, trade_date: str) -> str:
@@ -1423,18 +2156,12 @@ def _refresh_realtime_positions(cfg: PaperAccountConfig, ledger: dict[str, pd.Da
 
 
 def _next_trade_date_from_stock_pool(cfg: PaperAccountConfig, signal_date: str) -> str:
-    with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
-        row = conn.execute(
-            """
-            SELECT MIN(f.trade_date) AS next_trade_date
-            FROM stock_daily_features f
-            JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
-            WHERE s.username=? AND s.template_name=? AND f.trade_date>?
-            """,
-            (cfg.stock_pool_username, cfg.stock_pool_template_name, str(signal_date)),
-        ).fetchone()
-    next_date = str(row["next_trade_date"] or "") if row is not None else ""
-    return next_date or _next_weekday(signal_date)
+    next_dates = [
+        str(row.get("trade_date") or "")
+        for row in _template_market_rows(cfg, start_date=str(signal_date))
+        if str(row.get("trade_date") or "") > str(signal_date)
+    ]
+    return min(next_dates) if next_dates else _next_weekday(signal_date)
 
 
 def _count_trade_days(cfg: PaperAccountConfig, symbol: str, start_date: str, end_date: str) -> int:
@@ -1442,17 +2169,14 @@ def _count_trade_days(cfg: PaperAccountConfig, symbol: str, start_date: str, end
         return 0
     key = _symbol_key(symbol)
     try:
-        with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
-            rows = conn.execute(
-                """
-                SELECT f.trade_date
-                FROM stock_daily_features f
-                WHERE f.symbol=? AND f.trade_date>=? AND f.trade_date<=?
-                ORDER BY f.trade_date
-                """,
-                (key, str(start_date), str(end_date)),
-            ).fetchall()
-        dates = [str(row["trade_date"]) for row in rows]
+        rows = market_data_store.read_feature_rows(
+            [key],
+            start_date=str(start_date),
+            end_date=str(end_date),
+            db_path=_market_data_db_path(),
+            legacy_db_path=market_data_store.DISABLE_LEGACY_FALLBACK,
+        )
+        dates = [str(row.get("trade_date") or "") for row in rows]
         if start_date not in dates or end_date not in dates:
             return 0
         return max(0, dates.index(end_date) - dates.index(start_date))
@@ -1460,20 +2184,19 @@ def _count_trade_days(cfg: PaperAccountConfig, symbol: str, start_date: str, end
         return 0
 
 
-def _latest_available_date(cfg: PaperAccountConfig) -> str:
-    with _connect(_stock_pool_db_path(cfg.stock_pool_db_path)) as conn:
-        row = conn.execute(
-            """
-            SELECT MAX(f.trade_date) AS latest_trade_date
-            FROM stock_daily_features f
-            JOIN stock_pool_template_stocks s ON s.symbol=f.symbol
-            WHERE s.username=? AND s.template_name=?
-            """,
-            (cfg.stock_pool_username, cfg.stock_pool_template_name),
-        ).fetchone()
-    latest = str(row["latest_trade_date"] or "") if row is not None else ""
+def _latest_available_date(cfg: PaperAccountConfig, requested_date: str = "") -> str:
+    rows = _template_market_rows(cfg, end_date=str(requested_date or ""))
+    available_dates = []
+    for row in rows:
+        raw_close = to_float(row.get("raw_close"))
+        close = to_float(row.get("close"))
+        trade_date = str(row.get("trade_date") or "")
+        if trade_date and raw_close is not None and raw_close > 0 and close is not None and close > 0:
+            available_dates.append(trade_date)
+    latest = max(available_dates) if available_dates else ""
     if not latest:
-        raise ValueError(f"股票池模板没有可用日线数据: {cfg.stock_pool_username}/{cfg.stock_pool_template_name}")
+        scope = f"{requested_date} 或之前" if requested_date else "当前"
+        raise ValueError(f"股票池模板在{scope}没有可用日线数据: {cfg.stock_pool_username}/{cfg.stock_pool_template_name}")
     return latest
 
 
@@ -1484,18 +2207,20 @@ def _tail_rows(frame: pd.DataFrame, limit: int = 200) -> list[dict[str, Any]]:
     return tail.where(pd.notna(tail), None).to_dict(orient="records")
 
 
-def _resolve_config_path(config_path: str, account_id: str, config_dir: str) -> str:
-    if config_path:
-        return config_path
-    if account_id:
-        matches = [row for row in list_paper_account_templates(config_dir) if row.get("account_id") == account_id]
-        if not matches:
-            raise FileNotFoundError(f"找不到模拟账户模板: {account_id}")
-        return str(matches[0]["config_path"])
-    templates = list_paper_account_templates(config_dir)
-    if not templates:
-        raise FileNotFoundError("没有找到任何模拟账户模板")
-    return str(templates[0]["config_path"])
+def _resolve_run_config(req: PaperTradingRunRequest) -> PaperAccountConfig:
+    username = _request_username(req)
+    context_db = _paper_context_db_path(req.config_dir, req.config_path)
+    if not _has_paper_account_templates(context_db, username):
+        _legacy_templates_to_sqlite(req.config_dir, username)
+    account_id = _account_id_from_template_selector(
+        config_path=req.config_path,
+        account_id=req.account_id,
+        config_dir=req.config_dir,
+        username=username,
+    )
+    cfg = _read_template_by_account(account_id, username, db_path=context_db)
+    cfg.raw_config["_config_path"] = cfg.account_id
+    return cfg
 
 
 def _ledger_response(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], action: str) -> dict[str, Any]:
@@ -1506,10 +2231,12 @@ def _ledger_response(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], a
     logs = ledger["运行日志"]
     summary: dict[str, Any] = {
         "action": action,
+        "username": cfg.username,
         "account_id": cfg.account_id,
         "account_name": cfg.account_name,
-        "ledger_path": str(cfg.ledger_path),
-        "ledger_exists": cfg.ledger_path.exists(),
+        "ledger_path": _ledger_storage_id(cfg),
+        "ledger_storage": "SQLite",
+        "ledger_exists": _ledger_exists(cfg),
         "stock_pool_username": cfg.stock_pool_username,
         "stock_pool_template_name": cfg.stock_pool_template_name,
         "order_count": len(pending),
@@ -1546,30 +2273,27 @@ def _ledger_response(cfg: PaperAccountConfig, ledger: dict[str, pd.DataFrame], a
         "asset_rows": _tail_rows(assets),
         "log_rows": _tail_rows(logs),
         "diagnostics": {
-            "config_path": str(_normalize_path(cfg.raw_config.get("_config_path", ""))) if cfg.raw_config.get("_config_path") else "",
-            "ledger_path": str(cfg.ledger_path),
-            "log_dir": str(cfg.log_dir),
+            "config_path": cfg.account_id,
+            "ledger_path": _ledger_storage_id(cfg),
+            "ledger_storage": "SQLite",
+            "log_dir": "SQLite运行日志",
             "stock_pool_username": cfg.stock_pool_username,
             "stock_pool_template_name": cfg.stock_pool_template_name,
             "stock_pool_db_path": cfg.stock_pool_db_path,
-            "template_count": len(list_paper_account_templates(DEFAULT_CONFIG_DIR)),
+            "template_count": len(list_paper_account_templates(DEFAULT_CONFIG_DIR, username=cfg.username)),
         },
     }
 
 
 def read_paper_trading_ledger(req: PaperTradingRunRequest) -> dict[str, Any]:
-    config_path = _resolve_config_path(req.config_path, req.account_id, req.config_dir)
-    cfg = load_paper_account_config(config_path)
-    cfg.raw_config["_config_path"] = str(_normalize_path(config_path))
-    ledger = _read_ledger(cfg.ledger_path)
+    cfg = _resolve_run_config(req)
+    ledger = _read_ledger(cfg)
     return _ledger_response(cfg, ledger, "读取账本")
 
 
 def run_paper_trading(req: PaperTradingRunRequest) -> dict[str, Any]:
-    config_path = _resolve_config_path(req.config_path, req.account_id, req.config_dir)
-    cfg = load_paper_account_config(config_path)
-    cfg.raw_config["_config_path"] = str(_normalize_path(config_path))
-    ledger = _read_ledger(cfg.ledger_path)
+    cfg = _resolve_run_config(req)
+    ledger = _read_ledger(cfg)
     ledger["配置快照"] = _config_snapshot(cfg)
     action = req.action
     trade_date = str(req.trade_date or "").strip()
@@ -1591,15 +2315,17 @@ def run_paper_trading(req: PaperTradingRunRequest) -> dict[str, Any]:
     else:
         raise ValueError(f"未知模拟交易动作: {action}")
 
-    _write_ledger(cfg.ledger_path, ledger)
+    _write_ledger(cfg, ledger)
     elapsed = round(time.time() - started, 3)
     summary.update(
         {
+            "username": cfg.username,
             "account_id": cfg.account_id,
             "account_name": cfg.account_name,
             "stock_pool_username": cfg.stock_pool_username,
             "stock_pool_template_name": cfg.stock_pool_template_name,
-            "ledger_path": str(cfg.ledger_path),
+            "ledger_path": _ledger_storage_id(cfg),
+            "ledger_storage": "SQLite",
             "elapsed_seconds": elapsed,
         }
     )
@@ -1611,20 +2337,27 @@ def run_paper_trading(req: PaperTradingRunRequest) -> dict[str, Any]:
         "asset_rows": _tail_rows(ledger["每日资产"]),
         "log_rows": _tail_rows(ledger["运行日志"]),
         "diagnostics": {
-            "config_path": str(_normalize_path(config_path)),
-            "ledger_path": str(cfg.ledger_path),
-            "log_dir": str(cfg.log_dir),
+            "config_path": cfg.account_id,
+            "ledger_path": _ledger_storage_id(cfg),
+            "ledger_storage": "SQLite",
+            "log_dir": "SQLite运行日志",
             "stock_pool_username": cfg.stock_pool_username,
             "stock_pool_template_name": cfg.stock_pool_template_name,
             "stock_pool_db_path": cfg.stock_pool_db_path,
-            "template_count": len(list_paper_account_templates(req.config_dir)),
+            "template_count": len(list_paper_account_templates(req.config_dir, username=cfg.username)),
         },
     }
 
 
-def run_all_paper_accounts(config_dir: str | Path, action: Literal["generate", "execute", "mark", "refresh"], trade_date: str = "") -> list[dict[str, Any]]:
+def run_all_paper_accounts(
+    config_dir: str | Path,
+    action: Literal["generate", "execute", "mark", "refresh"],
+    trade_date: str = "",
+    username: str = DEFAULT_USERNAME,
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    for item in list_paper_account_templates(config_dir):
+    clean_user = _clean_username(username)
+    for item in list_paper_account_templates(config_dir, username=clean_user):
         if item.get("error"):
             results.append({"summary": {"account_id": item.get("account_id"), "error": item["error"]}})
             continue
@@ -1632,10 +2365,11 @@ def run_all_paper_accounts(config_dir: str | Path, action: Literal["generate", "
             results.append(
                 run_paper_trading(
                     PaperTradingRunRequest(
-                        config_path=str(item["config_path"]),
+                        account_id=str(item["account_id"]),
                         action=action,
                         trade_date=trade_date,
                         config_dir=str(config_dir),
+                        username=clean_user,
                     )
                 )
             )

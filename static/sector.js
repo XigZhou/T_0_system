@@ -3,8 +3,7 @@ const state = {
 };
 
 const defaults = {
-  processedDir: "sector_research/data/processed",
-  reportDir: "sector_research/reports",
+  source: "sqlite",
 };
 
 const themeColumns = [
@@ -156,14 +155,15 @@ function renderSummary(summary = {}) {
       `,
     )
     .join("");
-  byId("sectorPathText").textContent = `指标目录：${summary.processed_dir || defaults.processedDir}；报告目录：${summary.report_dir || defaults.reportDir}`;
+  const sourceText = summary.source === "sqlite" ? "SQLite主库" : "旧CSV兼容";
+  byId("sectorPathText").textContent = `数据源：${sourceText}；指标位置：${summary.processed_dir || "market_data.sqlite"}`;
 }
 
 function renderMarketContext(marketContext = {}) {
   const grid = byId("sectorMarketGrid");
   const note = byId("sectorMarketNote");
   const indexes = marketContext.indexes || [];
-  note.textContent = marketContext.note || "读取本地 data_bundle/market_context.csv，不触发行情抓取。";
+  note.textContent = marketContext.note || "读取 SQLite 主库中的大盘环境数据，不触发行情抓取。";
 
   if (marketContext.status !== "ready" || indexes.length === 0) {
     grid.innerHTML = `
@@ -306,12 +306,10 @@ function renderPayload(payload) {
 }
 
 async function loadSectorOverview() {
-  const processedDir = byId("sectorProcessedDir").value.trim() || defaults.processedDir;
-  const reportDir = byId("sectorReportDir").value.trim() || defaults.reportDir;
-  const params = new URLSearchParams({ processed_dir: processedDir, report_dir: reportDir });
+  const params = new URLSearchParams({ source: defaults.source });
   setStatus("正在读取板块研究结果。");
   try {
-    const response = await fetch(`/api/sector/overview?${params.toString()}`);
+    const response = await fetch(`/api/sector/overview?${params.toString()}`, { credentials: "same-origin" });
     const text = await response.text();
     let payload = {};
     try {
@@ -338,8 +336,6 @@ byId("sectorForm").addEventListener("submit", (event) => {
 });
 
 byId("resetSectorBtn").addEventListener("click", () => {
-  byId("sectorProcessedDir").value = defaults.processedDir;
-  byId("sectorReportDir").value = defaults.reportDir;
   loadSectorOverview();
 });
 

@@ -94,6 +94,39 @@ body::before {
   margin-top: 4px;
 }
 
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.user-badge span {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+}
+
+.user-badge strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.tab-note {
+  margin: 8px 4px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
 .workspace {
   display: grid;
   gap: 24px;
@@ -165,7 +198,8 @@ body::before {
 
 .subtle,
 .panel-note,
-.status {
+.status,
+.tab-note {
   color: var(--muted);
   line-height: 1.55;
 }
@@ -562,6 +596,34 @@ button:hover,
 .compact-chart {
   min-height: 210px;
   padding: 14px;
+}
+
+.single-page .kline-panel {
+  padding: 14px 16px 16px;
+  overflow: visible;
+}
+
+.single-page .kline-panel .panel-head {
+  margin-bottom: 10px;
+}
+
+.single-page .single-kline-chart {
+  height: clamp(560px, 68vh, 760px);
+  min-height: 560px;
+  padding: 0;
+  border-radius: 18px;
+  background: #fffdf9;
+}
+
+.single-page .single-kline-chart .empty {
+  min-height: 100%;
+}
+
+@media (max-width: 720px) {
+  .single-page .single-kline-chart {
+    height: 430px;
+    min-height: 430px;
+  }
 }
 
 .chart-box svg {
@@ -1293,6 +1355,168 @@ td {
   margin: 8px 0 0;
 }
 
+.admin-page .admin-template-actions {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-page .admin-template-actions label {
+  min-width: 0;
+  font-size: 0.74rem;
+}
+
+.admin-page .admin-template-actions select {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.admin-page .admin-job-table-wrap {
+  height: min(48vh, 420px);
+}
+
+.admin-page .admin-job-table-wrap table {
+  min-width: 1180px;
+}
+
+.admin-page .admin-job-table-wrap tbody tr {
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .admin-page .admin-template-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-page .admin-toolbar,
+.admin-page .admin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-page .admin-overview-strip {
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+}
+
+.admin-page .admin-core-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.admin-page .admin-core-card .metric-sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.admin-page .admin-stock-data-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr) minmax(220px, 0.8fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.admin-page .admin-stock-data-card {
+  display: grid;
+  gap: 12px;
+  align-content: space-between;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.admin-page .admin-stock-data-card .panel-note {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+}
+
+.admin-page .admin-stock-data-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-page .admin-stock-data-actions button {
+  min-height: 36px;
+  padding: 8px 12px;
+  white-space: normal;
+}
+
+.admin-page .admin-date-grid {
+  gap: 10px;
+}
+
+.admin-page .admin-stock-data-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: end;
+}
+
+.admin-page .admin-stock-data-options input,
+.admin-page .admin-date-grid input {
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.admin-page .admin-universe-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-page .admin-universe-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.admin-page .admin-universe-editor textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.admin-page .admin-universe-table-wrap,
+.admin-page .admin-run-table-wrap {
+  height: min(44vh, 390px);
+}
+
+.admin-page .admin-universe-table-wrap table {
+  min-width: 760px;
+}
+
+.admin-page .admin-run-table-wrap table {
+  min-width: 1180px;
+}
+
+.admin-page .small-action {
+  min-height: 26px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+}
+
+.admin-page .muted-cell {
+  color: var(--muted);
+}
+
+@media (max-width: 960px) {
+  .admin-page .admin-overview-strip,
+  .admin-page .admin-stock-data-grid,
+  .admin-page .admin-universe-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-page .admin-core-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .sector-page {
   --shadow: 0 12px 26px rgba(33, 24, 17, 0.07);
   font-size: 14px;
@@ -1823,4 +2047,90 @@ tr:last-child td {
   .stock-pool-page .stock-pool-editor-grid .check-field {
     grid-column: 1 / -1;
   }
+}
+
+.compact-form .check-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid rgba(28, 26, 23, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.compact-form .check-field input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+
+.auth-page .shell,
+.user-admin-page .shell {
+  max-width: 1080px;
+}
+
+.auth-page .shell {
+  place-items: center;
+  padding: 28px 16px;
+}
+
+.auth-card {
+  max-width: 448px;
+  width: min(100%, 448px);
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.auth-card .panel-head {
+  margin-bottom: 12px;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-family: Georgia,  Songti SC, serif;
+  font-size: 1.55rem;
+  line-height: 1.08;
+}
+
+.auth-form {
+  gap: 12px;
+  margin-top: 0;
+}
+
+.auth-form label {
+  gap: 6px;
+}
+
+.auth-form input {
+  padding: 10px 12px;
+  border-radius: 13px;
+}
+
+.auth-form .status {
+  margin: 0;
+  min-height: 20px;
+}
+
+.auth-actions,
+.user-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.secondary-link,
+.logout-link {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+[hidden] {
+  display: none !important;
 }

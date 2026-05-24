@@ -64,5 +64,11 @@ class ScoreExpressionTest(unittest.TestCase):
         self.assertAlmostEqual(score, 0.5, places=6)
 
 
+    def test_removed_enhancement_fields_are_rejected_in_score(self) -> None:
+        for expr in ("industry_m20", "sector_exposure_score", "rotation_is_favorable_state"):
+            with self.subTest(expr=expr):
+                with self.assertRaises(ScoreExpressionError):
+                    compile_score_expression(expr)
+
 if __name__ == "__main__":
     unittest.main()

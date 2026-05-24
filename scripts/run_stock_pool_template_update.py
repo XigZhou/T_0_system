@@ -14,13 +14,14 @@ from overnight_bt.stock_pool_feature_store import StockPoolFeatureUpdateConfig, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="更新股票池模板涉及股票的共享日线与指标库")
-    parser.add_argument("--source", choices=["active_templates", "template", "symbols", "all"], default="active_templates")
+    parser.add_argument("--source", choices=["active_templates", "template", "symbols", "all", "main_universe"], default="active_templates")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--template-name", default="")
     parser.add_argument("--stock-text", default="")
     parser.add_argument("--start-date", default="20220101")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--db-path", default="")
+    parser.add_argument("--market-db-path", default="", help="主行情 SQLite 路径；生产默认旧模板库会自动同步 data_store/market_data.sqlite")
     parser.add_argument("--log-dir", default="logs/stock_pool_template_update")
     parser.add_argument("--batch-size", type=int, default=0, help="每批处理股票数，0 表示不按批次切分")
     parser.add_argument("--batch-index", type=int, default=0, help="批次序号，从 0 开始；batch-size>0 时生效")
@@ -28,7 +29,7 @@ def main() -> None:
     parser.add_argument("--resume-after-symbol", default="", help="断点续跑：从指定股票代码之后继续")
     parser.add_argument("--retry-attempts", type=int, default=1, help="单只股票失败重试次数，至少 1")
     parser.add_argument("--retry-sleep-seconds", type=float, default=2.0, help="失败重试基础等待秒数，第 N 次按 N 倍等待")
-    parser.add_argument("--include-up-to-date", action="store_true", help="包含已更新到截止日的股票；默认只补缺失")
+    parser.add_argument("--include-up-to-date", action="store_true", help="强制重采已更新到截止日的股票；默认只补缺失")
     parser.add_argument("--max-symbols", type=int, default=0)
     parser.add_argument("--sleep-seconds", type=float, default=0.2)
     parser.add_argument("--force-full-rebuild", action="store_true")
@@ -46,6 +47,7 @@ def main() -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         db_path=Path(args.db_path) if args.db_path else None,
+        market_db_path=Path(args.market_db_path) if args.market_db_path else None,
         log_dir=Path(args.log_dir),
         max_symbols=args.max_symbols,
         sleep_seconds=args.sleep_seconds,

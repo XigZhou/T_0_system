@@ -15,10 +15,15 @@
             <h1>信号摆动组合回测</h1>
           </div>
           <div class="brand-actions">
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
             <p class="subtle">
               T 日生成信号，T+1 开盘买入；截止日按收盘价估值，并保留下一交易日候选。
             </p>
-            <p class="subtle"><a href="/sector">板块研究</a> · <a href="/stock-pools">股票池模板</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a></p>
+            <p class="subtle"><a href="/sector">板块研究</a> · <a href="/stock-pools">股票池模板</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a> · <a href="/admin" data-admin-only>系统管理员</a> · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a></p>
           </div>
         </div>
 
@@ -52,7 +57,7 @@
           <div class="stock-pool-source field-wide">
             <div class="readonly-field">
               <span>当前用户</span>
-              <strong id="backtestPoolUser">admin</strong>
+              <strong id="backtestPoolUser">未登录</strong>
               <small>登录系统接入后自动获取</small>
             </div>
             <label>
@@ -382,6 +387,7 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

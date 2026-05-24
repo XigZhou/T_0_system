@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>登录 T_0 系统</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="auth-page">
+    <div class="shell">
+      <main class="panel compact-panel auth-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">用户登录</p>
+            <h1>进入回测系统</h1>
+          </div>
+        </div>
+        <form id="loginForm" class="form-grid auth-form">
+          <label>
+            <span>用户名</span>
+            <input id="loginUsername" type="text" autocomplete="username" value="admin" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" />
+          </label>
+          <div class="auth-actions">
+            <button type="submit">登录</button>
+            <a class="secondary-link" href="/register">注册普通用户</a>
+          </div>
+          <p id="loginStatus" class="status">请输入账号密码。</p>
+        </form>
+      </main>
+    </div>
+    <script>
+      const loginForm = document.getElementById("loginForm");
+      const loginStatus = document.getElementById("loginStatus");
+      function setLoginStatus(text, error = false) {
+        loginStatus.textContent = text;
+        loginStatus.style.color = error ? "#8a2f13" : "";
+      }
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setLoginStatus("正在登录...");
+        try {
+          const response = await fetch("/api/auth/login", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: document.getElementById("loginUsername").value.trim(),
+              password: document.getElementById("loginPassword").value,
+            }),
+          });
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || `登录失败：${response.status}`);
+          }
+          window.location.href = "/";
+        } catch (error) {
+          setLoginStatus(error.message, true);
+        }
+      });
+    </script>
+  </body>
+</html>

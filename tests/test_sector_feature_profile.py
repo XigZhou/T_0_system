@@ -73,6 +73,7 @@ class SectorFeatureProfileTest(unittest.TestCase):
 
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     data_profile="sector",
                     start_date="20240102",
@@ -95,6 +96,7 @@ class SectorFeatureProfileTest(unittest.TestCase):
 
             plan = build_daily_plan(
                 DailyPlanRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     data_profile="sector",
                     signal_date="20240102",
@@ -128,6 +130,7 @@ class SectorFeatureProfileTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "sector_feature_manifest"):
                 run_portfolio_backtest(
                     BacktestRequest(
+                        data_source="csv",
                         processed_dir=str(processed_dir),
                         data_profile="sector",
                         start_date="20240102",

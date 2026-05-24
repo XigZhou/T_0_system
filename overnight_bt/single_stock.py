@@ -7,9 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from .backtest import load_processed_folder
 from .expressions import evaluate_conditions, max_required_offset, parse_condition_expr
 from .models import SingleStockBacktestRequest
+from .market_data_store import DISABLE_LEGACY_FALLBACK, read_feature_rows
+from .sqlite_only_guard import assert_sqlite_only_allowed, is_sqlite_only_enabled
+from . import stock_pool_templates
+from .stock_pool_templates import DEFAULT_USERNAME, _connect_readonly, read_template_symbols
 
 
 REQUIRED_BY_TIMING = {
@@ -96,7 +99,8 @@ def _symbol_key(symbol: str) -> str:
     return text
 
 
-def _load_single_stock_processed(processed_dir: str, symbol_query: str) -> tuple[pd.DataFrame, str, str]:
+def _load_single_stock_processed(processed_dir: str, symbol_query: str) -> tuple[pd.DataFrame, str, str, str]:
+    assert_sqlite_only_allowed("single-stock processed CSV folder", str(processed_dir))
     query = str(symbol_query or "").strip()
     if not query:
         raise ValueError("股票代码或名称不能为空")
@@ -127,10 +131,213 @@ def _load_single_stock_processed(processed_dir: str, symbol_query: str) -> tuple
     work = work.dropna(subset=["trade_date"]).sort_values("trade_date").reset_index(drop=True)
     if work.empty:
         raise ValueError(f"{item.symbol} {item.name} 没有可用交易日期")
-    return work, item.symbol, item.name
+    return work, item.symbol, item.name, "前复权价格"
 
 
-def load_single_stock_excel(excel_path: str, execution_timing: str) -> tuple[pd.DataFrame, str, str]:
+_SQLITE_TEXT_COLUMNS = {
+    "symbol",
+    "ts_code",
+    "name",
+    "trade_date",
+    "trade_date_text",
+    "industry",
+    "market",
+    "board",
+    "created_at",
+    "updated_at",
+    "resolved_name",
+}
+_SQLITE_BOOLEAN_COLUMNS = {
+    "is_suspended_t",
+    "is_suspended_t1",
+    "can_buy_t",
+    "can_buy_open_t",
+    "can_buy_open_t1",
+    "can_sell_t",
+    "can_sell_t1",
+}
+_TRUE_VALUES = {"1", "true", "yes", "y"}
+_FALSE_VALUES = {"0", "false", "no", "n"}
+
+
+def _bool_value(value, default: bool = True) -> bool:
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except TypeError:
+        pass
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return default
+        if text in _TRUE_VALUES:
+            return True
+        if text in _FALSE_VALUES:
+            return False
+    return bool(value)
+
+
+def _first_numeric_series(work: pd.DataFrame, columns: list[str]) -> pd.Series:
+    for column in columns:
+        if column in work.columns:
+            return pd.to_numeric(work[column], errors="coerce")
+    return pd.Series([pd.NA] * len(work), index=work.index, dtype="Float64")
+
+
+def _ensure_price_column(work: pd.DataFrame, column: str, fallbacks: list[str]) -> None:
+    fallback = _first_numeric_series(work, fallbacks)
+    if column not in work.columns:
+        work[column] = fallback
+    else:
+        work[column] = pd.to_numeric(work[column], errors="coerce").fillna(fallback)
+
+
+def _prepare_single_stock_frame(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    if "trade_date" not in df.columns:
+        raise ValueError(f"{source_name} missing trade_date")
+    work = df.copy()
+    if "resolved_name" in work.columns:
+        resolved = work["resolved_name"].fillna("").astype(str).str.strip()
+        current = work["name"].fillna("").astype(str).str.strip() if "name" in work.columns else pd.Series([""] * len(work), index=work.index)
+        work["name"] = current.where(current != "", resolved)
+        work = work.drop(columns=["resolved_name"])
+    work["trade_date_text"] = work["trade_date"].astype(str).str.strip()
+    work["trade_date"] = pd.to_datetime(work["trade_date_text"], format="%Y%m%d", errors="coerce")
+    work = work.dropna(subset=["trade_date"]).sort_values("trade_date").reset_index(drop=True)
+    if work.empty:
+        raise ValueError(f"{source_name} has no valid trade_date rows")
+
+    for column in list(work.columns):
+        if column in _SQLITE_BOOLEAN_COLUMNS:
+            work[column] = work[column].map(lambda value: _bool_value(value, default=False))
+        elif column not in _SQLITE_TEXT_COLUMNS:
+            work[column] = pd.to_numeric(work[column], errors="coerce")
+
+    _ensure_price_column(work, "close", ["qfq_close", "raw_close"])
+    _ensure_price_column(work, "open", ["qfq_open", "raw_open", "close"])
+    _ensure_price_column(work, "high", ["qfq_high", "raw_high", "close"])
+    _ensure_price_column(work, "low", ["qfq_low", "raw_low", "close"])
+    if "vol" not in work.columns:
+        work["vol"] = 0.0
+    else:
+        work["vol"] = pd.to_numeric(work["vol"], errors="coerce").fillna(0.0)
+    return work
+
+
+def _stock_pool_scope(username: str, template_name: str) -> tuple[str, str]:
+    clean_username = str(username or DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
+    clean_template = str(template_name or "").strip()
+    return clean_username, clean_template
+
+
+def _sqlite_candidate_rows(conn, query: str, username: str, template_name: str) -> list[dict]:
+    scope_join = ""
+    scope_params: list[str] = []
+    name_expr = "COALESCE(NULLIF(MAX(f.name), ''), NULLIF(MAX(b.name), ''), '') AS name"
+    name_fields = ["f.name", "b.name"]
+    if template_name:
+        scope_join = "JOIN stock_pool_template_stocks s ON s.symbol=f.symbol AND s.username=? AND s.template_name=?"
+        scope_params = [username, template_name]
+        name_expr = "COALESCE(NULLIF(MAX(f.name), ''), NULLIF(MAX(s.stock_name), ''), NULLIF(MAX(b.name), ''), '') AS name"
+        name_fields = ["f.name", "s.stock_name", "b.name"]
+
+    def run(where_sql: str, params: list[str]) -> list[dict]:
+        rows = conn.execute(
+            f"""
+            SELECT f.symbol, {name_expr}
+            FROM stock_daily_features f
+            {scope_join}
+            LEFT JOIN stock_basic b ON b.symbol=f.symbol
+            WHERE {where_sql}
+            GROUP BY f.symbol
+            ORDER BY f.symbol
+            """,
+            [*scope_params, *params],
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    query_key = _symbol_key(query)
+    if query_key.isdigit():
+        exact_symbol = run("f.symbol=?", [query_key.zfill(6)])
+        if exact_symbol:
+            return exact_symbol
+
+    exact_where = " OR ".join(f"{field}=?" for field in name_fields)
+    exact_name = run(exact_where, [query] * len(name_fields))
+    if exact_name:
+        return exact_name
+
+    like = f"%{query}%"
+    fuzzy_where = " OR ".join(f"{field} LIKE ?" for field in name_fields)
+    return run(fuzzy_where, [like] * len(name_fields))
+
+
+
+def _template_candidate_rows(stocks: list[dict], query: str) -> list[dict]:
+    query_text = str(query or "").strip()
+    query_key = _symbol_key(query_text)
+
+    def as_row(stock: dict) -> dict:
+        return {"symbol": str(stock.get("symbol") or "").strip().zfill(6), "name": str(stock.get("stock_name") or "").strip()}
+
+    if query_key.isdigit():
+        exact_symbol = [as_row(stock) for stock in stocks if _symbol_key(str(stock.get("symbol") or "")) == query_key.zfill(6)]
+        if exact_symbol:
+            return exact_symbol
+
+    exact_name = [as_row(stock) for stock in stocks if str(stock.get("stock_name") or "").strip() == query_text]
+    if exact_name:
+        return exact_name
+
+    return [as_row(stock) for stock in stocks if query_text and query_text in str(stock.get("stock_name") or "").strip()]
+
+def _load_single_stock_sqlite(
+    symbol_query: str,
+    db_path: str | Path | None,
+    username: str = DEFAULT_USERNAME,
+    template_name: str = "",
+) -> tuple[pd.DataFrame, str, str, str]:
+    query = str(symbol_query or "").strip()
+    if not query:
+        raise ValueError("stock code or name is required")
+    clean_username, clean_template = _stock_pool_scope(username, template_name)
+    resolved_db_path = db_path or stock_pool_templates.DEFAULT_DB_PATH
+
+    if clean_template:
+        stocks = read_template_symbols(clean_username, clean_template, db_path=resolved_db_path)
+        matches = _template_candidate_rows(stocks, query)
+    else:
+        with _connect_readonly(resolved_db_path) as conn:
+            matches = _sqlite_candidate_rows(conn, query, clean_username, clean_template)
+
+    if not matches:
+        scope = f"template {clean_username}/{clean_template}" if clean_template else "stock pool SQLite"
+        raise ValueError(f"{scope} does not contain stock: {query}")
+    if len(matches) > 1:
+        names = ", ".join(f"{row['symbol']} {row.get('name') or ''}".strip() for row in matches[:8])
+        raise ValueError(f"multiple stocks matched; use a more specific code or name: {names}")
+
+    symbol = str(matches[0]["symbol"]).strip().zfill(6)
+    legacy_db_path = DISABLE_LEGACY_FALLBACK if is_sqlite_only_enabled() else resolved_db_path
+    rows = read_feature_rows([symbol], legacy_db_path=legacy_db_path)
+    if not rows:
+        raise ValueError(f"stock pool SQLite has no daily rows for {symbol}")
+    frame = pd.DataFrame(rows)
+    template_name_value = str(matches[0].get("name") or "").strip()
+    if template_name_value:
+        if "name" not in frame.columns:
+            frame["name"] = template_name_value
+        else:
+            frame["name"] = frame["name"].fillna("").replace("", template_name_value)
+    work = _prepare_single_stock_frame(frame, f"{symbol}.sqlite")
+    stock_name = str(work.iloc[0].get("name") or template_name_value).strip()
+    return work, symbol, stock_name, "前复权价格"
+
+
+def load_single_stock_excel(excel_path: str, execution_timing: str) -> tuple[pd.DataFrame, str, str, str]:
+    assert_sqlite_only_allowed("single-stock Excel file", str(excel_path))
     path = _resolve_excel_path(excel_path)
 
     engine = _pick_excel_engine(path)
@@ -210,15 +417,21 @@ def load_single_stock_excel(excel_path: str, execution_timing: str) -> tuple[pd.
     stock_code = stem_parts[0] if stem_parts else path.stem
     stock_name = stem_parts[1] if len(stem_parts) > 1 else ""
     work["trade_date_text"] = work["trade_date"].dt.strftime("%Y%m%d")
-    return work, stock_code, stock_name
+    return work, stock_code, stock_name, "除权价格"
 
 
-def load_single_stock_data(req: SingleStockBacktestRequest) -> tuple[pd.DataFrame, str, str]:
-    if str(req.processed_dir or "").strip() and str(req.symbol or "").strip():
-        return _load_single_stock_processed(req.processed_dir, req.symbol)
-    if str(req.excel_path or "").strip():
-        return load_single_stock_excel(req.excel_path, req.execution_timing)
-    raise ValueError("请填写处理后数据目录和股票代码；如使用旧模式，则填写 Excel 路径")
+def load_single_stock_data(req: SingleStockBacktestRequest) -> tuple[pd.DataFrame, str, str, str]:
+    data_source = str(getattr(req, "data_source", "stock_pool") or "stock_pool")
+    if data_source != "stock_pool":
+        raise RuntimeError("legacy single-stock CSV/Excel input has been removed; use stock pool SQLite data instead")
+    if str(req.symbol or "").strip():
+        return _load_single_stock_sqlite(
+            req.symbol,
+            getattr(req, "stock_pool_db_path", "") or None,
+            username=getattr(req, "stock_pool_username", DEFAULT_USERNAME),
+            template_name=getattr(req, "stock_pool_template_name", ""),
+        )
+    raise ValueError("stock code is required; default source is stock pool SQLite")
 
 
 def _apply_date_range(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
@@ -264,6 +477,13 @@ def _row_price(row: dict, raw_key: str, fallback_key: str) -> float | None:
     return float(raw)
 
 
+def _row_float(row: dict, key: str) -> float | None:
+    value = row.get(key)
+    if pd.isna(value):
+        return None
+    return float(value)
+
+
 def _build_eval_row(df: pd.DataFrame, idx: int, max_offset: int) -> dict:
     eval_row = df.iloc[idx].to_dict()
     for lag in range(1, max_offset + 1):
@@ -290,18 +510,53 @@ def _metric_definitions() -> list[dict]:
     ]
 
 
+def _strict_execution_block_reason(row: dict, action: str, timing: str, strict_execution: bool) -> str:
+    if not strict_execution:
+        return ""
+    if action == "BUY":
+        flag = "can_buy_t" if timing == "same_day_close" else "can_buy_open_t"
+        if not _bool_value(row.get(flag), default=True):
+            return "strict execution blocked buy at open"
+    if action == "SELL" and not _bool_value(row.get("can_sell_t"), default=True):
+        return "strict execution blocked sell at open"
+    return ""
+
+
+def _blocked_trade_row(order: dict, row: dict, trade_date_text: str, reason: str, cash: float, position: int) -> dict:
+    action = str(order.get("action") or "")
+    close_price = _row_price(row, "raw_close", "close") or 0.0
+    market_value = close_price * position
+    return {
+        "signal_date": order.get("signal_date", trade_date_text),
+        "trade_date": trade_date_text,
+        "action": f"{action}_BLOCKED",
+        "price": None,
+        "shares": int(position if action == "SELL" else 0),
+        "gross_amount": None,
+        "fees": None,
+        "net_amount": None,
+        "cash_after": round(cash, 2),
+        "position_after": int(position),
+        "position_market_value_after": round(market_value, 2),
+        "equity_after": round(cash + market_value, 2),
+        "pnl_realized": None,
+        "reason": reason,
+    }
+
+
 def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
-    df, stock_code, stock_name = load_single_stock_data(req)
+    df, stock_code, stock_name, chart_price_basis = load_single_stock_data(req)
     df = _apply_date_range(df, req.start_date, req.end_date)
 
     buy_rules = parse_condition_expr(req.buy_condition)
-    sell_rules = parse_condition_expr(req.sell_condition)
+    sell_rules = parse_condition_expr(req.sell_condition) if str(req.sell_condition or "").strip() else []
     max_offset = max(max_required_offset(buy_rules), max_required_offset(sell_rules))
 
     cash = float(req.initial_cash)
     position = 0
     avg_cost_per_share = 0.0
     last_buy_exec_idx: int | None = None
+    max_hold_exit_idx: int | None = None
     pending_order: dict | None = None
 
     trades: list[dict] = []
@@ -313,7 +568,111 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
     loss_count = 0
     buy_streak = 0
     sell_streak = 0
+    blocked_buy_count = 0
+    blocked_sell_count = 0
     equity_curve: list[float] = []
+
+    def process_order(order: dict, current_row: dict, current_date: str) -> tuple[str, str]:
+        nonlocal cash, position, avg_cost_per_share, last_buy_exec_idx, max_hold_exit_idx
+        nonlocal realized_pnl_total, gross_profit_total, gross_loss_total, win_count, loss_count
+        nonlocal blocked_buy_count, blocked_sell_count
+
+        action = str(order["action"])
+        block_reason = _strict_execution_block_reason(current_row, action, req.execution_timing, bool(req.strict_execution))
+        if block_reason:
+            if action == "BUY":
+                blocked_buy_count += 1
+            else:
+                blocked_sell_count += 1
+            trades.append(_blocked_trade_row(order, current_row, current_date, block_reason, cash, position))
+            return f"{action}_BLOCKED", block_reason
+
+        price_timing = str(order.get("price_timing") or req.execution_timing)
+        if price_timing in {"next_day_open", "current_open"}:
+            exec_price = _row_price(current_row, "raw_open", "open")
+        elif price_timing == "same_day_close":
+            exec_price = _row_price(current_row, "raw_close", "close")
+        else:
+            raw_order_price = order.get("price")
+            exec_price = None if raw_order_price is None or pd.isna(raw_order_price) else float(raw_order_price)
+        if exec_price is None:
+            missing_reason = f"{price_timing} price is NaN"
+            if action == "BUY":
+                blocked_buy_count += 1
+            else:
+                blocked_sell_count += 1
+            trades.append(_blocked_trade_row(order, current_row, current_date, missing_reason, cash, position))
+            return f"{action}_BLOCKED", missing_reason
+
+        current_close = _row_price(current_row, "raw_close", "close") or exec_price
+        if action == "BUY":
+            shares = int(order["shares"])
+            gross_amount = exec_price * shares
+            fees = float(order["fees"])
+            net_amount = gross_amount + fees
+            cash -= net_amount
+            position = shares
+            avg_cost_per_share = net_amount / shares if shares else 0.0
+            last_buy_exec_idx = idx
+            max_hold_exit_idx = idx + int(req.max_hold_days) if int(req.max_hold_days or 0) > 0 else None
+            position_market_value_after = current_close * position
+            equity_after = cash + position_market_value_after
+            trades.append(
+                {
+                    "signal_date": order["signal_date"],
+                    "trade_date": current_date,
+                    "action": "BUY",
+                    "price": round(exec_price, 4),
+                    "shares": int(shares),
+                    "gross_amount": round(gross_amount, 2),
+                    "fees": round(fees, 2),
+                    "net_amount": round(net_amount, 2),
+                    "cash_after": round(cash, 2),
+                    "position_after": int(position),
+                    "position_market_value_after": round(position_market_value_after, 2),
+                    "equity_after": round(equity_after, 2),
+                    "pnl_realized": 0.0,
+                    "reason": order["reason"],
+                }
+            )
+            return "BUY", order["reason"]
+
+        shares = int(position)
+        gross_amount = exec_price * shares
+        fees = gross_amount * (req.sell_fee_rate + req.stamp_tax_sell)
+        net_amount = gross_amount - fees
+        realized = net_amount - (avg_cost_per_share * shares)
+        cash += net_amount
+        position = 0
+        avg_cost_per_share = 0.0
+        max_hold_exit_idx = None
+        if realized > 0:
+            win_count += 1
+            gross_profit_total += realized
+        elif realized < 0:
+            loss_count += 1
+            gross_loss_total += abs(realized)
+        realized_pnl_total += realized
+        equity_after = cash
+        trades.append(
+            {
+                "signal_date": order["signal_date"],
+                "trade_date": current_date,
+                "action": "SELL",
+                "price": round(exec_price, 4),
+                "shares": int(shares),
+                "gross_amount": round(gross_amount, 2),
+                "fees": round(fees, 2),
+                "net_amount": round(net_amount, 2),
+                "cash_after": round(cash, 2),
+                "position_after": 0,
+                "position_market_value_after": 0.0,
+                "equity_after": round(equity_after, 2),
+                "pnl_realized": round(realized, 2),
+                "reason": order["reason"],
+            }
+        )
+        return "SELL", order["reason"]
 
     for idx in range(len(df)):
         row = df.iloc[idx].to_dict()
@@ -321,83 +680,41 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
         executed_action = ""
         executed_reason = ""
 
-        if pending_order and pending_order["exec_idx"] == idx:
-            exec_price = pending_order["price"]
-            current_close = _row_price(row, "raw_close", "close") or exec_price
-            if pending_order["action"] == "BUY":
-                shares = pending_order["shares"]
-                gross_amount = exec_price * shares
-                fees = pending_order["fees"]
-                net_amount = gross_amount + fees
-                cash -= net_amount
-                position = shares
-                avg_cost_per_share = net_amount / shares if shares else 0.0
-                position_market_value_after = current_close * position
-                equity_after = cash + position_market_value_after
-                trades.append(
-                    {
-                        "signal_date": pending_order["signal_date"],
-                        "trade_date": trade_date_text,
-                        "action": "BUY",
-                        "price": round(exec_price, 4),
-                        "shares": int(shares),
-                        "gross_amount": round(gross_amount, 2),
-                        "fees": round(fees, 2),
-                        "net_amount": round(net_amount, 2),
-                        "cash_after": round(cash, 2),
-                        "position_after": int(position),
-                        "position_market_value_after": round(position_market_value_after, 2),
-                        "equity_after": round(equity_after, 2),
-                        "pnl_realized": 0.0,
-                        "reason": pending_order["reason"],
-                    }
-                )
-                last_buy_exec_idx = idx
-                executed_action = "BUY"
-                executed_reason = pending_order["reason"]
-            else:
-                shares = position
-                gross_amount = exec_price * shares
-                fees = gross_amount * (req.sell_fee_rate + req.stamp_tax_sell)
-                net_amount = gross_amount - fees
-                realized = net_amount - (avg_cost_per_share * shares)
-                cash += net_amount
-                position = 0
-                avg_cost_per_share = 0.0
-                if realized > 0:
-                    win_count += 1
-                    gross_profit_total += realized
-                elif realized < 0:
-                    loss_count += 1
-                    gross_loss_total += abs(realized)
-                realized_pnl_total += realized
-                position_market_value_after = 0.0
-                equity_after = cash
-                trades.append(
-                    {
-                        "signal_date": pending_order["signal_date"],
-                        "trade_date": trade_date_text,
-                        "action": "SELL",
-                        "price": round(exec_price, 4),
-                        "shares": int(shares),
-                        "gross_amount": round(gross_amount, 2),
-                        "fees": round(fees, 2),
-                        "net_amount": round(net_amount, 2),
-                        "cash_after": round(cash, 2),
-                        "position_after": 0,
-                        "position_market_value_after": 0.0,
-                        "equity_after": round(equity_after, 2),
-                        "pnl_realized": round(realized, 2),
-                        "reason": pending_order["reason"],
-                    }
-                )
-                executed_action = "SELL"
-                executed_reason = pending_order["reason"]
+        if pending_order and pending_order["exec_idx"] <= idx:
+            current_order = pending_order
+            executed_action, executed_reason = process_order(current_order, row, trade_date_text)
             pending_order = None
+            if executed_action == "SELL_BLOCKED" and idx + 1 < len(df):
+                pending_order = {
+                    **current_order,
+                    "exec_idx": idx + 1,
+                    "reason": f"{current_order.get('reason', '')}; retry after blocked sell".strip("; "),
+                }
+
+        if pending_order is None and position > 0 and max_hold_exit_idx is not None and idx >= max_hold_exit_idx:
+            exec_price = _row_price(row, "raw_open", "open")
+            max_order = {
+                "action": "SELL",
+                "signal_date": trade_date_text,
+                "exec_idx": idx,
+                "price": float(exec_price) if exec_price is not None else 0.0,
+                "price_timing": "current_open",
+                "reason": f"max hold reached ({req.max_hold_days}) via current_open",
+            }
+            if exec_price is None:
+                blocked_sell_count += 1
+                executed_action = "SELL_BLOCKED"
+                executed_reason = "max hold sell but current open is NaN"
+                trades.append(_blocked_trade_row(max_order, row, trade_date_text, executed_reason, cash, position))
+            else:
+                executed_action, executed_reason = process_order(max_order, row, trade_date_text)
 
         eval_row = _build_eval_row(df, idx, max_offset)
         buy_ok, buy_reason = evaluate_conditions(eval_row, buy_rules)
-        sell_ok, sell_reason = evaluate_conditions(eval_row, sell_rules)
+        if sell_rules:
+            sell_ok, sell_reason = evaluate_conditions(eval_row, sell_rules)
+        else:
+            sell_ok, sell_reason = False, "sell condition disabled"
 
         buy_streak = buy_streak + 1 if buy_ok else 0
         sell_streak = sell_streak + 1 if sell_ok else 0
@@ -407,7 +724,8 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
         signal_reason = "no signal"
 
         if pending_order is None:
-            if position > 0 and sell_streak >= req.sell_confirm_days:
+            sell_signal_hit = bool(sell_rules) and position > 0 and sell_streak >= req.sell_confirm_days
+            if sell_signal_hit:
                 exec_idx, exec_price, px_src = _execution_point(df, idx, req.execution_timing)
                 if exec_idx is not None and exec_price is not None:
                     pending_order = {
@@ -415,13 +733,22 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
                         "signal_date": trade_date_text,
                         "exec_idx": exec_idx,
                         "price": float(exec_price),
+                        "price_timing": px_src,
                         "reason": f"sell streak reached ({sell_streak}) via {px_src}",
                     }
                     scheduled_action = "SELL"
                     scheduled_trade_date = str(df.iloc[exec_idx].get("trade_date_text", trade_date_text))
                     signal_reason = sell_reason
-                    if req.execution_timing == "same_day_close":
-                        continue
+                    if pending_order["exec_idx"] == idx:
+                        current_order = pending_order
+                        executed_action, executed_reason = process_order(current_order, row, trade_date_text)
+                        pending_order = None
+                        if executed_action == "SELL_BLOCKED" and idx + 1 < len(df):
+                            pending_order = {
+                                **current_order,
+                                "exec_idx": idx + 1,
+                                "reason": f"{current_order.get('reason', '')}; retry after blocked sell".strip("; "),
+                            }
                 else:
                     signal_reason = f"sell signal but cannot execute: {px_src}"
             elif position == 0 and buy_streak >= req.buy_confirm_days:
@@ -442,6 +769,7 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
                                 "signal_date": trade_date_text,
                                 "exec_idx": exec_idx,
                                 "price": float(exec_price),
+                                "price_timing": px_src,
                                 "shares": int(shares),
                                 "fees": float(fees),
                                 "reason": f"buy streak reached ({buy_streak}) via {px_src}",
@@ -449,8 +777,9 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
                             scheduled_action = "BUY"
                             scheduled_trade_date = str(df.iloc[exec_idx].get("trade_date_text", trade_date_text))
                             signal_reason = buy_reason
-                            if req.execution_timing == "same_day_close":
-                                continue
+                            if pending_order["exec_idx"] == idx:
+                                executed_action, executed_reason = process_order(pending_order, row, trade_date_text)
+                                pending_order = None
                         else:
                             signal_reason = "insufficient cash for configured trade budget"
                     else:
@@ -466,11 +795,17 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
         daily_rows.append(
             {
                 "trade_date": trade_date_text,
-                "open": _row_price(row, "raw_open", "open"),
-                "high": _row_price(row, "raw_high", "high"),
-                "low": _row_price(row, "raw_low", "low"),
-                "close": _row_price(row, "raw_close", "close"),
+                "open": _row_price(row, "qfq_open", "open"),
+                "high": _row_price(row, "qfq_high", "high"),
+                "low": _row_price(row, "qfq_low", "low"),
+                "close": _row_price(row, "qfq_close", "close"),
                 "vol": None if pd.isna(row.get("vol")) else float(row.get("vol")),
+                "ma5": _row_float(row, "ma5"),
+                "ma10": _row_float(row, "ma10"),
+                "ma20": _row_float(row, "ma20"),
+                "m5": _row_float(row, "m5"),
+                "m10": _row_float(row, "m10"),
+                "m20": _row_float(row, "m20"),
                 "buy_signal": bool(buy_ok),
                 "sell_signal": bool(sell_ok),
                 "buy_streak": int(buy_streak),
@@ -525,6 +860,7 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
     if gross_profit_total > 0 and gross_loss_total > 0:
         profit_factor = gross_profit_total / gross_loss_total
 
+    executed_trades = [trade for trade in trades if trade["action"] in {"BUY", "SELL"}]
     sell_trades = [trade for trade in trades if trade["action"] == "SELL"]
     summary = {
         "initial_cash": round(req.initial_cash, 2),
@@ -536,9 +872,11 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
         "realized_pnl": round(realized_pnl_total, 2),
         "unrealized_pnl": round(unrealized_pnl, 2),
         "total_return": round(ending_equity / req.initial_cash - 1.0, 4),
-        "trade_count": len(trades),
+        "trade_count": len(executed_trades),
         "buy_count": len([trade for trade in trades if trade["action"] == "BUY"]),
         "sell_count": len(sell_trades),
+        "blocked_buy_count": blocked_buy_count,
+        "blocked_sell_count": blocked_sell_count,
         "win_rate": round(win_count / len(sell_trades), 4) if sell_trades else 0.0,
         "loss_count": loss_count,
         "sharpe_ratio": round(sharpe_ratio, 4),
@@ -550,6 +888,7 @@ def run_single_stock_backtest(req: SingleStockBacktestRequest) -> dict:
     return {
         "stock_code": stock_code,
         "stock_name": stock_name,
+        "chart_price_basis": chart_price_basis,
         "summary": summary,
         "metric_definitions": _metric_definitions(),
         "trade_rows": trades,

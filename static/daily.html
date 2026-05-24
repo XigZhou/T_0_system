@@ -15,10 +15,15 @@
             <h1>每日收盘选股</h1>
           </div>
           <div class="brand-actions">
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
             <p class="subtle">
               收盘后用当天数据筛选明日候选买入股票，并根据当前持仓提示明日需要卖出的股票。
             </p>
-            <p class="subtle"><a href="/">返回组合回测</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a></p>
+            <p class="subtle"><a href="/">返回组合回测</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a> · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a></p>
           </div>
         </div>
 
@@ -35,7 +40,7 @@
           <div class="stock-pool-source field-wide">
             <div class="readonly-field">
               <span>当前用户</span>
-              <strong id="dailyPoolUser">admin</strong>
+              <strong id="dailyPoolUser">未登录</strong>
               <small>登录系统接入后自动获取</small>
             </div>
             <label>
@@ -180,6 +185,7 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/daily.js"></script>
   </body>
 </html>

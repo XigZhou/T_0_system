@@ -9,6 +9,47 @@ from typing import Literal
 ExitMode = Literal["fixed", "sell_condition_with_fallback", "sell_condition_only"]
 
 
+class AuthUser(BaseModel):
+    user_id: str
+    username: str
+    display_name: str = ""
+    role: Literal["admin", "user"] = "user"
+    is_admin: bool = False
+    is_active: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+    last_login_at: str = ""
+    password_updated_at: str = ""
+
+
+class AuthMeResponse(BaseModel):
+    authenticated: bool = False
+    user: AuthUser | None = None
+
+
+class AuthLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class AuthRegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=32)
+    password: str = Field(..., min_length=8)
+    display_name: str = ""
+
+
+class UserListResponse(BaseModel):
+    users: list[AuthUser]
+
+
+class UserStatusUpdateRequest(BaseModel):
+    is_active: bool
+
+
+class UserPasswordResetRequest(BaseModel):
+    new_password: str = Field(..., min_length=8)
+
+
 class _ExitModeMixin(BaseModel):
     exit_mode: ExitMode = Field(
         "sell_condition_with_fallback",
@@ -33,12 +74,14 @@ class _ExitModeMixin(BaseModel):
 
 
 class BacktestRequest(_ExitModeMixin):
-    data_source: Literal["csv", "stock_pool"] = Field("csv", description="csv=读取处理后CSV目录；stock_pool=读取股票池模板SQLite")
-    processed_dir: str = Field("", description="Directory containing per-stock processed CSV files; csv mode only")
-    stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
+    data_source: Literal["stock_pool"] = Field("stock_pool", description="????????? SQLite")
+    processed_dir: str = Field("", description="??????SQLite-only ????? CSV")
+    stock_pool_username: str = Field("admin", description="股票池模板所属用户；由当前登录用户在 API 边界自动填充")
     stock_pool_template_name: str = Field("", description="股票池模板名称；stock_pool mode required")
-    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；为空时使用默认 data_store/stock_pool_templates.sqlite")
-    data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
+    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；前端不展示，默认使用 data_store/stock_pool_templates.sqlite")
+    stock_pool_market_db_path: str = Field("", description="行情指标SQLite路径；为空时使用 data_store/market_data.sqlite")
+    stock_pool_feature_legacy_fallback: bool = Field(False, description="是否允许从旧模板特征表兼容读取；SQLite-only模式固定关闭")
+    data_profile: Literal["auto", "base"] = Field("base", description="????????")
     start_date: str = Field("", description="Backtest start date YYYYMMDD")
     end_date: str = Field("", description="Backtest end date YYYYMMDD")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
@@ -76,12 +119,14 @@ class BacktestResponse(BaseModel):
 
 
 class SignalQualityRequest(_ExitModeMixin):
-    data_source: Literal["csv", "stock_pool"] = Field("csv", description="csv=读取处理后CSV目录；stock_pool=读取股票池模板SQLite")
-    processed_dir: str = Field("", description="Directory containing per-stock processed CSV files; csv mode only")
-    stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
+    data_source: Literal["stock_pool"] = Field("stock_pool", description="????????? SQLite")
+    processed_dir: str = Field("", description="??????SQLite-only ????? CSV")
+    stock_pool_username: str = Field("admin", description="股票池模板所属用户；由当前登录用户在 API 边界自动填充")
     stock_pool_template_name: str = Field("", description="股票池模板名称；stock_pool mode required")
-    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；为空时使用默认 data_store/stock_pool_templates.sqlite")
-    data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
+    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；前端不展示，默认使用 data_store/stock_pool_templates.sqlite")
+    stock_pool_market_db_path: str = Field("", description="行情指标SQLite路径；为空时使用 data_store/market_data.sqlite")
+    stock_pool_feature_legacy_fallback: bool = Field(False, description="是否允许从旧模板特征表兼容读取；SQLite-only模式固定关闭")
+    data_profile: Literal["auto", "base"] = Field("base", description="????????")
     start_date: str = Field("", description="Signal quality start date YYYYMMDD")
     end_date: str = Field("", description="Signal quality end date YYYYMMDD")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
@@ -126,12 +171,14 @@ class DailyHolding(BaseModel):
 
 
 class DailyPlanRequest(BaseModel):
-    data_source: Literal["csv", "stock_pool"] = Field("csv", description="csv=读取处理后CSV目录；stock_pool=读取股票池模板SQLite")
-    processed_dir: str = Field("", description="Directory containing per-stock processed CSV files; csv mode only")
-    stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
+    data_source: Literal["stock_pool"] = Field("stock_pool", description="????????? SQLite")
+    processed_dir: str = Field("", description="??????SQLite-only ????? CSV")
+    stock_pool_username: str = Field("admin", description="股票池模板所属用户；由当前登录用户在 API 边界自动填充")
     stock_pool_template_name: str = Field("", description="股票池模板名称；stock_pool mode required")
-    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；为空时使用默认 data_store/stock_pool_templates.sqlite")
-    data_profile: Literal["auto", "base", "sector"] = Field("auto", description="Data feature profile validation")
+    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；前端不展示，默认使用 data_store/stock_pool_templates.sqlite")
+    stock_pool_market_db_path: str = Field("", description="行情指标SQLite路径；为空时使用 data_store/market_data.sqlite")
+    stock_pool_feature_legacy_fallback: bool = Field(False, description="是否允许从旧模板特征表兼容读取；SQLite-only模式固定关闭")
+    data_profile: Literal["auto", "base"] = Field("base", description="????????")
     signal_date: str = Field("", description="Signal date YYYYMMDD; empty means latest available trade date")
     buy_condition: str = Field(..., description="Comma-separated boolean filters")
     sell_condition: str = Field("", description="Optional sell filters evaluated on current holdings")
@@ -158,16 +205,17 @@ class PaperTemplateResponse(BaseModel):
 
 
 class PaperTemplateSaveRequest(BaseModel):
-    config_dir: str = Field("configs/paper_accounts", description="模拟账户模板目录")
-    config_path: str = Field("", description="当前模板路径；覆盖保存时必须填写")
-    file_name: str = Field("", description="模板文件名，例如 my_account.yaml")
-    overwrite_existing: bool = Field(False, description="是否覆盖当前 config_path 指向的模板")
+    username: str = Field("admin", description="模板所属用户；由当前登录用户在 API 边界自动填充")
+    config_dir: str = Field("configs/paper_accounts", description="兼容旧YAML导入目录；前端不再展示")
+    config_path: str = Field("", description="兼容旧模板路径；SQLite模式下可为空")
+    file_name: str = Field("", description="兼容旧模板文件名；SQLite模式下可为空")
+    overwrite_existing: bool = Field(False, description="是否覆盖当前账户编号对应的SQLite模板")
     account_id: str = Field(..., min_length=1, description="账户编号")
     account_name: str = Field(..., min_length=1, description="账户名称")
     initial_cash: float = Field(100_000.0, gt=0)
-    stock_pool_username: str = Field("admin", description="股票池模板所属用户；未接入登录前默认admin")
+    stock_pool_username: str = Field("admin", description="股票池模板所属用户；由当前登录用户在 API 边界自动填充")
     stock_pool_template_name: str = Field(..., min_length=1, description="股票池模板名称")
-    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；为空时使用默认 data_store/stock_pool_templates.sqlite")
+    stock_pool_db_path: str = Field("", description="股票池模板SQLite路径；前端不展示，默认使用 data_store/stock_pool_templates.sqlite")
     buy_condition: str = Field(..., min_length=1)
     sell_condition: str = ""
     score_expression: str = Field(..., min_length=1)
@@ -192,14 +240,15 @@ class PaperTemplateSaveRequest(BaseModel):
     stamp_tax_sell: float = Field(0.0, ge=0)
     slippage_bps: float = Field(3.0, ge=0)
     min_commission: float = Field(0.0, ge=0)
-    ledger_path: str = ""
-    log_dir: str = "paper_trading/logs"
+    ledger_path: str = Field("", description="兼容旧字段；账本实际保存到 data_store/paper_trading.sqlite")
+    log_dir: str = Field("", description="兼容旧字段；运行日志实际保存到SQLite")
 
 
 class PaperTradingRunRequest(BaseModel):
-    config_path: str = Field("", description="模拟账户中文 YAML 模板路径")
-    config_dir: str = Field("configs/paper_accounts", description="模拟账户模板目录")
-    account_id: str = Field("", description="模板中的账户编号；config_path 为空时使用")
+    username: str = Field("admin", description="当前登录用户；由当前登录用户在 API 边界自动填充")
+    config_path: str = Field("", description="兼容旧YAML模板路径；SQLite模式优先使用account_id")
+    config_dir: str = Field("configs/paper_accounts", description="兼容旧YAML模板目录")
+    account_id: str = Field("", description="SQLite模板中的账户编号")
     action: Literal["generate", "execute", "mark", "refresh"] = Field(
         "generate",
         description="generate=收盘生成待执行订单；execute=开盘执行待成交订单；mark=收盘估值；refresh=实时刷新当前持仓估值",
@@ -222,7 +271,7 @@ class StockPoolTemplateResponse(BaseModel):
 
 
 class StockPoolTemplateSaveRequest(BaseModel):
-    username: str = Field("admin", description="模板所属用户；未接入登录前默认 admin")
+    username: str = Field("admin", description="模板所属用户；由当前登录用户在 API 边界自动填充")
     original_template_name: str = Field("", description="当前模板名称；覆盖或改名保存时使用")
     template_name: str = Field(..., min_length=1, description="股票池模板名称")
     description: str = ""
@@ -235,12 +284,22 @@ class StockPoolValidateRequest(BaseModel):
     stock_text: str = Field("", description="用户手工输入的股票代码列表")
 
 
+class MainUniverseResolveRequest(BaseModel):
+    names: list[str] = Field(default_factory=list, description="管理员输入的股票名称列表")
+
+
+class MainUniverseSaveApiRequest(BaseModel):
+    mode: Literal["append", "replace"] = Field("append", description="append=追加或激活；replace=本次缺失股票置为 inactive")
+    rows: list[dict[str, str]] = Field(default_factory=list, description="主股票池行，管理员可仅填写 name")
+    source: str = Field("admin_upload", description="主股票池来源标记")
+
+
 class StockPoolRefreshRequest(BaseModel):
-    source: Literal["active_templates", "template", "symbols", "all"] = Field(
+    source: Literal["active_templates", "template", "symbols", "all", "main_universe"] = Field(
         "template",
-        description="active_templates=当前用户全部活跃模板，template=单模板，symbols=手工股票，all=全市场初始化",
+        description="active_templates=当前用户全部活跃模板，template=单模板，symbols=手工股票，all/main_universe=主股票池",
     )
-    username: str = Field("admin", description="当前未接入登录系统，默认 admin")
+    username: str = Field("admin", description="当前登录用户，由 API 边界自动填充")
     template_name: str = Field("", description="source=template 时必填")
     stock_text: str = Field("", description="source=symbols 时可填写手工股票列表")
     start_date: str = Field("20220101", description="数据起始日期 YYYYMMDD")
@@ -257,17 +316,32 @@ class StockPoolRefreshRequest(BaseModel):
     only_missing: bool = Field(True, description="是否只处理库内未更新到截止日的股票")
 
 
+class AdminStockDataTaskRequest(BaseModel):
+    username: str = Field("admin", description="当前登录用户，由 API 边界自动填充")
+    start_date: str = Field("20220101", description="数据起始日期 YYYYMMDD")
+    end_date: str = Field("", description="数据截止日期 YYYYMMDD；为空时取最新交易日")
+    max_symbols: int = Field(0, ge=0, le=10000, description="测试或限流时限制本批股票数，0 表示不限")
+    sleep_seconds: float = Field(0.2, ge=0, le=10, description="每只股票之间的 Tushare 调用间隔")
+    retry_attempts: int = Field(3, ge=1, le=10, description="单只股票失败重试次数")
+    retry_sleep_seconds: float = Field(5.0, ge=0, le=300, description="失败重试基础等待秒数")
+
 class SingleStockBacktestRequest(BaseModel):
-    processed_dir: str = Field("", description="Processed data directory shared with portfolio backtest")
-    symbol: str = Field("", description="Stock code or stock name in processed_dir")
-    excel_path: str = Field("", description="Optional legacy path to one stock excel file")
+    data_source: Literal["stock_pool"] = Field("stock_pool", description="????????? SQLite")
+    processed_dir: str = Field("", description="??????SQLite-only ????? CSV")
+    symbol: str = Field("", description="Stock code or stock name")
+    stock_pool_username: str = Field("admin", description="Stock pool template owner; defaults to admin before login is added")
+    stock_pool_template_name: str = Field("", description="Optional; when set, match the stock only inside this stock pool template")
+    stock_pool_db_path: str = Field("", description="Stock pool SQLite path; defaults to data_store/stock_pool_templates.sqlite")
+    excel_path: str = Field("", description="??????SQLite-only ????? Excel")
     start_date: str = Field("", description="Backtest start date YYYYMMDD")
     end_date: str = Field("", description="Backtest end date YYYYMMDD")
     buy_condition: str = Field(..., description="Comma-separated boolean filters for entry")
     buy_confirm_days: int = Field(1, ge=1)
     buy_cooldown_days: int = Field(0, ge=0)
-    sell_condition: str = Field(..., description="Comma-separated boolean filters for exit")
+    sell_condition: str = Field("", description="Comma-separated boolean filters for exit")
     sell_confirm_days: int = Field(1, ge=1)
+    max_hold_days: int = Field(0, ge=0, le=120, description="Optional maximum holding days after entry; 0 disables forced exit")
+    strict_execution: bool = Field(True, description="Strict execution: block buys/sells when the execution day is not tradable")
     initial_cash: float = Field(100_000.0, gt=0)
     per_trade_budget: float = Field(10_000.0, gt=0)
     lot_size: int = Field(100, ge=1)
@@ -280,10 +354,45 @@ class SingleStockBacktestRequest(BaseModel):
 class SingleStockBacktestResponse(BaseModel):
     stock_code: str
     stock_name: str
+    chart_price_basis: str
     summary: dict
     metric_definitions: list[dict]
     trade_rows: list[dict]
     signal_rows: list[dict]
+
+
+class SchedulerRunResponse(BaseModel):
+    run_id: str
+    job_name: str
+    target_date: str = ""
+    status: str
+    started_at: str
+    finished_at: str = ""
+    duration_seconds: float | None = None
+    failed_stage: str = ""
+    error_summary: str = ""
+    log_file: str = ""
+    retry_of_run_id: str = ""
+
+
+class SchedulerRunsResponse(BaseModel):
+    runs: list[SchedulerRunResponse]
+
+
+class SchedulerRetryRequest(BaseModel):
+    reason: str = Field("", description="人工重跑原因，当前只登记待重跑记录，不直接执行任务")
+
+
+class SchedulerRetryResponse(BaseModel):
+    retry_run: SchedulerRunResponse
+    original_run: SchedulerRunResponse
+    message: str
+
+
+class AdminOverviewResponse(BaseModel):
+    scheduler: dict
+    core_tasks: dict = Field(default_factory=dict)
+    core_tasks: dict = Field(default_factory=dict)
 
 
 @dataclass

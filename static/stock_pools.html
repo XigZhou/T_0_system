@@ -15,23 +15,23 @@
             <h1>股票池模板管理</h1>
           </div>
           <div class="brand-actions">
-            <p class="subtle">只维护用户手工股票列表；第一阶段不会抓取行情，也不会改动现有回测和模拟交易入口。</p>
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
+            <p class="subtle">模板只保存股票集合；行情与指标由主行情库和统一调度维护。</p>
             <p class="subtle">
               <a href="/">组合回测</a>
               · <a href="/daily">每日收盘选股</a>
               · <a href="/paper">多账户模拟</a>
               · <a href="/sector">板块研究</a>
+              · <a href="/admin" data-admin-only>系统管理员</a> · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a>
             </p>
           </div>
         </div>
 
         <form id="stockPoolPickerForm" class="form-grid compact-form">
-          <div class="readonly-field stock-pool-current-user">
-            <span>当前用户</span>
-            <strong id="poolCurrentUser">admin</strong>
-            <small>登录系统接入后自动获取</small>
-          </div>
-
           <label class="field-wide">
             <span>选择模板</span>
             <select id="poolTemplateSelect"></select>
@@ -55,7 +55,7 @@
           <div class="summary-intro">
             <p class="eyebrow">模板摘要</p>
             <h2>当前股票池信息</h2>
-            <p class="panel-note">模板名称与用户名唯一；删除模板只删除模板关系，不删除后续 SQLite 日线数据。</p>
+            <p class="panel-note">模板名称与用户名唯一；删除模板只删除模板关系，不删除主行情库数据。</p>
           </div>
           <div id="poolSummaryGrid" class="summary-grid"></div>
         </section>
@@ -66,7 +66,7 @@
               <p class="eyebrow">模板字段</p>
               <h3>编辑股票池模板</h3>
             </div>
-            <p class="panel-note">股票列表支持一行一个、空格、逗号或分号分隔；重复股票自动忽略，只保留首次出现顺序。</p>
+            <p class="panel-note">股票列表只需股票名称，一行一个或用空格、逗号、分号分隔；重复项自动忽略。</p>
           </div>
 
           <div class="stock-pool-editor-grid">
@@ -84,7 +84,7 @@
             </label>
             <label class="field-expression">
               <span>手工股票列表</span>
-              <textarea id="poolStockText" placeholder="300750&#10;600941&#10;688981"></textarea>
+              <textarea id="poolStockText" placeholder="宁德时代,亿纬锂能"></textarea>
             </label>
           </div>
 
@@ -92,41 +92,6 @@
             <button id="validatePoolBtn" type="button" class="secondary">校验股票列表</button>
             <button id="seedPoolsBtn" type="button" class="secondary">初始化基础模板</button>
           </div>
-        </section>
-
-        <section id="stockPoolAdminPanel" class="panel compact-panel stock-pool-admin-panel admin-only" hidden>
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">数据运维</p>
-              <h3>模板数据刷新</h3>
-            </div>
-            <p class="panel-note">仅 admin 可见；默认只补缺失或未更新到最新交易日的股票。</p>
-          </div>
-          <div class="stock-pool-admin-actions">
-            <button id="refreshPoolDataBtn" type="button">刷新当前模板数据</button>
-            <button id="reloadPoolJobsBtn" type="button" class="secondary">刷新任务状态</button>
-            <p id="poolAdminStatus" class="status">等待 admin 操作。</p>
-          </div>
-          <div class="table-wrap stock-pool-job-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>任务ID</th>
-                  <th>状态</th>
-                  <th>来源</th>
-                  <th>模板</th>
-                  <th>执行股票</th>
-                  <th>成功</th>
-                  <th>失败</th>
-                  <th>截止日期</th>
-                  <th>完成时间</th>
-                  <th>日志路径</th>
-                </tr>
-              </thead>
-              <tbody id="poolJobRows"></tbody>
-            </table>
-          </div>
-          <p id="poolJobDetail" class="panel-note stock-pool-job-detail">点击任务行可查看失败明细和输出文件。</p>
         </section>
 
         <section class="panel compact-panel">
@@ -155,6 +120,7 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/stock_pools.js"></script>
   </body>
 </html>

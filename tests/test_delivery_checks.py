@@ -71,6 +71,7 @@ class DeliveryChecksTest(unittest.TestCase):
             "scripts/build_universe_snapshot.py",
             "scripts/sync_tushare_bundle.py",
             "scripts/build_processed_data.py",
+            "scripts/migrate_legacy_stock_pool_to_market_data.py",
             "scripts/run_overnight_research.py",
             "scripts/run_overnight_feature_scan.py",
             "scripts/run_buy_condition_grid.py",
@@ -80,7 +81,6 @@ class DeliveryChecksTest(unittest.TestCase):
             "scripts/run_topn_hold_compare.py",
             "scripts/run_sector_research.py",
             "scripts/build_sector_research_features.py",
-            "scripts/run_stock_pool_layer_grid.py",
         ]:
             result = subprocess.run(
                 [sys.executable, script_name, "--help"],
@@ -90,6 +90,19 @@ class DeliveryChecksTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, msg=f"{script_name}\n{result.stdout}\n{result.stderr}")
+
+    def test_stock_pool_update_script_documents_market_db_path(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "scripts/run_stock_pool_template_update.py", "--help"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+        self.assertIn("--market-db-path", result.stdout)
 
 
 if __name__ == "__main__":

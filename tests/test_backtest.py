@@ -1,15 +1,93 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from overnight_bt.backtest import run_portfolio_backtest
+from overnight_bt.backtest import load_stock_pool_template_data, run_portfolio_backtest
 from overnight_bt.models import BacktestRequest
-from tests.helpers import make_processed_stock, write_processed_dir
+from tests.helpers import make_processed_stock, write_processed_dir, write_stock_pool_db
 
 
 class BacktestEngineTest(unittest.TestCase):
+
+    def test_sqlite_only_blocks_processed_csv_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock])
+            old_value = os.environ.get("T0_SQLITE_ONLY")
+            os.environ["T0_SQLITE_ONLY"] = "1"
+            try:
+                with self.assertRaisesRegex(RuntimeError, "SQLite-only mode blocks legacy source"):
+                    run_portfolio_backtest(
+                        BacktestRequest(
+                            data_source="csv",
+                            processed_dir=str(processed_dir),
+                            start_date="20240102",
+                            end_date="20240102",
+                            buy_condition="m20>0",
+                            score_expression="m20",
+                        )
+                    )
+            finally:
+                if old_value is None:
+                    os.environ.pop("T0_SQLITE_ONLY", None)
+                else:
+                    os.environ["T0_SQLITE_ONLY"] = old_value
+
+    def test_stock_pool_template_can_disable_legacy_feature_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {
+                        "trade_date": "20240102",
+                        "raw_open": 10.0,
+                        "raw_high": 10.2,
+                        "raw_low": 9.8,
+                        "raw_close": 10.0,
+                        "m20": 0.8,
+                        "can_buy_open_t": True,
+                        "can_sell_t": True,
+                    }
+                ],
+            )
+            template_db = write_stock_pool_db(base / "stock_pool_templates.sqlite", "接口股票池", [stock])
+            empty_market_db = base / "empty_market_data.sqlite"
+
+            with self.assertRaisesRegex(ValueError, "没有可回测数据"):
+                load_stock_pool_template_data(
+                    template_name="接口股票池",
+                    db_path=template_db,
+                    market_db_path=empty_market_db,
+                    start_date="20240102",
+                    end_date="20240102",
+                    legacy_feature_fallback=False,
+                )
+
+            loaded, diagnostics = load_stock_pool_template_data(
+                template_name="接口股票池",
+                db_path=template_db,
+                market_db_path=empty_market_db,
+                start_date="20240102",
+                end_date="20240102",
+                legacy_feature_fallback=True,
+            )
+
+            self.assertEqual([item.symbol for item in loaded], ["000001"])
+            self.assertEqual(diagnostics["missing_feature_count"], 0)
+
+
     def test_signal_day_enters_t1_open_and_exits_t2_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
@@ -35,6 +113,7 @@ class BacktestEngineTest(unittest.TestCase):
 
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -88,6 +167,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -122,6 +202,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -157,6 +238,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -200,6 +282,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock_main, stock_cyb])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -234,6 +317,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -279,6 +363,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -323,6 +408,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240104",
@@ -369,6 +455,7 @@ class BacktestEngineTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock])
             result = run_portfolio_backtest(
                 BacktestRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240104",
                     end_date="20240104",

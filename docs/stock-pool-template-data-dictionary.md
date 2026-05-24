@@ -1,6 +1,6 @@
 # 股票池模板系统数据说明
 
-本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库；第四阶段已把批量回测、每日收盘选股和多账户模拟交易接入股票池模板 SQLite。单股回测和板块研究暂时仍沿用原 CSV 输入。
+本文档说明股票池模板系统的数据来源、SQLite 表结构、字段定义、行情与指标入库、日志输出和使用方式。第一阶段负责“模板 + 手工股票列表”的保存、读取、校验和删除；第二阶段已实现共享日线与指标入库；第四阶段已把批量回测、每日收盘选股、多账户模拟交易和单股回测接入股票池模板 SQLite。当前正在执行主数据迁移：模板库只保留用户、模板和模板股票关系，生产日线与指标逐步迁移到 `data_store/market_data.sqlite`。板块研究暂时仍沿用原 CSV 输入。
 
 ## 1. 数据来源
 
@@ -27,14 +27,17 @@
 
 | 项目 | 路径 | 说明 |
 | --- | --- | --- |
-| SQLite 数据库 | `data_store/stock_pool_templates.sqlite` | 运行时数据库，已加入 `.gitignore`，不提交到 Git |
+| 模板 SQLite 数据库 | `data_store/stock_pool_templates.sqlite` | 模板、用户和模板股票关系数据库，已加入 `.gitignore`，不提交到 Git |
+| 主数据 SQLite 数据库 | `data_store/market_data.sqlite` | 主股票池、生产日线和指标目标数据库，第一阶段由迁移脚本从旧特征表补齐；迁移期由生产默认更新脚本双写 |
 
-> 当前未接入登录系统，系统固定使用 `admin` 作为模板所属用户。登录系统接入后，前端应从登录态自动带入用户名，不在页面上提供手工输入。所有模板默认参与后续每日更新，第一阶段不提供“不参与更新”选项。校验和保存时，重复股票会自动去重，只保留首次出现的顺序；股票名称会从 SQLite `stock_basic`、Top500 分层文件、当前 Top100 处理后 CSV 和已有股票池快照中尽量回填。
+> 股票池模板页面从登录态读取当前用户，不在页面上提供手工输入用户名。模板只保存股票集合；校验和保存时，重复股票会自动去重，只保留首次出现的顺序，并且必须通过主股票池校验。不在主股票池中或已停用的股票不能写入模板。
 | 前端页面 | `static/stock_pools.html` | 股票池模板管理页面 |
 | 前端逻辑 | `static/stock_pools.js` | 模板列表、载入、复制、保存、删除和校验 |
 | 后端模块 | `overnight_bt/stock_pool_templates.py` | SQLite 初始化、模板 CRUD、股票列表解析和基础模板初始化 |
-| 行情入库模块 | `overnight_bt/stock_pool_feature_store.py` | 股票范围去重、Tushare 拉取、指标计算、SQLite upsert、任务日志 |
-| 初始化脚本 | `scripts/init_stock_pool_feature_store.py` | 全市场或指定来源首次入库 |
+| 行情入库模块 | `overnight_bt/stock_pool_feature_store.py` | 旧模板共享行情入库模块，迁移期仍保留 |
+| 主数据读取与迁移模块 | `overnight_bt/market_data_store.py` | `market_data.sqlite.stock_daily_features` 初始化、读写、旧特征表迁移 |
+| 主数据迁移脚本 | `scripts/migrate_legacy_stock_pool_to_market_data.py` | 把旧模板库特征表迁到主数据表，并初始化 `main_stock_universe` |
+| 初始化脚本 | `scripts/init_stock_pool_feature_store.py` | 主股票池或指定来源首次入库 |
 | 更新脚本 | `scripts/run_stock_pool_template_update.py` | 活跃模板、单模板或手工股票增量更新 |
 | 定时任务脚本 | `scripts/run_stock_pool_template_update.sh` | shell 包装、虚拟环境、锁、cron 日志 |
 
@@ -50,7 +53,7 @@
 | `stock_pool_update_jobs` | 每个数据更新任务一行 | `job_id` |
 | `stock_pool_update_job_items` | 每个任务内每只股票一行 | `PRIMARY KEY(job_id, symbol)` |
 
-第一阶段会创建所有表并写入用户、模板、模板股票关系和基础股票信息。第二阶段开始写入 `stock_daily_features`、`stock_pool_update_jobs`、`stock_pool_update_job_items`。
+第一阶段会创建所有表并写入用户、模板、模板股票关系和基础股票信息。第二阶段开始写入旧模板库中的 `stock_daily_features`、`stock_pool_update_jobs`、`stock_pool_update_job_items`。主数据迁移后，新的生产事实表应以 `market_data.sqlite.stock_daily_features` 为准。迁移期内，生产默认旧模板库更新会同时写旧模板库和主数据表；旧模板库事实表仅作为迁移来源和兼容备份。
 
 ## 4. 表字段定义
 
@@ -103,7 +106,7 @@
 
 ### 4.5 `stock_daily_features`
 
-该表为第二阶段行情和指标入库事实表，所有用户和模板共享同一份股票日线与指标。主要字段如下：
+该表为第二阶段行情和指标入库事实表，所有用户和模板共享同一份股票日线与指标。迁移目标是把该表物理放到 `data_store/market_data.sqlite`；旧 `data_store/stock_pool_templates.sqlite.stock_daily_features` 只作为第一阶段迁移来源和迁移期兼容写入。主要字段如下：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -162,10 +165,10 @@
 3. 选择已有模板并点击“载入模板”，或点击“新建模板”。
 4. 在“手工股票列表”中粘贴股票代码。
 5. 点击“校验股票列表”，确认有效、重复和错误项。
-6. 点击“保存模板”。保存动作只写 SQLite 模板表，不直接拉取行情，避免大股票池保存超时；新增股票会在夜间统一调度中补齐，也可以由 admin 在页面手动刷新当前模板数据。
+6. 点击“保存模板”。保存动作只写模板表，不直接拉取行情；保存前必须通过主股票池校验，不在主股票池中的股票不允许生成模板。行情和指标由主行情库与统一调度维护。
 7. 如需基于已有模板稍作修改，点击“复制模板”，修改名称或股票列表后保存。
-8. 删除模板时只删除模板关系，不删除后续日线事实数据。
-9. 只有 admin 会看到“模板数据刷新”和“最近任务状态”区域；普通用户只能维护模板，不能触发行情刷新或查看任务明细。
+8. 删除模板时只删除模板关系，不删除主行情库中的日线和指标数据。
+9. 股票池模板页面只维护股票集合，不展示模板数据刷新、最近任务状态或任务明细；定时任务状态统一在系统管理员运维看板查看。
 
 ### 7.2 API 使用
 
@@ -177,13 +180,13 @@
 | `/api/stock-pools/template` | DELETE | 删除模板 |
 | `/api/stock-pools/template/validate` | POST | 校验手工股票列表 |
 | `/api/stock-pools/templates/seed?username=admin` | POST | 手动初始化基础模板 |
-| `/api/stock-pools/template/refresh` | POST | 手动触发行情与指标入库任务；仅 admin |
-| `/api/stock-pools/jobs?username=admin&limit=50` | GET | 查看最近更新任务；仅 admin |
-| `/api/stock-pools/jobs/{job_id}?username=admin` | GET | 查看任务明细；仅 admin |
+| `/api/stock-pools/template/refresh` | POST | legacy 手动触发行情与指标入库任务；仅 admin；前端不再暴露，响应含 `legacy: true` |
+| `/api/stock-pools/jobs?username=admin&limit=50` | GET | legacy 查看最近更新任务；仅 admin；前端不再暴露 |
+| `/api/stock-pools/jobs/{job_id}?username=admin` | GET | legacy 查看任务明细；仅 admin；前端不再暴露 |
 
-### 7.2.1 admin-only 数据刷新接口
+### 7.2.1 legacy admin-only 数据刷新接口
 
-当前未接入登录系统时，刷新和任务接口使用 `username=admin` 作为过渡权限判断。非 admin 调用会返回 403。接入登录系统后，应由后端从登录态读取用户名和角色，不再信任前端传入的用户名。
+legacy 刷新和任务接口由后端从登录态校验 admin 权限，非 admin 调用会返回 403。该接口仅为兼容旧脚本和人工排障保留，股票池模板页面和系统管理员运维看板不再触发它。
 
 刷新当前模板示例：
 
@@ -220,7 +223,7 @@
 
 ### 7.3 第二阶段 CLI 使用
 
-全市场首次初始化，默认从 `20220101` 到最新交易日：
+主股票池首次初始化/补数，默认从 `20220101` 到最新交易日（`source=all` 表示主股票池）：
 
 ```bash
 python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
@@ -276,7 +279,8 @@ python scripts/run_stock_pool_template_update.py \
 | `--resume-after-symbol` | 空 | 从指定股票代码之后继续处理，例如 `300750` 或 `300750.SZ` |
 | `--retry-attempts` | `1` | 单只股票拉取 `daily/adj_factor/stk_limit/suspend_d` 失败后的尝试次数 |
 | `--retry-sleep-seconds` | `2.0` | 每次失败后的基础等待秒数，第 N 次按 N 倍等待 |
-| `--include-up-to-date` | 关闭 | 默认只补库内未更新到截止交易日的股票；打开后会把已最新股票放入本批并记录为 skipped |
+| `--market-db-path` | 空 | 主行情 SQLite 路径；生产默认旧模板库会自动同步 `data_store/market_data.sqlite`，自定义 `--db-path` 需要显式指定 |
+| `--include-up-to-date` | 关闭 | 默认只补库内未更新到截止交易日的股票；打开后会强制重采已最新股票并 upsert 到旧模板库和主行情库 |
 | `--force-full-rebuild` | 关闭 | 强制从起始日重算并 upsert，不执行只补缺失过滤 |
 | `--max-symbols` | `0` | 在当前批次窗口内再限制前 N 只，主要用于冒烟验证或临时限流 |
 
@@ -328,11 +332,12 @@ STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECOND
 
 补救规则：
 
-- 如果某些股票失败，先用 `GET /api/stock-pools/jobs/{job_id}` 或明细 CSV 找到失败股票和错误信息。
+- 如果 legacy 补数任务中某些股票失败，可用 `GET /api/stock-pools/jobs/{job_id}` 或明细 CSV 找到失败股票和错误信息；日常生产任务失败应优先查看系统管理员运维看板中的调度运行记录。
 - 若是 Tushare 临时失败，可用 `--source symbols --stock-text "300750 688981" --retry-attempts 3` 单独补跑失败股票。
+- 若旧模板库已有非空数据但 `market_data.sqlite` 缺数，可用 `--source symbols --stock-text "300750 688981" --include-up-to-date` 强制重采并双写主行情库。
 - 若某一批中途断开，优先看 `_items.csv` 最后一只成功股票，再用 `--resume-after-symbol` 从其后一只继续。
 - 若是指标边界或基础信息问题，可加 `--force-full-rebuild` 从起始日全量重算并 upsert。
-- 默认只补缺失，已经完整更新到最新交易日的股票不会重复采集；如需在明细中显式记录 skipped，可加 `--include-up-to-date`。
+- 默认只补缺失，已经完整更新到最新交易日的股票不会重复采集；如需强制覆盖刷新或修复主行情库缺数，可加 `--include-up-to-date`。
 - 删除模板不会删除 `stock_daily_features`，因为同一股票可能仍被其他模板复用。
 
 ## 8. 更新时间
@@ -342,3 +347,9 @@ STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECOND
 - 第二阶段已提供手动刷新、初始化脚本和每日更新脚本。
 - 第三阶段已把 `scripts/run_stock_pool_template_update.sh` 接入 `scripts/run_after_close_pipeline.sh` 统一收盘后调度。默认 `RUN_STOCK_POOL_TEMPLATE_UPDATE=1`；多账户模拟交易已依赖股票池 SQLite，默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0` 时更新失败只记录警告并继续进入模拟账户，但模拟账户自身会校验最新日期并在不满足时失败退出。
 - 批量验证记录见 `docs/stock-pool-template-batch-validation-20260514.md`。
+
+### ????????
+
+`data_store/stock_pool_templates.sqlite` ??????????????????????????????????????? `scripts/soft_reset_sqlite_runtime.py --execute` ???????????????????????????? `SQLite??????`???????? `601138.SH`?
+
+?????? `main_universe` ? `data_store/market_data.sqlite.main_stock_universe` ?? `is_active=1` ?????????????????? `stock_daily_features` ??? `market_data.sqlite.stock_daily_features`??????????????

@@ -147,7 +147,7 @@ industry_rank_m20<0.3,industry_m20>0,industry_up_ratio>0.5,stock_vs_industry_m20
 
 入口：
 
-`ash
+`ash
 python scripts/run_sector_research.py --start-date 20230101
 `
 
@@ -165,7 +165,7 @@ python scripts/run_sector_research.py --start-date 20230101
 
 如需把板块研究结果接入现有回测，使用下面脚本生成新的处理后股票 CSV 目录：
 
-`ash
+`ash
 python scripts/build_sector_research_features.py \
   --processed-dir data_bundle/processed_qfq_theme_focus_top100 \
   --sector-processed-dir sector_research/data/processed \
@@ -266,7 +266,7 @@ python scripts/build_theme_tradeable_universe.py \
 
 ### 股票池模板与共享行情库
 
-用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。第四阶段已把批量回测、每日收盘选股和多账户模拟交易切到股票池模板输入；单股回测和板块研究暂时仍沿用 CSV 输入。
+用途：让用户手工维护股票池模板，并把模板涉及股票的日线、复权、涨跌停、停牌、大盘环境和批量回测指标统一写入 SQLite。第四阶段已把批量回测、每日收盘选股、多账户模拟交易和单股回测切到股票池模板输入；板块研究暂时仍沿用 CSV 输入。
 
 页面入口：
 
@@ -283,14 +283,14 @@ python scripts/build_theme_tradeable_universe.py \
 | `POST /api/stock-pools/template` | 新建、复制后保存或覆盖模板 |
 | `DELETE /api/stock-pools/template` | 删除模板关系，不删除日线事实数据 |
 | `POST /api/stock-pools/template/validate` | 校验手工股票列表 |
-| `POST /api/stock-pools/template/refresh` | 手动触发行情与指标入库 |
-| `GET /api/stock-pools/jobs?limit=50` | 查看最近更新任务 |
-| `GET /api/stock-pools/jobs/{job_id}` | 查看任务明细 |
+| `POST /api/stock-pools/template/refresh` | legacy 手动触发行情与指标入库；前端不再暴露 |
+| `GET /api/stock-pools/jobs?limit=50` | legacy 查看最近更新任务；前端不再暴露 |
+| `GET /api/stock-pools/jobs/{job_id}` | legacy 查看任务明细；前端不再暴露 |
 
 数据入库入口：
 
 ```bash
-# 全市场或模板股票初始化
+# 主股票池或模板股票初始化
 python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
 
 # 日常更新当前 admin 活跃模板涉及股票
@@ -317,24 +317,35 @@ python scripts/run_stock_pool_template_update.py \
   --resume-after-symbol 300750 \
   --max-symbols 100 \
   --retry-attempts 3
+
+# 旧模板库已有数据但主行情库缺数时，强制重采并同步主库
+python scripts/run_stock_pool_template_update.py \
+  --source symbols \
+  --stock-text "300750 601012" \
+  --start-date 20260521 \
+  --end-date 20260521 \
+  --include-up-to-date \
+  --retry-attempts 3
 ```
 
 关键输入参数：
 
 | 参数 | 说明 |
 | --- | --- |
-| `--source` | `active_templates`、`template`、`symbols`、`all`；分别代表活跃模板、单模板、手工股票和全市场初始化 |
+| `--source` | `active_templates`、`template`、`symbols`、`all`、`main_universe`；其中 `all/main_universe` 代表主股票池活跃股票，不再代表全市场 |
 | `--start-date` / `--end-date` | 数据起止日期，`end-date` 为空时使用最新开市日 |
 | `--batch-size` / `--batch-index` | 按完整解析股票列表切批，避免前一批入库后后一批错位 |
 | `--offset` | 直接从第 N 只开始，优先于 `batch-index` 计算起点 |
 | `--resume-after-symbol` | 从指定股票之后继续，用于人工断点续跑 |
 | `--retry-attempts` / `--retry-sleep-seconds` | 单只股票拉取失败后的重试次数和等待时间 |
-| `--include-up-to-date` | 默认不打开；打开后会把已最新股票放入本批并记录为 skipped |
+| `--market-db-path` | 主行情 SQLite 路径；生产默认旧模板库会自动同步 `data_store/market_data.sqlite`，自定义 `--db-path` 需要显式指定 |
+| `--include-up-to-date` | 默认不打开；打开后会强制重采已最新股票并 upsert 到旧模板库和主行情库 |
 | `--force-full-rebuild` | 强制从起始日重算并 upsert |
 
 输出结果：
 
-- SQLite：`data_store/stock_pool_templates.sqlite`。
+- 模板 SQLite：`data_store/stock_pool_templates.sqlite`。
+- 主行情 SQLite：`data_store/market_data.sqlite`。迁移期内，生产默认旧模板库更新会双写主行情库；测试或自定义模板库只有显式传 `--market-db-path` 才会写主库。
 - 日线与指标表：`stock_daily_features`，主键为 `symbol + trade_date`。
 - 任务表：`stock_pool_update_jobs`、`stock_pool_update_job_items`。
 - 运行日志：`logs/stock_pool_template_update/*_<job_id>.log`、`<job_id>_items.csv`、`<job_id>_summary.json`。
@@ -357,7 +368,7 @@ python scripts/run_stock_pool_template_update.py \
 
 异常处理：
 
-- 默认只补缺失，库内已更新到截止交易日的股票不会重复采集。
+- 默认只补缺失，库内已更新到截止交易日的股票不会重复采集；如需修复主行情库缺数或主动覆盖校验，可加 `--include-up-to-date` 强制重采。
 - 单只股票 Tushare 临时失败时，脚本按 `retry_attempts` 自动重试；最终失败会写入任务明细，并让 `scripts/run_stock_pool_template_update.py` 返回非 0。
 - 某批中途断开时，查看 `_items.csv` 最后一只成功股票，用 `--resume-after-symbol` 继续。
 - 如果只想补失败股票，可用 `--source symbols --stock-text "300750 688981" --retry-attempts 3`。
@@ -1135,8 +1146,8 @@ python scripts/run_topn_hold_compare.py
 | 参数 | 说明 |
 | --- | --- |
 | `data_source` | 数据源，`stock_pool` 表示读取股票池模板 SQLite，`csv` 表示兼容旧处理后 CSV 目录 |
-| `processed_dir` | 处理后数据目录，仅 `data_source=csv` 时使用 |
-| `stock_pool_username` | 股票池模板用户，当前未接入登录系统时默认为 `admin` |
+| `processed_dir` | 兼容旧 CSV 模式的处理后数据目录 |
+| `stock_pool_username` | 股票池模板用户；页面默认使用当前登录用户 |
 | `stock_pool_template_name` | 股票池模板名称，`data_source=stock_pool` 时必填 |
 | `stock_pool_db_path` | 股票池 SQLite 路径，默认 `data_store/stock_pool_templates.sqlite` |
 | `start_date/end_date` | 信号日期范围 |
@@ -1192,7 +1203,7 @@ python scripts/run_topn_hold_compare.py
 
 ### 信号质量回测接口
 
-信号质量回测用于先判断“买入条件、卖出条件、评分表达式本身是否有效”。它不模拟账户现金和仓位金额占用，但会按单股虚拟持仓去重，避免同一股票持仓期内连续重复买入。
+信号质量回测用于先判断“买入条件、卖出条件、评分表达式本身是否有效”。它不模拟账户现金和仓位金额占用，但会按固定 100 股虚拟持仓去重，避免同一股票持仓期内连续重复买入。
 
 - Python 调用：`overnight_bt.signal_quality.run_signal_quality`
 - API：`POST /api/run-signal-quality`
@@ -1202,7 +1213,7 @@ python scripts/run_topn_hold_compare.py
 - 每个信号日仍按 `buy_condition` 过滤，并用 `score_expression` 排序取 `TopN`。
 - `TopN` 在信号质量模式下也是 TopK 扫描上限；例如想比较 Top1、Top2、Top3、Top5、Top10，就把 `TopN` 填到 10 或更高。
 - 每个入选信号默认 `T+1` 开盘虚拟买入。
-- 不使用 `initial_cash`、账户现金和资金不足跳过；`per_trade_budget`、`lot_size` 只用于交易流水按整手估算展示股数、买入净额、卖出净额和盈亏，不影响信号是否入选。
+- 不使用 `initial_cash`、账户现金、`per_trade_budget` 和 `lot_size`；交易流水固定按 100 股计算买入净额、卖出净额和盈亏，不影响信号是否入选。
 - 同一股票从入选后到虚拟卖出前视为已有持仓或待买订单，后续信号日即使仍满足买入条件，也会被跳过，统计在 `blocked_reentry_count`。
 - 持有期间仍按 `sell_condition`、`min_hold_days`、`max_hold_days` 和严格成交口径计算退出。
 - 默认 `settlement_mode=cutoff` 不读取结束日之后的数据；无法完成买卖的信号展示为未完成或截止日估值，不进入已完成信号统计。
@@ -1214,7 +1225,7 @@ python scripts/run_topn_hold_compare.py
 | `summary` | 入选信号数、完成信号数、平均/中位单笔收益、胜率、收益因子、信号净值收益、回撤、持仓期跳过信号数 |
 | `daily_rows` | 信号净值曲线、每日候选数、入选数、完成信号数、持仓期跳过信号数和平均收益 |
 | `pick_rows` | 每日入选信号，包含完成、买入阻塞、未完成和截止日估值状态 |
-| `trade_rows` | 已完成的独立信号样本；买入和卖出拆成两行动作，股数按每笔目标资金和每手股数估算，卖出盈亏按卖出净额减买入净额计算 |
+| `trade_rows` | 已完成的独立信号样本；买入和卖出拆成两行动作，股数固定为 100 股，卖出盈亏按卖出净额减买入净额计算 |
 | `topk_rows` | 累计 TopK 扫描结果，比较 Top1、Top2、Top3、Top5、Top10 等买入数量的收益、胜率、收益因子、回撤和辅助推荐分；辅助推荐分会轻微惩罚过大的 TopK，避免把“买几乎所有候选”误判成最佳 |
 | `rank_rows` | 按评分排名分组的平均收益、中位收益、胜率和分位数收益 |
 | `contribution_rows` | 个股在信号样本中的贡献 |
@@ -1250,11 +1261,20 @@ http://127.0.0.1:8083/
 - 评分表达式
 - `TopN`；在信号质量模式下代表 TopK 扫描上限，想比较 Top10 就填 10 或更高
 - 初始资金，仅实盘账户回测使用
-- 每笔目标资金：信号质量模式仅用于展示估算股数；实盘账户模式用于实际买入资金约束
+- 每笔目标资金：仅实盘账户模式用于实际买入资金约束；信号质量模式不使用
 - 买入偏移、退出模式、卖出偏移
 - 退出模式支持：`卖出条件优先 + 固定兜底`、`固定持有退出`、`仅卖出条件退出`；选择“仅卖出条件退出”时，卖出偏移可为空，未触发卖出条件的持仓只估值不强制卖出
+
+示例（从用户角度理解最大持有天数）：
+假设我把退出模式设为“卖出条件优先 + 固定兜底”，买入偏移填 1，最大持有天数填 5，最短持有天数填 2，卖出条件是 `close<ma5`。
+如果信号日是 2024-05-06（假设为交易日），系统会在 2024-05-07 开盘买入；
+若卖出条件在 2024-05-10 收盘触发，则在 2024-05-13 开盘卖出；
+若一直未触发卖出条件，则会在 2024-05-14 开盘卖出（相当于 T+6，即持有满 5 个交易日）。
+如果我把退出模式改成“固定持有退出”，则无论卖出条件是否触发，都会在 2024-05-14 开盘卖出。
+如果我选择“仅卖出条件退出”，最大持有天数就不生效；只有卖出条件触发时才会在下一交易日开盘卖出，未触发则持有到回测结束日仅做估值。
+
 - 最短持有天数、最大持有天数
-- 每手股数：信号质量模式仅用于展示估算股数；实盘账户模式用于实际整手成交约束
+- 每手股数：仅实盘账户模式用于实际整手成交约束；信号质量模式固定按 100 股
 - 买卖费率、印花税、滑点、最低佣金
 - 是否严格成交
 - 结束日处理方式，默认“截止日估值”，适合不想使用未来数据的实盘式回测
@@ -1306,7 +1326,7 @@ http://127.0.0.1:8083/
 | --- | --- |
 | `data_source` | 数据源，前端默认 `stock_pool`；后端仍兼容 `csv` 旧调用 |
 | `processed_dir` | 处理后数据目录，仅 `data_source=csv` 时使用 |
-| `stock_pool_username` | 股票池模板用户，当前未接入登录系统时默认为 `admin` |
+| `stock_pool_username` | 股票池模板用户；页面默认使用当前登录用户 |
 | `stock_pool_template_name` | 股票池模板名称，`data_source=stock_pool` 时必填 |
 | `stock_pool_db_path` | 股票池 SQLite 路径，默认 `data_store/stock_pool_templates.sqlite` |
 | `signal_date` | 信号日期；留空时使用数据中最新交易日；若输入非交易日，使用此前最近交易日 |
@@ -1349,83 +1369,106 @@ http://127.0.0.1:8083/
 
 ### 功能
 
-- 使用中文 YAML 模板定义模拟账户，每个模板对应一套独立买入条件、卖出条件、评分表达式、买入股数、费用和账本路径。
+- 按当前登录用户加载可见的模拟账户模板；管理员可在用户管理中维护账号。
+- 模板、账本和运行日志统一保存到 `data_store/paper_trading.sqlite`，不再使用 CSV/Excel/YAML 作为运行时存储。
+- 旧 `configs/paper_accounts/*.yaml` 仅作为兼容导入来源：首次读取时导入 SQLite；之后以 SQLite 表为准，列表刷新不会覆盖已编辑模板，也不会复活已停用模板。
+- 每个账户对应一套独立买入条件、卖出条件、评分表达式、买入股数、费用和成交规则。
 - 收盘后根据模板生成 T+1 待执行订单，开盘时按配置行情源模拟成交。
 - 当前持仓或已有待买订单的股票不会重复生成买入订单。
-- 买入、卖出、持仓、现金、浮动盈亏、实现盈亏和每日资产都写入 Excel 账本。
-- 新系统独立于原有组合回测、信号质量回测、单股回测和每日收盘选股；它复用条件解析、每日计划和股票池 SQLite 共享行情库，不再读取账户模板里的旧 CSV 处理后目录。
+- 买入、卖出、持仓、现金、浮动盈亏、实现盈亏、每日资产和运行日志都写入 SQLite 账本表。
+- 模块复用条件解析、每日计划和股票池 SQLite 共享行情库，不再读取账户模板里的旧 CSV 处理后目录。
 
 ### 入口
 
 - 页面：`/paper`
 - 模板管理页：`/paper/templates`
-- 模板目录：`configs/paper_accounts/`
-- 默认模板：`configs/paper_accounts/momentum_top5_v1.yaml`
-- 账本目录：`paper_trading/accounts/`
-- 日志目录：`paper_trading/logs/`
-- API：`GET /api/paper/templates`
-- API：`GET /api/paper/template`
+- SQLite 账本库：`data_store/paper_trading.sqlite`
+- 股票池模板库：`data_store/stock_pool_templates.sqlite`
+- 当前默认用户：`admin`
+- API：`GET /api/paper/templates?username=admin`
+- API：`GET /api/paper/template?username=admin&account_id=账户编号`
 - API：`POST /api/paper/template`
-- API：`DELETE /api/paper/template`
-- API：`GET /api/paper/ledger`
+- API：`DELETE /api/paper/template?username=admin&account_id=账户编号`
+- API：`GET /api/paper/ledger?username=admin&account_id=账户编号`
 - API：`POST /api/paper/run`
-- 命令行：`python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action generate --date 20260416`
+- 命令行兼容：`python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action generate --date 20260416`
 - 定时任务脚本：`scripts/run_paper_trading_cron.sh`
 
-### 中文 YAML 模板字段
+### SQLite 表设计
+
+| 表 | 主键或隔离字段 | 说明 |
+| --- | --- | --- |
+| `paper_account_templates` | `username + account_id`，并约束 `username + account_name` 唯一 | 保存账户模板字段、原始配置快照 JSON、启停状态和更新时间 |
+| `paper_config_snapshot` | `username + account_id + position` | 每次运行时写入当前模板关键参数快照 |
+| `paper_pending_orders` | `username + account_id + row_key` | T 日生成、T+1 执行的买入/卖出订单及执行状态 |
+| `paper_trades` | `username + account_id + row_key` | 已成交买卖记录，包含价格、股数、手续费、总金额、实现盈亏和现金余额 |
+| `paper_holdings` | `username + account_id + row_key` | 未卖出的持仓、成本、当前市值、浮动盈亏和持有天数 |
+| `paper_assets` | `username + account_id + row_key` | 现金、持仓市值、总资产和累计收益 |
+| `paper_logs` | `username + account_id + row_key` | 每次运行的动作、状态和异常说明 |
+| `paper_account_ledgers` | 视图 | 汇总每个账户在各账本表中的记录数 |
+
+### 模板字段
+
+前端模板管理只展示业务字段，不展示模板目录、模板路径、股票池数据库路径、账本路径或日志目录。这些路径统一由系统按当前用户和账户编号决定。
 
 | 字段 | 说明 |
 | --- | --- |
-| `账户编号` | 模拟账户唯一编号，也用于默认账本文件名 |
-| `账户名称` | 页面和账本里展示的账户名称 |
-| `初始资金` | 模拟账户初始现金 |
-| `股票池.用户` | 股票池模板所属用户；当前未接入登录系统时固定为 `admin` |
-| `股票池.模板名称` | 多账户模拟交易使用的股票池模板名称，例如 `当前多账户模拟股票池` 或 L0-L4 模板 |
-| `股票池.数据库路径` | 股票池 SQLite 路径，默认 `data_store/stock_pool_templates.sqlite` |
-| `买入条件` | 收盘后筛选明日买入候选的表达式 |
-| `卖出条件` | 收盘后判断当前持仓是否需要卖出的表达式 |
-| `评分表达式` | 对买入候选排序的表达式 |
-| `买入排名数量` | 每天最多生成多少只候选买入订单 |
-| `买入偏移` | 默认 `1`，表示 T 日信号、T+1 执行 |
-| `最短持有天数` | 持仓达到该天数后卖出条件才生效 |
-| `最大持有天数` | 达到后可触发卖出提醒 |
-| `买入数量.方式` | 当前支持 `固定股数` |
-| `买入数量.股数` | 每只股票基础买入股数，例如 `200` |
-| `买入数量.每手股数` | 股数向上取整单位，A 股通常填 `100` |
-| `买入数量.最低买入金额` | 用 T 日收盘价估算的最低买入市值；不足时按整手向上补足股数，`0` 表示不用金额下限 |
-| `买入价格筛选.最低收盘价` | 可选，用 T 日未复权收盘价过滤过低价格股票，`0` 表示不限制 |
-| `买入价格筛选.最高收盘价` | 可选，用 T 日未复权收盘价过滤过高价格股票，`0` 表示不限制 |
-| `行情源.首选` | `东方财富`、`腾讯股票` 或 `本地日线`；本地日线来自股票池 SQLite 的 `raw_open/raw_close` |
-| `行情源.备用` | 首选行情源失败后的备用来源 |
-| `行情源.价格字段` | `开盘价` 或 `收盘价` |
-| `交易规则.持仓时不重复买入` | 已持仓股票再次入选时是否跳过 |
-| `交易规则.有待成交订单时不重复买入` | 已有待买订单时是否跳过重复信号 |
-| `交易规则.严格成交` | 是否检查涨跌停、停牌等成交约束字段 |
-| `费用.买卖费率` | 买卖默认佣金费率；也可分别配置买入费率和卖出费率 |
-| `费用.印花税` | 卖出印花税 |
-| `费用.滑点bps` | 成交滑点，买入加价、卖出减价 |
-| `费用.最低佣金` | 单笔最低佣金 |
-| `输出.账本路径` | Excel 账本路径 |
-| `输出.日志目录` | 文本日志目录 |
+| `username` | 模板所属用户；当前固定为 `admin`，后续从登录态自动获取 |
+| `account_id` | 模拟账户唯一编号，也是模板下拉框和账本隔离字段 |
+| `account_name` | 页面展示的账户名称；同一用户下不可重复 |
+| `initial_cash` | 模拟账户初始现金 |
+| `stock_pool_username` | 股票池模板所属用户；当前默认 `admin` |
+| `stock_pool_template_name` | 多账户模拟交易使用的股票池模板名称，例如 `当前多账户模拟股票池` 或 L0-L4 模板 |
+| `buy_condition` | 收盘后筛选明日买入候选的表达式 |
+| `sell_condition` | 收盘后判断当前持仓是否需要卖出的表达式 |
+| `score_expression` | 对买入候选排序的表达式；为空时前端默认填 `m20` |
+| `top_n` | 每天最多生成多少只候选买入订单 |
+| `entry_offset` | 默认 `1`，表示 T 日信号、T+1 执行 |
+| `min_hold_days` | 持仓达到该天数后卖出条件才生效 |
+| `max_hold_days` | 达到后可触发卖出提醒 |
+| `buy_quantity_mode` | 当前支持 `固定股数` |
+| `buy_shares` | 每只股票基础买入股数，例如 `200` |
+| `buy_lot_size` | 股数向上取整单位，A 股通常填 `100` |
+| `min_buy_amount` | 用 T 日收盘价估算的最低买入市值；不足时按整手向上补足股数，`0` 表示不用金额下限 |
+| `buy_min_close` | 可选，用 T 日未复权收盘价过滤过低价格股票，`0` 表示不限制 |
+| `buy_max_close` | 可选，用 T 日未复权收盘价过滤过高价格股票，`0` 表示不限制 |
+| `price_primary` | `东方财富`、`腾讯股票` 或 `本地日线`；本地日线来自股票池 SQLite 的 `raw_open/raw_close` |
+| `price_fallback` | 首选行情源失败后的备用来源 |
+| `price_field` | `开盘价` 或 `收盘价` |
+| `skip_if_holding` | 已持仓股票再次入选时是否跳过 |
+| `skip_if_pending_order` | 已有待买订单时是否跳过重复信号 |
+| `strict_execution` | 是否检查涨跌停、停牌等成交约束字段 |
+| `buy_fee_rate` | 买入佣金费率 |
+| `sell_fee_rate` | 卖出佣金费率 |
+| `stamp_tax_sell` | 卖出印花税 |
+| `slippage_bps` | 成交滑点，买入加价、卖出减价 |
+| `min_commission` | 单笔最低佣金 |
 
 ### 前端模板管理
 
-`/paper` 页面现在只负责模板选择、账本读取、订单生成、成交执行和持仓估值；模板字段编辑已经独立到 `/paper/templates`。模板管理页会先显示模板目录、模板下拉框和模板路径，选择模板后自动载入 YAML，再提供新建、复制、载入、保存、另存和删除中文 YAML 模板的表单。模板管理只操作 `configs/paper_accounts/` 下的 `.yaml` 文件；复制模板只在前端生成未落盘的新草稿；不会直接改写历史 Excel 账本，也不会把旧账本自动迁移到新策略。
+`/paper` 页面只负责模板选择、账本读取、订单生成、成交执行和持仓估值；模板字段编辑在 `/paper/templates`。
+
+- 模板下拉框调用 `GET /api/paper/templates?username=admin`，只加载当前用户可见模板。
+- `保存模板` 覆盖当前账户编号对应的 SQLite 模板。
+- `另存为新模板` 使用新的账户编号创建 SQLite 模板。
+- `复制模板` 只在前端生成新草稿，自动生成新的账户编号和账户名称；保存前不会写入 SQLite。
+- `删除模板` 只把 SQLite 模板标记为停用，不删除历史订单、成交、持仓、资产和日志。
+- 旧 YAML 导入后不会覆盖已编辑的 SQLite 模板，也不会复活已停用模板。
 
 保存规则：
 
-- `保存模板` 只允许覆盖当前正在编辑的模板路径。
-- `复制模板` 会根据当前表单自动生成新的模板文件名、账户编号、账户名称和账本路径，并清空模板路径；继续点击 `保存模板` 后才会写入新的 YAML 文件。
-- `另存为新模板` 必须使用未占用的模板文件名。
-- 后端会检查账户编号、账户名称和账本路径是否已被其他模板占用。
-- 新模板不能复用已经存在的 Excel 账本路径；如确实要用旧账本，应手工明确处理账本文件，避免历史交易和新策略混在一起。
-- `删除模板` 只删除 YAML 模板文件，返回结果会说明 Excel 账本路径和账本是否仍存在。
+- 同一用户下 `account_id` 不可重复。
+- 同一用户下 `account_name` 不可重复。
+- 覆盖保存不能切换账户编号；如需新账户使用“另存为新模板”。
+- 股票池模板必须存在，否则保存返回 404/400，页面状态栏显示失败原因。
+- 账本路径、日志目录、股票池数据库路径不再作为前端输入和冲突条件。
 
 常见错误处理：
 
-- 文件名包含目录、`..` 或非 `.yaml` 后缀时拒绝保存。
-- 模板路径不在当前模板目录内时拒绝读取、保存或删除。
-- 账户编号、账户名称、账本路径冲突时返回 400，页面状态栏会显示具体冲突项。
+- 未选择模板读取账本时，页面提示先选择模拟账户模板。
+- 账户编号或账户名称冲突时返回 400，页面状态栏显示具体冲突项。
+- 股票池模板不存在时返回错误，提示先在股票池模板管理或系统管理员页面初始化数据。
+- SQLite 账本尚无记录时，读取账本会显示空表；运行一次生成、执行或估值后自动创建记录。
 
 ### 执行动作
 
@@ -1437,31 +1480,22 @@ http://127.0.0.1:8083/
 | `refresh` | 手动运行，使用东方财富或腾讯股票最新行情刷新当前持仓价格、市值、浮动盈亏和每日资产；不生成订单、不执行买卖 |
 | `after-close` | 定时脚本专用动作，先更新估值，再为所有账户生成下一交易日订单 |
 
-### Excel 账本
-
-| Sheet | 说明 |
-| --- | --- |
-| `配置快照` | 每次运行时记录模板关键参数 |
-| `待执行订单` | T 日生成、T+1 执行的买入/卖出订单及执行状态 |
-| `成交流水` | 已成交买卖记录，包含价格、股数、手续费、总金额、实现盈亏和现金余额 |
-| `当前持仓` | 未卖出的持仓、成本、当前市值、浮动盈亏和持有天数 |
-| `每日资产` | 现金、持仓市值、总资产和累计收益 |
-| `运行日志` | 每次运行的动作、状态和异常说明 |
-
 ### 使用方式
 
-1. 在 `configs/paper_accounts/` 新增或复制一个中文 YAML 模板。
-2. 打开 `/paper/templates`，创建或修改模板；确认无误后回到 `/paper` 选择模板。
-3. 页面会自动读取所选模板对应的 Excel 账本；如果没有看到日志，可以点击“读取账本”刷新。
-4. 收盘后选择“收盘生成待执行订单”，动作日期填信号日。
-5. 下一交易日开盘后选择“开盘执行待成交订单”，动作日期填执行日。
-6. 收盘后可选择“收盘更新持仓估值”，动作日期填当天交易日。
-7. 盘中、收盘后或周末想看当前浮盈时，可以点击“获取当前持仓最新价格”，系统会用实时行情源更新持仓估值和账户权益。
-8. 打开对应 Excel 账本，复核订单、成交、持仓、资产和日志。
+1. 打开 `/paper/templates`。
+2. 在“选择模板”下拉框选择当前用户可见模板，或点击“新建模板”“复制模板”。
+3. 编辑账户编号、账户名称、资金、股票池模板、买入卖出条件、评分表达式、股数和费用等业务字段；股票池数据库、账本路径、日志目录由系统自动处理。
+4. 点击“保存模板”或“另存为新模板”，模板会写入 `data_store/paper_trading.sqlite`。
+5. 打开 `/paper`，选择模拟账户模板。
+6. 点击“读取SQLite账本”查看已有订单、成交、持仓、资产和日志。
+7. 收盘后选择“收盘生成待执行订单”，动作日期填信号日。
+8. 下一交易日开盘后选择“开盘执行待成交订单”，动作日期填执行日。
+9. 收盘后可选择“收盘更新持仓估值”，动作日期填当天交易日。
+10. 盘中、收盘后或周末想看当前浮盈时，可以点击“获取当前持仓最新价格”，系统会用实时行情源更新持仓估值和账户权益。
 
 执行顺序说明：如果 T 日收盘同时生成了卖出和买入订单，T+1 开盘执行时会先处理卖出，再处理买入。这样持仓触发卖出条件时会被模拟卖出，卖出到账资金也可以参与同一轮后续买入。
 
-买入价格和股数说明：生成 T 日收盘买入候选时，系统会先用 T 日未复权收盘价应用 `买入价格筛选`，被过滤的高价或低价股票不会占用最终 TopN 名额；之后再根据 `买入数量.股数`、`买入数量.最低买入金额` 和 `买入数量.每手股数` 计算计划股数。示例：股价 25 元、基础 200 股、最低 10000 元时计划买 400 股；股价 70 元、基础 300 股时基础市值已经 21000 元，就仍计划买 300 股。
+买入价格和股数说明：生成 T 日收盘买入候选时，系统会先用 T 日未复权收盘价应用买入价格筛选，被过滤的高价或低价股票不会占用最终 TopN 名额；之后再根据基础股数、最低买入金额和每手股数计算计划股数。示例：股价 25 元、基础 200 股、最低 10000 元时计划买 400 股；股价 70 元、基础 300 股时基础市值已经 21000 元，就仍计划买 300 股。
 
 实时价格刷新说明：`refresh` 动作不依赖处理后数据是否已经更新到当天，也不会修改待执行订单或成交流水。它只请求实时行情源并重算当前持仓和每日资产；交易时段一般得到盘中最新价，收盘后通常得到当日收盘价或收盘后的最新可用价格，非交易日或节假日通常得到最近交易日收盘价或行情源最后可用价格。若某只股票行情失败，该持仓沿用旧市值并写入警告日志。
 
@@ -1483,12 +1517,10 @@ http://127.0.0.1:8083/
 
 ### 异常处理
 
-- 模板不存在或 YAML 格式错误时，API 返回 4xx/5xx，并在前端状态栏显示错误。
+- 模板不存在或账户编号不可见时，API 返回 404，并在前端状态栏显示错误。
 - 股票池模板不存在、模板内股票没有 `stock_daily_features` 日线或动作日期缺少价格时，订单会执行失败并写入失败原因。
 - 现金不足、已持仓重复买入、开盘不可成交等情况会把订单标记为 `执行失败`，不会隔天继续误买旧信号。
-- 如果使用实时行情源失败，订单不会静默成交，会写入失败原因；离线复盘可把 `行情源.首选` 配成 `本地日线`，价格来自股票池 SQLite，便于稳定验证账本逻辑。
-
-详细说明见 `docs/paper-trading-system.md`。
+- 如果使用实时行情源失败，订单不会静默成交，会写入失败原因；离线复盘可把 `price_primary` 配成 `本地日线`，价格来自股票池 SQLite，便于稳定验证账本逻辑。
 
 ## 12. 股票池模板管理模块
 
@@ -1504,16 +1536,16 @@ http://127.0.0.1:8083/
 - 页面：`/stock-pools`
 - SQLite：`data_store/stock_pool_templates.sqlite`
 
-> 当前未接入登录系统，系统固定使用 `admin` 作为模板所属用户。登录系统接入后，前端应从登录态自动带入用户名，不在页面上提供手工输入。所有模板默认参与后续每日更新，第一阶段不提供“不参与更新”选项。校验和保存时，重复股票会自动去重，只保留首次出现的顺序；股票名称会从 SQLite `stock_basic`、Top500 分层文件、当前 Top100 处理后 CSV 和已有股票池快照中尽量回填。
+> 股票池模板页面从登录态读取当前用户，不在页面上提供手工输入用户名。模板只保存股票集合；校验和保存时，重复股票会自动去重，只保留首次出现的顺序，并且必须通过主股票池校验。不在主股票池中或已停用的股票不能写入模板。
 - API：`GET /api/stock-pools/templates`
 - API：`GET /api/stock-pools/template`
 - API：`POST /api/stock-pools/template`
 - API：`DELETE /api/stock-pools/template`
 - API：`POST /api/stock-pools/template/validate`
 - API：`POST /api/stock-pools/templates/seed`
-- API：`POST /api/stock-pools/template/refresh`
-- API：`GET /api/stock-pools/jobs`
-- API：`GET /api/stock-pools/jobs/{job_id}`
+- legacy API：`POST /api/stock-pools/template/refresh`
+- legacy API：`GET /api/stock-pools/jobs`
+- legacy API：`GET /api/stock-pools/jobs/{job_id}`
 
 ### 页面输入项
 
@@ -1554,7 +1586,7 @@ http://127.0.0.1:8083/
 ### 第二阶段数据入库命令
 
 ```bash
-# 全市场初始化共享日线与指标库
+# 主股票池初始化共享日线与指标库
 python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
 
 # 每日更新所有活跃模板涉及的唯一股票
@@ -1567,7 +1599,7 @@ python scripts/run_stock_pool_template_update.py --source template --template-na
 bash scripts/run_stock_pool_template_update.sh 20260514
 ```
 
-每次任务会记录：任务表 `stock_pool_update_jobs`、明细表 `stock_pool_update_job_items`、日志文件、明细 CSV 和 summary JSON。已完整更新的股票会标记为 `skipped`，不会重复采集；失败股票可用 `--source symbols --stock-text "300750"` 单独补跑。
+每次任务会记录：任务表 `stock_pool_update_jobs`、明细表 `stock_pool_update_job_items`、日志文件、明细 CSV 和 summary JSON。默认只补缺失，已完整更新的股票会在前置过滤阶段跳过；生产默认旧模板库更新会同步写 `data_store/market_data.sqlite`。如果旧模板库已有数据但主行情库缺数，可用 `--source symbols --stock-text "300750" --include-up-to-date` 强制重采并双写主库；失败股票可用 `--source symbols --stock-text "300750"` 单独补跑。
 
 ### 保存和删除规则
 
@@ -1583,8 +1615,8 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 - 股票列表为空或包含格式错误项时返回 400。
 - 读取或删除不存在的模板时返回 404。
 - SQLite 运行时数据库位于 `data_store/`，该目录已加入 `.gitignore`，不会被提交到 Git。
-- 保存模板不会在前端请求内阻塞式拉取行情；如果页面“最新数据日期”为空，表示当前 SQLite 尚未写入该股票日线数据，不代表股票代码不可用。
-- 行情补数失败时，先查 `GET /api/stock-pools/jobs/{job_id}` 或 `logs/stock_pool_template_update/<job_id>_items.csv`，再对失败股票单独补跑。
+- 保存模板不会在前端请求内阻塞式拉取行情；模板只保存股票集合，行情与指标由主行情库和统一调度维护。
+- 行情补数失败时，优先查看系统管理员运维看板中的调度运行记录；legacy 模板补数任务可查 `GET /api/stock-pools/jobs/{job_id}` 或 `logs/stock_pool_template_update/<job_id>_items.csv`。
 
 详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段方案见 `docs/stock-pool-template-system-plan.md`。
 
@@ -1592,11 +1624,11 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 
 ### 功能
 
-- 默认从处理后数据目录读取单只股票 CSV，与组合回测和每日收盘选股共用同一份数据
+- 默认从股票池 SQLite 共享行情库 `stock_daily_features` 读取单只股票日线、复权指标、未复权成交价和严格成交字段
 - 展示回测摘要、指标解释、K 线买卖点、交易日志和每日信号表
 - 页面展示方式与组合回测一致：上方是紧凑参数区，下方先展示摘要，再用页签切换“指标解释、K 线图、交易日志、信号表”
-- 买入条件和卖出条件默认沿用组合回测当前推荐值；由于默认读取同一份处理后数据，`hs300_m20` 等大盘字段可直接共用
-- API 仍兼容旧的 `excel_path` 调用方式，但前端默认不再使用 Excel 路径
+- 买入条件和卖出条件默认沿用组合回测当前推荐值；`hs300_m20` 等大盘字段来自股票池 SQLite 共享行情库
+- API 默认 `data_source=stock_pool`；仍兼容 `data_source=csv` 的处理后目录和旧 `excel_path` 调用方式
 
 ### 入口
 
@@ -1607,7 +1639,11 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 
 | 参数 | 说明 |
 | --- | --- |
-| `processed_dir` | 处理后数据目录，与组合回测和每日收盘选股共用 |
+| `data_source` | 默认 `stock_pool`，读取股票池 SQLite；兼容旧 `csv` |
+| `stock_pool_username` | 股票池模板所属用户，当前默认 `admin` |
+| `stock_pool_template_name` | 可选；填写后只在该模板内匹配股票 |
+| `stock_pool_db_path` | 可选 SQLite 路径；默认 `data_store/stock_pool_templates.sqlite` |
+| `processed_dir` | 兼容旧 CSV 模式的处理后数据目录 |
 | `symbol` | 股票代码或股票名称，例如 `000063` 或 `中兴通讯` |
 | `excel_path` | 兼容旧 API 的单个股票 Excel 路径；前端默认不使用 |
 | `start_date/end_date` | 回测区间 |
@@ -1616,6 +1652,8 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 | `buy_cooldown_days` | 买入冷却天数 |
 | `sell_condition` | 卖出条件 |
 | `sell_confirm_days` | 卖出连续确认天数 |
+| `max_hold_days` | 最大持有天数；`0` 表示不启用强制退出，只看卖出条件 |
+| `strict_execution` | 严格成交；买入日不可买或卖出日不可卖时记录阻塞，不强行成交 |
 | `execution_timing` | `same_day_close` 或 `next_day_open` |
 | `initial_cash` | 初始资金 |
 | `per_trade_budget` | 每次目标买入金额 |
@@ -1639,8 +1677,7 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 
 ### 异常处理
 
-- 处理后数据目录不存在时抛出 `FileNotFoundError`
-- 股票代码或名称找不到时抛出 `ValueError`
+- 默认 SQLite 模式下，股票代码或名称在共享行情库中找不到时抛出 `ValueError`；旧 CSV 模式下处理后目录不存在时抛出 `FileNotFoundError`
 - 旧 Excel 兼容模式下，Excel 路径不存在时抛出 `FileNotFoundError`
 - 缺少 `trade_date` 或执行所需价格列时抛出 `ValueError`
 
@@ -1648,7 +1685,7 @@ bash scripts/run_stock_pool_template_update.sh 20260514
 
 如果你要复现当前“主题前100池 + Top2 + 动量买入 + 大盘强度过滤 + 大盘卖出门槛”的推荐结果，可以在前端填写；这些参数也是首页和每日收盘选股页的默认值，单股表格回测页也默认使用同一组买入和卖出条件：
 
-- 处理后数据目录：`D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100`
+- 数据来源：股票池 SQLite 共享行情库（无需填写处理后目录）
 - 开始日期：`20230101`
 - 结束日期：`20251231`
 - 买入条件：`m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02`
@@ -1966,3 +2003,20 @@ python scripts/verify_delivery.py
 4. 做一次 API/前端本地冒烟验证
 5. 运行 `python scripts/verify_delivery.py`
 6. 确认通过后再提交或推送
+
+
+## 用户注册、登录与用户管理
+
+系统功能默认要求登录后使用。未登录用户可以访问 /register 注册普通账号，也可以通过 /login 登录。登录后系统按当前用户名读取股票池模板、模拟账户模板和账本，避免不同用户之间的股票池与模拟交易数据混用。
+
+默认管理员账号为 admin，初始密码不写入代码或文档。首次初始化用户库前，可在服务器环境或 .env 中设置 T0_ADMIN_DEFAULT_PASSWORD；该变量只在 admin 用户没有密码时生效，不会覆盖已有管理员密码。管理员可以访问 /admin 执行股票数据采集、指标计算和任务查看，也可以访问 /users 查看用户、启用或禁用普通用户、重置普通用户密码。
+
+用户忘记密码时，普通用户由管理员在用户管理页面重置；管理员忘记密码时需要在服务器侧执行管理重置。系统不会保存明文密码，只保存密码哈希。用户表预留不可变 user_id，后续如增加充值、订单、资金流水或会员权限模块，应使用 user_id 关联，不使用可展示用户名作为资金主键。
+
+## SQLite ???????
+
+`scripts/soft_reset_sqlite_runtime.py` ????? SQLite ???????????????????????? dry-run ???? `--execute` ??????? SQLite ??????????????????????????????????????????? `601138.SH` ???????
+
+?????????????????? `SQLite??????` ??????? `sqlite_smoke_601138`?????????? `source=main_universe`????????? `market_data.sqlite.main_stock_universe`??????????????????
+
+?????????? `python scripts/soft_reset_sqlite_runtime.py --execute`???? `python scripts/run_stock_pool_template_update.py --source main_universe --start-date 20260521 --end-date 20260521 --include-up-to-date`????? `scripts/run_paper_trading_cron.sh --check-only after-close 20260521`?

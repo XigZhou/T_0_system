@@ -20,7 +20,6 @@ from .expressions import (
     parse_condition_expr,
 )
 from .models import DailyPlanRequest, Position
-from .sector_features import resolve_data_profile, sector_display_values, validate_sector_feature_set
 from .utils import to_float
 
 
@@ -67,16 +66,7 @@ def _estimate_shares(raw_close: float | None, per_trade_budget: float, lot_size:
 
 def build_daily_plan(req: DailyPlanRequest) -> dict[str, Any]:
     loaded, diagnostics = load_backtest_input(req)
-    data_profile = resolve_data_profile(
-        requested_profile=req.data_profile,
-        processed_dir=diagnostics["processed_dir"],
-        buy_condition=req.buy_condition,
-        sell_condition=req.sell_condition,
-        score_expression=req.score_expression,
-    )
-    diagnostics["data_profile"] = data_profile
-    if data_profile == "sector":
-        diagnostics.update(validate_sector_feature_set(loaded_items=loaded, processed_dir=diagnostics["processed_dir"]))
+    diagnostics["data_profile"] = "base"
     all_dates = sorted({date for item in loaded for date in item.df["trade_date"].astype(str).tolist()})
     signal_date, date_note = _resolve_signal_date(all_dates, req.signal_date)
     symbol_map = _build_symbol_map(loaded)
@@ -123,7 +113,6 @@ def build_daily_plan(req: DailyPlanRequest) -> dict[str, Any]:
                 "estimated_budget": round(float(req.per_trade_budget), 2),
                 "reason": reason,
                 "open_check": "明日开盘若涨停、跌停、停牌或流动性不足，则不买入",
-                **sector_display_values(row),
             }
         )
     buy_rows.sort(key=lambda item: (-float(item["score"]), str(item["symbol"])))

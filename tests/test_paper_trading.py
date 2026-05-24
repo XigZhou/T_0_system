@@ -1,5 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +19,7 @@ from overnight_bt.paper_trading import (
     run_paper_trading,
     save_paper_account_template,
 )
-from tests.helpers import make_processed_stock, write_stock_pool_db
+from tests.helpers import make_processed_stock, write_stock_pool_db, write_stock_pool_template_symbols_db
 
 
 class PaperTradingTest(unittest.TestCase):
@@ -50,6 +52,7 @@ class PaperTradingTest(unittest.TestCase):
         lot_size: int = 100,
         min_close: float = 0,
         max_close: float = 0,
+        seed_market_data_from_template: bool = True,
     ) -> Path:
         config_dir = base / "configs" / "paper_accounts"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -98,9 +101,41 @@ class PaperTradingTest(unittest.TestCase):
 """.strip(),
             encoding="utf-8",
         )
+        if seed_market_data_from_template:
+            self._seed_market_data_from_template_db(base, db_path)
         return config_path
 
-    def test_generate_execute_sell_and_excel_ledger(self) -> None:
+
+    def _seed_market_data_from_template_db(self, base: Path, template_db: Path) -> None:
+        try:
+            with sqlite3.connect(template_db) as conn:
+                rows = pd.read_sql_query("SELECT * FROM stock_daily_features", conn)
+        except Exception:
+            return
+        if rows.empty:
+            return
+        from overnight_bt.market_data_store import upsert_feature_rows
+
+        market_db = base / "data_store" / "market_data.sqlite"
+        payload = rows.astype(object).where(pd.notna(rows), None).to_dict("records")
+        upsert_feature_rows(payload, db_path=market_db)
+        old_value = os.environ.get("MARKET_DATA_DB_PATH")
+        os.environ["MARKET_DATA_DB_PATH"] = str(market_db)
+
+        def restore_env() -> None:
+            if old_value is None:
+                os.environ.pop("MARKET_DATA_DB_PATH", None)
+            else:
+                os.environ["MARKET_DATA_DB_PATH"] = old_value
+
+        self.addCleanup(restore_env)
+
+    def _sqlite_count(self, path: Path, table: str, account_id: str) -> int:
+        with sqlite3.connect(path) as conn:
+            row = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE account_id=?", (account_id,)).fetchone()
+        return int(row[0])
+
+    def test_generate_execute_sell_and_sqlite_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             stock_a = make_processed_stock(
@@ -151,11 +186,25 @@ class PaperTradingTest(unittest.TestCase):
 
             ledger_path = Path(sold["summary"]["ledger_path"])
             self.assertTrue(ledger_path.exists())
-            sheets = pd.read_excel(ledger_path, sheet_name=None)
-            self.assertIn("待执行订单", sheets)
-            self.assertIn("成交流水", sheets)
-            self.assertIn("当前持仓", sheets)
-            self.assertIn("每日资产", sheets)
+            self.assertEqual(ledger_path.name, "paper_trading.sqlite")
+            with sqlite3.connect(ledger_path) as conn:
+                table_names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")}
+            for table_name in [
+                "paper_config_snapshot",
+                "paper_pending_orders",
+                "paper_trades",
+                "paper_holdings",
+                "paper_assets",
+                "paper_logs",
+                "paper_account_ledgers",
+            ]:
+                self.assertIn(table_name, table_names)
+            self.assertGreater(self._sqlite_count(ledger_path, "paper_config_snapshot", "测试账户"), 0)
+            self.assertGreaterEqual(self._sqlite_count(ledger_path, "paper_pending_orders", "测试账户"), 2)
+            self.assertEqual(self._sqlite_count(ledger_path, "paper_trades", "测试账户"), 2)
+            self.assertEqual(self._sqlite_count(ledger_path, "paper_holdings", "测试账户"), 0)
+            self.assertGreaterEqual(self._sqlite_count(ledger_path, "paper_assets", "测试账户"), 1)
+            self.assertGreaterEqual(self._sqlite_count(ledger_path, "paper_logs", "测试账户"), 1)
 
     def test_execute_sells_before_buys_to_release_cash(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -297,6 +346,79 @@ class PaperTradingTest(unittest.TestCase):
             self.assertEqual(templates[0]["stock_pool_template_name"], "测试股票池")
             self.assertEqual(templates[0]["buy_shares"], 200)
 
+
+    def test_sqlite_only_does_not_auto_import_legacy_yaml_when_sqlite_is_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
+            config_path = self._write_config(base, db_path)
+            old_value = os.environ.get("T0_SQLITE_ONLY")
+            os.environ["T0_SQLITE_ONLY"] = "1"
+            try:
+                templates = list_paper_account_templates(config_path.parent)
+            finally:
+                if old_value is None:
+                    os.environ.pop("T0_SQLITE_ONLY", None)
+                else:
+                    os.environ["T0_SQLITE_ONLY"] = old_value
+
+            self.assertEqual(templates, [])
+
+    def test_sqlite_only_filters_previously_imported_legacy_yaml_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
+            config_path = self._write_config(base, db_path)
+            legacy_templates = list_paper_account_templates(config_path.parent)
+            self.assertEqual([item["account_id"] for item in legacy_templates], ["测试账户"])
+
+            save_paper_account_template(
+                PaperTemplateSaveRequest(
+                    config_dir=str(config_path.parent),
+                    account_id="sqlite_account",
+                    account_name="SQLite账户",
+                    stock_pool_username="admin",
+                    stock_pool_template_name="测试股票池",
+                    stock_pool_db_path=str(db_path),
+                    buy_condition="m20>0",
+                    score_expression="m20",
+                )
+            )
+
+            old_value = os.environ.get("T0_SQLITE_ONLY")
+            os.environ["T0_SQLITE_ONLY"] = "1"
+            try:
+                templates = list_paper_account_templates(config_path.parent)
+            finally:
+                if old_value is None:
+                    os.environ.pop("T0_SQLITE_ONLY", None)
+                else:
+                    os.environ["T0_SQLITE_ONLY"] = old_value
+
+            self.assertEqual([item["account_id"] for item in templates], ["sqlite_account"])
+
+    def test_list_templates_does_not_reimport_legacy_yaml_when_sqlite_has_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "\u8fc1\u79fb\u6d4b\u8bd5\u6c60", [self._one_stock()])
+            config_path = self._write_config(base, db_path)
+            save_paper_account_template(
+                PaperTemplateSaveRequest(
+                    config_dir=str(config_path.parent),
+                    account_id="sqlite_account",
+                    account_name="SQLite\u8d26\u6237",
+                    stock_pool_username="admin",
+                    stock_pool_template_name="\u8fc1\u79fb\u6d4b\u8bd5\u6c60",
+                    stock_pool_db_path=str(db_path),
+                    buy_condition="m20>0",
+                    score_expression="m20",
+                )
+            )
+
+            templates = list_paper_account_templates(config_path.parent)
+
+            self.assertEqual([item["account_id"] for item in templates], ["sqlite_account"])
+
     def test_generate_latest_signal_falls_back_to_next_weekday_when_template_has_no_next_row(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
@@ -315,7 +437,146 @@ class PaperTradingTest(unittest.TestCase):
             self.assertEqual(generated["summary"]["added_order_count"], 1)
             self.assertEqual(generated["pending_order_rows"][0]["计划执行日期"], "20240105")
 
-    def test_save_template_writes_yaml_and_reads_editor_payload(self) -> None:
+    def test_generate_signal_date_skips_empty_latest_feature_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240104", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m20": 0.8, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240105", "raw_open": None, "raw_high": None, "raw_low": None, "raw_close": None, "m20": None, "can_buy_open_t": False, "can_sell_t": False},
+                ],
+            )
+            db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [stock])
+            config_path = self._write_config(base, db_path)
+
+            generated = run_paper_trading(PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240105"))
+
+            self.assertEqual(generated["summary"]["signal_date"], "20240104")
+            self.assertEqual(generated["summary"]["added_order_count"], 1)
+            self.assertEqual(generated["pending_order_rows"][0]["信号日期"], "20240104")
+            self.assertEqual(generated["pending_order_rows"][0]["计划执行日期"], "20240105")
+
+    def test_after_close_generates_orders_from_market_data_store_when_template_has_only_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            template_db = write_stock_pool_template_symbols_db(
+                base / "stock_pool_templates.sqlite",
+                "测试股票池",
+                [{"symbol": "000001", "stock_name": "平安银行"}],
+            )
+            market_db = base / "market_data.sqlite"
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {
+                        "trade_date": "20240102",
+                        "raw_open": 10.0,
+                        "raw_high": 10.2,
+                        "raw_low": 9.8,
+                        "raw_close": 10.0,
+                        "m20": 0.8,
+                        "can_buy_open_t": True,
+                        "can_sell_t": True,
+                    }
+                ],
+            )
+            rows = stock.astype(object).where(pd.notna(stock), None).to_dict("records")
+            config_path = self._write_config(base, template_db)
+
+            from overnight_bt.market_data_store import upsert_feature_rows
+
+            upsert_feature_rows(rows, db_path=market_db)
+
+            with patch("overnight_bt.market_data_store.DEFAULT_DB_PATH", market_db):
+                generated = run_paper_trading(
+                    PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102")
+                )
+
+            self.assertEqual(generated["summary"]["signal_date"], "20240102")
+            self.assertEqual(generated["summary"]["added_order_count"], 1)
+            self.assertEqual(generated["pending_order_rows"][0]["股票代码"], "000001.SZ")
+            self.assertEqual(generated["pending_order_rows"][0]["计划执行日期"], "20240103")
+
+    def test_after_close_does_not_fall_back_to_template_feature_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stale_stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {
+                        "trade_date": "20240102",
+                        "raw_open": 10.0,
+                        "raw_high": 10.2,
+                        "raw_low": 9.8,
+                        "raw_close": 10.0,
+                        "m20": 0.8,
+                        "can_buy_open_t": True,
+                        "can_sell_t": True,
+                    }
+                ],
+            )
+            template_db = write_stock_pool_db(base / "stock_pool_templates.sqlite", "测试股票池", [stale_stock])
+            market_db = base / "empty_market_data.sqlite"
+            config_path = self._write_config(base, template_db, seed_market_data_from_template=False)
+
+            with patch("overnight_bt.market_data_store.DEFAULT_DB_PATH", market_db), patch(
+                "overnight_bt.market_data_store.LEGACY_STOCK_POOL_DB_PATH", template_db
+            ), patch.dict(os.environ, {"MARKET_DATA_DB_PATH": str(market_db)}):
+                with self.assertRaises(ValueError) as ctx:
+                    run_paper_trading(
+                        PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102")
+                    )
+
+            self.assertIn("没有可用日线数据", str(ctx.exception))
+
+    def test_market_data_db_env_is_used_for_paper_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            template_db = write_stock_pool_template_symbols_db(
+                base / "stock_pool_templates.sqlite",
+                "测试股票池",
+                [{"symbol": "000001", "stock_name": "平安银行"}],
+            )
+            env_market_db = base / "env_market_data.sqlite"
+            default_market_db = base / "empty_default_market_data.sqlite"
+            stock = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {
+                        "trade_date": "20240102",
+                        "raw_open": 10.0,
+                        "raw_high": 10.2,
+                        "raw_low": 9.8,
+                        "raw_close": 10.0,
+                        "m20": 0.8,
+                        "can_buy_open_t": True,
+                        "can_sell_t": True,
+                    }
+                ],
+            )
+            rows = stock.astype(object).where(pd.notna(stock), None).to_dict("records")
+            config_path = self._write_config(base, template_db)
+
+            from overnight_bt.market_data_store import upsert_feature_rows
+
+            upsert_feature_rows(rows, db_path=env_market_db)
+
+            with patch("overnight_bt.market_data_store.DEFAULT_DB_PATH", default_market_db), patch.dict(
+                os.environ, {"MARKET_DATA_DB_PATH": str(env_market_db)}
+            ):
+                generated = run_paper_trading(
+                    PaperTradingRunRequest(config_path=str(config_path), action="generate", trade_date="20240102")
+                )
+
+            self.assertEqual(generated["summary"]["added_order_count"], 1)
+            self.assertEqual(generated["pending_order_rows"][0]["股票代码"], "000001.SZ")
+
+    def test_save_template_writes_sqlite_and_reads_editor_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             config_dir = base / "configs" / "paper_accounts"
@@ -337,13 +598,15 @@ class PaperTradingTest(unittest.TestCase):
                 )
             )
 
-            saved_path = Path(result["template"]["config_path"])
-            self.assertTrue(saved_path.exists())
-            loaded = read_paper_account_template(str(saved_path), str(config_dir))
+            self.assertEqual(result["template"]["config_path"], "编辑账户")
+            self.assertEqual(result["template"]["ledger_storage"], "SQLite")
+            self.assertEqual(Path(result["template"]["ledger_path"]), base / "data_store" / "paper_trading.sqlite")
+            loaded = read_paper_account_template(account_id="编辑账户", config_dir=str(config_dir))
             self.assertEqual(loaded["account_id"], "编辑账户")
             self.assertEqual(loaded["stock_pool_template_name"], "测试股票池")
             self.assertEqual(loaded["buy_condition"], "m20>0.1")
-            self.assertEqual(Path(loaded["ledger_path"]), base / "paper_trading" / "accounts" / "editor_account.xlsx")
+            self.assertEqual(loaded["ledger_storage"], "SQLite")
+            self.assertEqual(Path(loaded["ledger_path"]), base / "data_store" / "paper_trading.sqlite")
 
     def test_save_template_rejects_conflicting_identity_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -351,7 +614,7 @@ class PaperTradingTest(unittest.TestCase):
             db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
             existing = self._write_config(base, db_path)
             config_dir = existing.parent
-            existing_ledger = base / "paper_trading" / "accounts" / "test_account.xlsx"
+            list_paper_account_templates(config_dir)
 
             with self.assertRaises(ValueError):
                 save_paper_account_template(
@@ -373,19 +636,19 @@ class PaperTradingTest(unittest.TestCase):
                 save_paper_account_template(
                     PaperTemplateSaveRequest(
                         config_dir=str(config_dir),
-                        file_name="duplicate_ledger.yaml",
+                        file_name="duplicate_name.yaml",
                         account_id="新账户",
-                        account_name="新模拟账户",
+                        account_name="测试模拟账户",
                         stock_pool_username="admin",
                         stock_pool_template_name="测试股票池",
                         stock_pool_db_path=str(db_path),
                         buy_condition="m20>0",
                         score_expression="m20",
-                        ledger_path=str(existing_ledger),
+                        ledger_path=str(base / "paper_trading" / "accounts" / "ignored.xlsx"),
                     )
                 )
 
-    def test_delete_template_keeps_excel_ledger_file(self) -> None:
+    def test_delete_template_deactivates_sqlite_template_and_keeps_legacy_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
@@ -396,11 +659,15 @@ class PaperTradingTest(unittest.TestCase):
 
             result = delete_paper_account_template(str(config_path), str(config_path.parent))
 
-            self.assertFalse(config_path.exists())
+            self.assertTrue(config_path.exists())
             self.assertTrue(ledger_path.exists())
-            self.assertTrue(result["ledger_exists"])
+            self.assertEqual(result["ledger_storage"], "SQLite")
+            self.assertFalse(result["ledger_exists"])
+            self.assertEqual(list_paper_account_templates(config_path.parent), [])
+            with self.assertRaises(FileNotFoundError):
+                read_paper_account_template(account_id="测试账户", config_dir=str(config_path.parent))
 
-    def test_overwrite_template_rejects_switching_to_existing_old_ledger(self) -> None:
+    def test_overwrite_template_ignores_old_ledger_path_and_keeps_sqlite_storage(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             db_path = write_stock_pool_db(base / "stock_pool.sqlite", "测试股票池", [self._one_stock()])
@@ -409,23 +676,25 @@ class PaperTradingTest(unittest.TestCase):
             old_ledger.parent.mkdir(parents=True, exist_ok=True)
             old_ledger.write_bytes(b"old ledger")
 
-            with self.assertRaises(ValueError):
-                save_paper_account_template(
-                    PaperTemplateSaveRequest(
-                        config_dir=str(config_path.parent),
-                        config_path=str(config_path),
-                        file_name=config_path.name,
-                        overwrite_existing=True,
-                        account_id="测试账户",
-                        account_name="测试模拟账户",
-                        stock_pool_username="admin",
-                        stock_pool_template_name="测试股票池",
-                        stock_pool_db_path=str(db_path),
-                        buy_condition="m20>0",
-                        score_expression="m20",
-                        ledger_path=str(old_ledger),
-                    )
+            result = save_paper_account_template(
+                PaperTemplateSaveRequest(
+                    config_dir=str(config_path.parent),
+                    config_path=str(config_path),
+                    file_name=config_path.name,
+                    overwrite_existing=True,
+                    account_id="测试账户",
+                    account_name="测试模拟账户",
+                    stock_pool_username="admin",
+                    stock_pool_template_name="测试股票池",
+                    stock_pool_db_path=str(db_path),
+                    buy_condition="m20>0",
+                    score_expression="m20",
+                    ledger_path=str(old_ledger),
                 )
+            )
+            self.assertEqual(result["template"]["ledger_storage"], "SQLite")
+            self.assertEqual(Path(result["template"]["ledger_path"]), base / "data_store" / "paper_trading.sqlite")
+            self.assertEqual(old_ledger.read_bytes(), b"old ledger")
 
 
 if __name__ == "__main__":

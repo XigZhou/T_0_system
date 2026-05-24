@@ -1,5 +1,4 @@
 const DEFAULT_STOCK_POOL_USERNAME = "admin";
-const STOCK_POOL_ADMIN_USERNAME = "admin";
 const poolCurrentUser = document.getElementById("poolCurrentUser");
 const poolTemplateSelect = document.getElementById("poolTemplateSelect");
 const reloadPoolsBtn = document.getElementById("reloadPoolsBtn");
@@ -18,12 +17,6 @@ const poolDescriptionInput = document.getElementById("poolDescription");
 const poolStockTextInput = document.getElementById("poolStockText");
 const poolValidationNote = document.getElementById("poolValidationNote");
 const poolStockRows = document.getElementById("poolStockRows");
-const stockPoolAdminPanel = document.getElementById("stockPoolAdminPanel");
-const refreshPoolDataBtn = document.getElementById("refreshPoolDataBtn");
-const reloadPoolJobsBtn = document.getElementById("reloadPoolJobsBtn");
-const poolAdminStatus = document.getElementById("poolAdminStatus");
-const poolJobRows = document.getElementById("poolJobRows");
-const poolJobDetail = document.getElementById("poolJobDetail");
 
 const POOL_SUMMARY_LABELS = {
   template_name: "模板名称",
@@ -40,33 +33,7 @@ function setPoolStatus(text, error = false) {
 }
 
 function currentStockPoolUsername() {
-  return DEFAULT_STOCK_POOL_USERNAME;
-}
-
-function isStockPoolAdmin() {
-  return currentStockPoolUsername() === STOCK_POOL_ADMIN_USERNAME;
-}
-
-function setPoolAdminStatus(text, error = false) {
-  if (!poolAdminStatus) {
-    return;
-  }
-  poolAdminStatus.textContent = text;
-  poolAdminStatus.style.color = error ? "#8a2f13" : "";
-}
-
-function setupAdminVisibility() {
-  const visible = isStockPoolAdmin();
-  if (stockPoolAdminPanel) {
-    stockPoolAdminPanel.hidden = !visible;
-  }
-  if (!visible) {
-    [refreshPoolDataBtn, reloadPoolJobsBtn].forEach((button) => {
-      if (button) {
-        button.disabled = true;
-      }
-    });
-  }
+  return window.T0Auth?.currentUsername?.() || DEFAULT_STOCK_POOL_USERNAME;
 }
 
 function chinaDateTimeStamp(date = new Date()) {
@@ -182,16 +149,8 @@ function setPoolButtonsDisabled(disabled) {
   });
 }
 
-function setAdminButtonsDisabled(disabled) {
-  [refreshPoolDataBtn, reloadPoolJobsBtn].forEach((button) => {
-    if (button) {
-      button.disabled = disabled || !isStockPoolAdmin();
-    }
-  });
-}
-
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "same-origin", ...options });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.detail || `请求失败：${response.status}`);
@@ -254,134 +213,6 @@ async function validatePoolStockText() {
     setPoolStatus(`股票列表校验通过，有效 ${data.valid_count} 只。`);
   }
   return data;
-}
-
-
-function shortJobId(jobId = "") {
-  const text = String(jobId || "");
-  return text.length > 8 ? text.slice(0, 8) : text;
-}
-
-function formatJobStatus(status = "") {
-  const text = String(status || "").trim();
-  if (text === "success") return "成功";
-  if (text === "failed") return "失败";
-  if (text === "running") return "运行中";
-  return text || "—";
-}
-
-function renderJobRows(jobs = []) {
-  if (!poolJobRows) {
-    return;
-  }
-  if (!jobs.length) {
-    poolJobRows.innerHTML = `<tr><td colspan="10">暂无股票池数据更新任务。</td></tr>`;
-    return;
-  }
-  poolJobRows.innerHTML = jobs
-    .map(
-      (job) => `
-        <tr data-job-id="${job.job_id || ""}">
-          <td title="${job.job_id || ""}">${shortJobId(job.job_id)}</td>
-          <td>${formatJobStatus(job.status)}</td>
-          <td>${job.job_type || ""}</td>
-          <td>${job.template_name || "全部活跃模板"}</td>
-          <td>${formatSummaryValue("stock_count", job.stock_count)}</td>
-          <td>${formatSummaryValue("success_count", job.success_count)}</td>
-          <td>${formatSummaryValue("failed_count", job.failed_count)}</td>
-          <td>${job.end_date || ""}</td>
-          <td>${job.finished_at || job.started_at || ""}</td>
-          <td title="${job.log_file || ""}">${job.log_file || "历史任务未记录"}</td>
-        </tr>
-      `
-    )
-    .join("");
-  Array.from(poolJobRows.querySelectorAll ? poolJobRows.querySelectorAll("tr[data-job-id]") : []).forEach((row) => {
-    row.addEventListener("click", () => loadPoolJobDetail(row.dataset.jobId));
-  });
-}
-
-async function loadPoolJobs(showStatus = false) {
-  if (!isStockPoolAdmin()) {
-    return;
-  }
-  if (showStatus) {
-    setPoolAdminStatus("正在读取最近任务...");
-  }
-  const data = await fetchJson(`/api/stock-pools/jobs?username=${usernameQuery()}&limit=20`);
-  renderJobRows(data.jobs || []);
-  if (showStatus) {
-    setPoolAdminStatus(`已读取最近 ${(data.jobs || []).length} 个任务。`);
-  }
-}
-
-async function loadPoolJobDetail(jobId) {
-  if (!jobId || !isStockPoolAdmin()) {
-    return;
-  }
-  setPoolAdminStatus("正在读取任务明细...");
-  const data = await fetchJson(`/api/stock-pools/jobs/${encodeURIComponent(jobId)}?username=${usernameQuery()}`);
-  const failedItems = (data.items || []).filter((item) => item.status === "failed");
-  const outputText = [
-    `任务 ${shortJobId(data.job_id)}：${formatJobStatus(data.status)}，执行 ${formatSummaryValue("stock_count", data.stock_count)} 只，失败 ${formatSummaryValue("failed_count", data.failed_count)} 只。`,
-    `日志：${data.log_file || "历史任务未记录"}`,
-    `明细：${data.item_csv || "历史任务未记录"}`,
-    `摘要：${data.summary_json || "历史任务未记录"}`,
-  ];
-  if (failedItems.length) {
-    outputText.push(`失败样例：${failedItems.slice(0, 5).map((item) => `${item.symbol}:${item.message}`).join("；")}`);
-  } else {
-    outputText.push("失败明细：无。");
-  }
-  if (poolJobDetail) {
-    poolJobDetail.textContent = outputText.join(" ");
-  }
-  setPoolAdminStatus(`任务明细已载入：${shortJobId(data.job_id)}。`);
-}
-
-async function refreshCurrentPoolData() {
-  if (!isStockPoolAdmin()) {
-    setPoolAdminStatus("只有 admin 用户可以刷新股票池数据。", true);
-    return;
-  }
-  const templateName = poolOriginalTemplateNameInput.value.trim() || poolTemplateNameInput.value.trim();
-  if (!templateName) {
-    setPoolAdminStatus("请先选择或保存一个股票池模板。", true);
-    return;
-  }
-  const confirmed =
-    typeof window === "undefined" || typeof window.confirm !== "function"
-      ? true
-      : window.confirm("将刷新当前模板涉及股票的共享日线与指标库，默认只补缺失数据。确认执行吗？");
-  if (!confirmed) {
-    return;
-  }
-  setAdminButtonsDisabled(true);
-  setPoolAdminStatus("正在刷新当前模板数据...");
-  try {
-    const data = await fetchJson("/api/stock-pools/template/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source: "template",
-        username: currentStockPoolUsername(),
-        template_name: templateName,
-        start_date: "20220101",
-        end_date: "",
-        retry_attempts: 3,
-        retry_sleep_seconds: 5,
-        sleep_seconds: 0.5,
-        only_missing: true,
-      }),
-    });
-    setPoolAdminStatus(data.message || "当前模板数据刷新完成。");
-    await loadCurrentPool(false);
-    await loadPoolJobs(false);
-  } catch (error) {
-    setPoolAdminStatus(`刷新失败：${error.message}`, true);
-  } finally {
-    setAdminButtonsDisabled(false);
-  }
 }
 
 async function saveCurrentPool() {
@@ -447,7 +278,7 @@ copyPoolBtn.addEventListener("click", () => {
   };
   poolTemplateSelect.value = "";
   populatePoolEditor(copied);
-  setPoolStatus("已复制为新股票池草稿。保存前不会写入 SQLite，也不会触发行情采集。");
+  setPoolStatus("已复制为新股票池草稿。保存前不会写入模板表，也不会触发行情采集。");
 });
 
 validatePoolBtn.addEventListener("click", async () => {
@@ -469,7 +300,7 @@ deletePoolBtn.addEventListener("click", async () => {
   const confirmed =
     typeof window === "undefined" || typeof window.confirm !== "function"
       ? true
-      : window.confirm("只删除股票池模板和模板股票关系，不删除 SQLite 日线数据。确认删除吗？");
+      : window.confirm("只删除股票池模板和模板股票关系，不删除主行情库数据。确认删除吗？");
   if (!confirmed) {
     return;
   }
@@ -486,24 +317,6 @@ deletePoolBtn.addEventListener("click", async () => {
   }
 });
 
-
-if (refreshPoolDataBtn) {
-  refreshPoolDataBtn.addEventListener("click", refreshCurrentPoolData);
-}
-
-if (reloadPoolJobsBtn) {
-  reloadPoolJobsBtn.addEventListener("click", async () => {
-    try {
-      setAdminButtonsDisabled(true);
-      await loadPoolJobs(true);
-    } catch (error) {
-      setPoolAdminStatus(`读取任务失败：${error.message}`, true);
-    } finally {
-      setAdminButtonsDisabled(false);
-    }
-  });
-}
-
 seedPoolsBtn.addEventListener("click", async () => {
   setPoolButtonsDisabled(true);
   setPoolStatus("正在初始化基础模板...");
@@ -519,7 +332,11 @@ seedPoolsBtn.addEventListener("click", async () => {
 });
 
 
-setupAdminVisibility();
 populatePoolEditor();
-loadPoolTemplates().catch((error) => setPoolStatus(`读取模板失败：${error.message}`, true));
-loadPoolJobs(false).catch((error) => setPoolAdminStatus(`读取任务失败：${error.message}`, true));
+window.T0Auth?.loadCurrentUser?.()
+  .then(() => {
+    return loadPoolTemplates();
+  })
+  .catch((error) => {
+    setPoolStatus(`读取模板失败：${error.message}`, true);
+  });

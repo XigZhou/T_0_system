@@ -15,23 +15,20 @@
             <h1>板块研究工作台</h1>
           </div>
           <div class="brand-actions">
-            <p class="subtle">读取独立板块研究产物，查看主题排名、强势板块、个股暴露和异常记录。</p>
-            <p class="subtle"><a href="/">组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a></p>
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
+            <p class="subtle">读取 SQLite 主库中的板块研究数据，查看主题排名、强势板块、个股暴露和异常记录。</p>
+            <p class="subtle"><a href="/">组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/single">单股表格回测</a> · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a></p>
           </div>
         </div>
 
         <form id="sectorForm" class="form-grid compact-form sector-form">
-          <label class="field-wide">
-            <span>板块指标目录</span>
-            <input id="sectorProcessedDir" type="text" value="sector_research/data/processed" />
-          </label>
-          <label class="field-dates">
-            <span>报告目录</span>
-            <input id="sectorReportDir" type="text" value="sector_research/reports" />
-          </label>
           <div class="actions">
             <button id="loadSectorBtn" type="submit">读取板块研究</button>
-            <button id="resetSectorBtn" type="button" class="secondary">默认目录</button>
+            <button id="resetSectorBtn" type="button" class="secondary">刷新</button>
           </div>
           <p id="sectorStatus" class="status">等待读取。</p>
         </form>
@@ -143,6 +140,7 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/sector.js"></script>
   </body>
 </html>

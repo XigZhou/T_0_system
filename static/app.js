@@ -31,35 +31,14 @@ const stockPoolTemplateSelect = document.getElementById("stockPoolTemplateSelect
 const reloadBacktestPoolsBtn = document.getElementById("reloadBacktestPoolsBtn");
 
 const DEFAULT_BACKTEST_POOL_USERNAME = "admin";
-const BASE_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100";
-const SECTOR_PROCESSED_DIR = "data_bundle/processed_qfq_theme_focus_top100_sector";
 const BASE_BUY_CONDITION = "m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02";
 const BASE_SCORE_EXPRESSION = "m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30";
-const SECTOR_FILTER_CONDITION = `${BASE_BUY_CONDITION},sector_exposure_score>0,sector_strongest_theme_score>=0.6,sector_strongest_theme_rank_pct<=0.5`;
-const SECTOR_SCORE_EXPRESSION = `${BASE_SCORE_EXPRESSION} + sector_strongest_theme_score * 30 + sector_exposure_score * 10 - sector_strongest_theme_rank_pct * 15`;
 const STRATEGY_PRESETS = {
   base: {
-    processedDir: BASE_PROCESSED_DIR,
     buyCondition: BASE_BUY_CONDITION,
     scoreExpression: BASE_SCORE_EXPRESSION,
-    dataProfile: "auto",
-    note: "已切换为基准动量预设，数据来自所选股票池模板。",
-  },
-  sector_filter: {
-    processedDir: SECTOR_PROCESSED_DIR,
-    buyCondition: SECTOR_FILTER_CONDITION,
-    scoreExpression: BASE_SCORE_EXPRESSION,
-    dataProfile: "sector",
-    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
-    disabled: true,
-  },
-  sector_score: {
-    processedDir: SECTOR_PROCESSED_DIR,
-    buyCondition: SECTOR_FILTER_CONDITION,
-    scoreExpression: SECTOR_SCORE_EXPRESSION,
-    dataProfile: "sector",
-    note: "板块增强预设需要 SQLite 入库 sector_* 字段后再开放。",
-    disabled: true,
+    dataProfile: "base",
+    note: "???????????????????????",
   },
 };
 
@@ -100,23 +79,6 @@ const PERCENT_KEYS = new Set([
   "hs300_m20",
   "hs300_m60",
   "hs300_m120",
-  "industry_m20",
-  "industry_m60",
-  "industry_rank_m20",
-  "industry_rank_m60",
-  "industry_up_ratio",
-  "industry_strong_ratio",
-  "stock_vs_industry_m20",
-  "stock_vs_industry_m60",
-  "sector_exposure_score",
-  "sector_strongest_theme_score",
-  "sector_strongest_theme_rank_pct",
-  "sector_strongest_theme_m5",
-  "sector_strongest_theme_m20",
-  "sector_strongest_theme_m60",
-  "sector_strongest_theme_amount_ratio_20",
-  "sector_strongest_theme_board_up_ratio",
-  "sector_strongest_theme_positive_m20_ratio",
 ]);
 
 const MONEY_KEYS = new Set([
@@ -195,17 +157,6 @@ const COLUMN_LABELS = {
   hs300_m120: "沪深300一百二十日动量",
   hs300_pct_chg: "沪深300当日涨跌幅",
   industry: "行业",
-  industry_amount: "行业成交额",
-  industry_amount20: "行业二十日均额",
-  industry_amount_ratio: "行业成交额放大倍数",
-  industry_m20: "行业二十日动量",
-  industry_m60: "行业六十日动量",
-  industry_rank_m20: "行业二十日强度排名",
-  industry_rank_m60: "行业六十日强度排名",
-  industry_stock_count: "行业股票数",
-  industry_strong_ratio: "行业强势股占比",
-  industry_up_ratio: "行业上涨股票占比",
-  industry_valid_m20_count: "行业有效动量样本数",
   listed_days: "上市天数",
   lower_shadow_pct: "下影线占比",
   m5: "五日动量",
@@ -251,19 +202,6 @@ const COLUMN_LABELS = {
   sell_count: "卖出次数",
   sell_fee: "卖出费用",
   sell_net_amount: "卖出净金额",
-  sector_board_count: "命中板块数",
-  sector_exposure_score: "板块主题暴露分",
-  sector_strongest_board: "最强板块",
-  sector_strongest_subtheme: "最强子赛道",
-  sector_strongest_theme: "最强主题",
-  sector_strongest_theme_amount_ratio_20: "最强主题成交额放大",
-  sector_strongest_theme_board_up_ratio: "最强主题上涨占比",
-  sector_strongest_theme_m5: "最强主题五日动量",
-  sector_strongest_theme_m20: "最强主题二十日动量",
-  sector_strongest_theme_m60: "最强主题六十日动量",
-  sector_strongest_theme_positive_m20_ratio: "最强主题正动量占比",
-  sector_strongest_theme_rank_pct: "最强主题排名百分位",
-  sector_strongest_theme_score: "最强主题综合分",
   shares: "股数",
   signal_count: "信号数",
   signal_close: "信号日前复权收盘价",
@@ -272,8 +210,6 @@ const COLUMN_LABELS = {
   signal_date: "信号日期",
   signal_raw_close: "信号日未复权收盘价",
   status: "状态",
-  stock_vs_industry_m20: "个股相对行业二十日动量",
-  stock_vs_industry_m60: "个股相对行业六十日动量",
   symbol: "股票代码",
   top_n: "选股数量",
   top_k: "累计TopK",
@@ -345,7 +281,7 @@ if (tabButtons.length) {
 }
 
 function currentBacktestPoolUsername() {
-  return DEFAULT_BACKTEST_POOL_USERNAME;
+  return window.T0Auth?.currentUsername?.() || DEFAULT_BACKTEST_POOL_USERNAME;
 }
 
 function selectedBacktestPoolTemplate() {
@@ -353,7 +289,7 @@ function selectedBacktestPoolTemplate() {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "same-origin", ...options });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.detail || `请求失败：${response.status}`);
@@ -451,16 +387,19 @@ reloadBacktestPoolsBtn?.addEventListener("click", () => {
   loadBacktestPoolTemplates(true).catch((error) => setStatus(`读取股票池模板失败: ${error.message}`, true));
 });
 applyStrategyPreset(strategyPreset?.value || "base", false);
-loadBacktestPoolTemplates(false).catch((error) => setStatus(`读取股票池模板失败: ${error.message}`, true));
+window.T0Auth?.loadCurrentUser?.()
+  .then(() => loadBacktestPoolTemplates(false))
+  .catch((error) => setStatus(`读取股票池模板失败: ${error.message}`, true));
 
-function buildPayload() {
+function buildPayload(mode = getBacktestMode()) {
   const preset = STRATEGY_PRESETS[strategyPreset?.value] || STRATEGY_PRESETS.base;
   const templateName = selectedBacktestPoolTemplate();
   const exitMode = exitModeSelect?.value || "sell_condition_with_fallback";
+  const isSignalQuality = mode === "signal_quality";
   if (!templateName) {
     throw new Error("请选择股票池模板");
   }
-  return {
+  const payload = {
     data_source: "stock_pool",
     processed_dir: "",
     stock_pool_username: currentBacktestPoolUsername(),
@@ -472,22 +411,25 @@ function buildPayload() {
     sell_condition: document.getElementById("sellCondition").value.trim(),
     score_expression: document.getElementById("scoreExpression").value.trim(),
     top_n: Number(document.getElementById("topN").value),
-    initial_cash: Number(document.getElementById("initialCash").value),
-    per_trade_budget: Number(document.getElementById("perTradeBudget").value),
     exit_mode: exitMode,
     entry_offset: Number(document.getElementById("entryOffset").value),
     exit_offset: exitMode === "sell_condition_only" ? null : Number(exitOffsetInput.value),
     min_hold_days: Number(document.getElementById("minHoldDays").value),
     max_hold_days: Number(document.getElementById("maxHoldDays").value),
-    lot_size: Number(document.getElementById("lotSize").value),
     buy_fee_rate: Number(document.getElementById("buyFeeRate").value),
     sell_fee_rate: Number(document.getElementById("sellFeeRate").value),
     stamp_tax_sell: Number(document.getElementById("stampTaxSell").value),
     realistic_execution: document.getElementById("realisticExecution").value === "true",
     settlement_mode: document.getElementById("settlementMode").value,
     slippage_bps: Number(document.getElementById("slippageBps").value),
-    min_commission: Number(document.getElementById("minCommission").value),
   };
+  if (!isSignalQuality) {
+    payload.initial_cash = Number(document.getElementById("initialCash").value);
+    payload.per_trade_budget = Number(document.getElementById("perTradeBudget").value);
+    payload.lot_size = Number(document.getElementById("lotSize").value);
+    payload.min_commission = Number(document.getElementById("minCommission").value);
+  }
+  return payload;
 }
 
 function setStatus(text, error = false) {
@@ -970,13 +912,13 @@ function applyResult(result) {
   renderTable(openPositionTable, result.open_position_rows, ["valuation_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "market_value", "unrealized_pnl", "unrealized_return", "holding_days", "planned_exit_date"]);
   renderTable(pendingSellTable, result.pending_sell_rows, ["signal_date", "planned_sell_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_condition", "reason"]);
   if (isSignalQuality) {
-    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
+    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
     renderTable(tradeTable, selectColumns(result.trade_rows, TRADE_TABLE_COLUMNS), TRADE_TABLE_COLUMNS);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "signal_count", "total_signal_return", "win_rate", "avg_trade_return", "median_trade_return"]);
     const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
     diagText.textContent = `信号质量回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
   } else {
-    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "sector_strongest_theme", "sector_strongest_theme_score", "sector_strongest_theme_rank_pct", "sector_exposure_score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
+    renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
     renderTable(tradeTable, selectColumns(result.trade_rows, TRADE_TABLE_COLUMNS), TRADE_TABLE_COLUMNS);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "realized_pnl", "trade_count", "win_rate", "avg_trade_return"]);
     const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
@@ -997,6 +939,7 @@ async function readResponseError(response) {
 async function postJson(url, payload) {
   const response = await fetch(url, {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -1027,14 +970,14 @@ function triggerBrowserDownload(blob, filename) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const mode = getBacktestMode();
   let payload;
   try {
-    payload = buildPayload();
+    payload = buildPayload(mode);
   } catch (error) {
     showPayloadError(error);
     return;
   }
-  const mode = getBacktestMode();
   const isSignalQuality = mode === "signal_quality";
   const endpoint = isSignalQuality ? "/api/run-signal-quality" : "/api/run-backtest";
   const modeLabel = isSignalQuality ? "信号质量回测" : "实盘账户回测";
@@ -1055,7 +998,7 @@ form.addEventListener("submit", async (event) => {
 async function downloadResultTable(tableKey, button) {
   let payload;
   try {
-    payload = buildPayload();
+    payload = buildPayload(getBacktestMode());
   } catch (error) {
     showPayloadError(error);
     return;
@@ -1093,7 +1036,7 @@ exportBtn?.addEventListener("click", async () => {
   }
   let payload;
   try {
-    payload = buildPayload();
+    payload = buildPayload(getBacktestMode());
   } catch (error) {
     showPayloadError(error);
     return;

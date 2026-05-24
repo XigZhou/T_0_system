@@ -15,30 +15,29 @@
             <h1>多账户模拟交易</h1>
           </div>
           <div class="brand-actions">
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
             <p class="subtle">这里负责读取模板、生成订单、执行成交和刷新账本；模板编辑已经独立到单独页面。</p>
             <p class="subtle">
               <a id="manageTemplatesHeaderLink" href="/paper/templates">模板管理</a>
+              · <a href="/stock-pools">股票池模板</a>
               · <a href="/">组合回测</a>
               · <a href="/daily">每日收盘选股</a>
               · <a href="/single">单股表格回测</a>
-            </p>
+             · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a></p>
           </div>
         </div>
 
         <form id="paperForm" class="form-grid compact-form">
-          <label class="field-wide">
-            <span>模板目录</span>
-            <input id="configDir" type="text" value="configs/paper_accounts" />
-          </label>
+          <input id="configDir" type="hidden" value="configs/paper_accounts" />
+          <input id="configPath" type="hidden" value="" />
 
-          <label class="field-dates">
+          <label class="field-wide">
             <span>选择模拟账户模板</span>
             <select id="templateSelect"></select>
-          </label>
-
-          <label class="field-wide">
-            <span>模板路径</span>
-            <input id="configPath" type="text" placeholder="可手动填写单个 YAML 模板路径" />
           </label>
 
           <div class="three-col">
@@ -63,7 +62,7 @@
           <div class="actions">
             <button id="runPaperBtn" type="submit">运行模拟账户</button>
             <button id="refreshQuotesBtn" type="button" class="secondary">获取当前持仓最新价格</button>
-            <button id="loadLedgerBtn" type="button" class="secondary">读取账本</button>
+            <button id="loadLedgerBtn" type="button" class="secondary">读取SQLite账本</button>
             <button id="reloadTemplatesBtn" type="button" class="secondary">刷新模板</button>
             <a id="manageTemplatesBtn" class="button-link secondary" href="/paper/templates">模板管理</a>
           </div>
@@ -77,7 +76,7 @@
           <div class="summary-intro">
             <p class="eyebrow">账户摘要</p>
             <h2>模拟运行结果</h2>
-            <p class="panel-note">先在收盘后生成待执行订单，再在下一交易日开盘执行订单；每一步都会写入 Excel 账本。</p>
+            <p class="panel-note">先在收盘后生成待执行订单，再在下一交易日开盘执行订单；每一步都会写入 SQLite 账本。</p>
           </div>
           <div id="paperSummaryGrid" class="summary-grid"></div>
         </section>
@@ -90,6 +89,8 @@
             <button type="button" class="tab-button" data-tab="paper-assets" role="tab" aria-selected="false">每日资产</button>
             <button type="button" class="tab-button" data-tab="paper-logs" role="tab" aria-selected="false">运行日志</button>
           </div>
+
+          <p class="tab-note status">执行动作决定“运行模拟账户”执行哪一步；动作日期留空时自动识别交易日；生成=收盘信号，执行=开盘成交，收盘估值=收盘更新持仓。</p>
 
           <div class="tab-panel active" data-tab-panel="paper-orders" role="tabpanel">
             <section class="panel compact-panel">
@@ -159,6 +160,7 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/paper.js"></script>
   </body>
 </html>

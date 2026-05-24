@@ -1,1454 +1,347 @@
-# T 日信号摆动回测系统 V2
+# T_0_system A 股 SQLite 量化回测与模拟交易系统
 
-本项目用于研究 A 股日线信号策略：
+这是当前系统的 GitHub 初始化版本。系统运行主线已经从旧 `data_bundle` / per-stock CSV 链路迁移到 SQLite-first：主股票池、日线 raw 数据、指标、调度状态、认证用户和多账户模拟交易账本都以 SQLite 为核心。
 
-- `T` 日只使用当日及历史数据生成买入信号
-- `T+1` 日按原始开盘价 `raw_open` 买入
-- 默认可按 `T+N` 日原始开盘价 `raw_open` 卖出，也支持“收盘触发卖出条件，下一交易日开盘执行”的混合退出模型
-- 信号与指标按前复权价格 `qfq_*` 计算
-- 买卖成交按原始除权价格 `raw_*` 计算
+当前生产目录在腾讯云：`/home/ubuntu/T_0_system`。默认服务入口是 FastAPI：`overnight_bt.app:app`，线上端口为 `8083`。
 
-项目当前包含：
+## 核心能力
 
-- 固定快照股票池构建
-- Tushare 原始数据同步
-- 处理后回测主输入生成
-- 前端批量回测页面
-- 独立板块主题研究系统
-- 每日收盘选股与持仓卖出提醒页面
-- API 导出交易流水
-- 股票池模板管理页面
-- 特征分层扫描
-- 训练期/验证期参数探索
+- 主股票池维护：`main_stock_universe` 控制默认采集、指标计算、回测和模拟交易范围。
+- 日线 raw 采集：Tushare `daily`、`adj_factor`、`stk_limit`、`suspend_d`、`daily_basic`、`trade_cal`、指数环境统一写入 `market_data.sqlite`。
+- 指标计算：从 SQLite raw 表计算 `stock_daily_features`，信号指标使用前复权价格，交易成交使用原始除权价格。
+- 批量回测：组合回测、信号质量评估、交易流水导出。
+- 每日计划：每日收盘选股、持仓卖出提醒、次日计划。
+- 单股回测：单只股票策略验证。
+- 多账户模拟交易：账户模板、待执行订单、成交、持仓、资产、日志落在 SQLite。
+- 系统管理员后台：主股票池维护、一键日线采集、一键指标计算、调度记录查看。
+- 股票池模板：普通用户维护自选股票模板，保存时受主股票池约束。
+- 板块看板：AKShare 板块研究结果可写入 SQLite 并通过 `/sector` 查看。
 
-说明：
+## 当前 SQLite 主线
 
-- 脚本文件名仍沿用早期的 `run_overnight_*` 命名，但内部逻辑已经切到新的摆动持有模型。
+主数据库位于：
 
-## 默认假设
+```text
+data_store/market_data.sqlite
+```
 
-- 默认按 `2000` 积分 Tushare 权限规划实现。
-- 默认接口：`stock_basic`、`daily_basic`、`daily`、`adj_factor`、`trade_cal`、`stk_limit`、`suspend_d`、`index_daily`。
-- `TUSHARE_TOKEN` 优先从本机环境变量读取；若缺失，再回退到本地 `.env`。
-- 固定快照默认按指定日期或此前最近开市日筛选 `总市值 >= 500亿` 且非 `ST` 股票。
-- 信号与指标基于前复权价格；实际成交和资金结算基于原始除权价格。
-- 默认探索参数：
-  - 初始资金 `100000`
-  - 每笔目标资金 `10000`
-  - 每手 `100` 股
-  - 买卖手续费各 `0.003%`
-  - 默认无印花税、无最低佣金
-  - 严格成交模式默认开启
+关键表：
 
-这些假设会影响结果正确性。正式跑全量研究前，建议先确认本机数据、交易成本和 Tushare 账号权限与目标环境一致。
+| 表 | 用途 |
+| --- | --- |
+| `main_stock_universe` | 主股票池，默认采集和计算范围 |
+| `stock_basic` | A 股基础信息缓存 |
+| `stock_daily_raw` | Tushare 原始日线 |
+| `stock_adj_factor` | 复权因子 |
+| `stock_stk_limit` | 涨跌停价格 |
+| `stock_suspend_d` | 停复牌数据 |
+| `stock_daily_basic` | 市值、换手、估值等日度基础面 |
+| `trade_calendar` | 交易日历 |
+| `market_context` | 大盘指数环境 |
+| `stock_daily_features` | 回测和模拟交易读取的股票日线指标 |
+| `sector_dashboard_rows` / `sector_dashboard_meta` | 板块看板数据 |
+
+其他运行库：
+
+| SQLite 文件 | 用途 |
+| --- | --- |
+| `data_store/stock_pool_templates.sqlite` | 用户、登录会话、股票池模板、legacy 更新任务 |
+| `data_store/paper_trading.sqlite` | 多账户模拟交易账本 |
+| `data_store/scheduler.sqlite` | 定时任务运行记录 |
+
+说明：`data_store/`、`.env`、`logs/`、`runtime_logs/` 都是运行时数据或敏感配置，不提交 GitHub。
+
+## source=all 的当前含义
+
+当前版本中，`source=all` 不再代表全市场股票。
+
+`source=all` 等价于 `source=main_universe`，只处理 `main_stock_universe` 中 `is_active=1` 的股票。管理员后台默认按钮、`scripts/collect_stock_daily_raw.py`、`scripts/compute_stock_daily_features.py` 和核心调度都遵循这个语义。
+
+如果需要改变系统默认股票范围，应先维护主股票池，而不是依赖 `all` 自动扩到全市场。
 
 ## 准备工作
 
-### 安装依赖
+### 1. 安装依赖
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-### 配置环境变量
-
-推荐直接在本机环境里设置：
-
-```powershell
-$env:TUSHARE_TOKEN="你的本机 token"
-```
-
-回退方式：
-
-- 在本地 `.env` 中配置 `TUSHARE_TOKEN=...`
-- 不要把 token 明文写入代码、文档或提交记录
-
-### 项目结构
-
-- [overnight_bt](/D:/量化/Momentum/T_0_system/overnight_bt)
-  回测引擎、处理逻辑、表达式解析、研究与交付检查模块
-- [scripts](/D:/量化/Momentum/T_0_system/scripts)
-  数据准备、研究、特征扫描与交付校验脚本
-- [sector_research](/D:/量化/Momentum/T_0_system/sector_research)
-  独立板块研究系统，默认只写自己的数据与报告，不覆盖当前回测主目录
-- [static](/D:/量化/Momentum/T_0_system/static)
-  前端页面
-- [docs](/D:/量化/Momentum/T_0_system/docs)
-  中文数据说明、指标说明、表达式说明与系统使用文档
-- [tests](/D:/量化/Momentum/T_0_system/tests)
-  单元测试与接口集成测试
-
-## 数据准备
-
-### 1. 生成固定快照股票池
+腾讯云生产环境使用：
 
 ```bash
-python scripts/build_universe_snapshot.py --as-of 目标交易日
-```
-
-输出：
-
-- `data_bundle/universe_snapshot.csv`
-
-### 2. 同步原始数据包
-
-```bash
-python scripts/sync_tushare_bundle.py --start-date 20160101 --end-date 目标交易日
-```
-
-建议输出目录结构：
-
-```text
-data_bundle/
-  universe_snapshot.csv
-  trade_calendar.csv
-  stk_limit.csv
-  suspend_d.csv
-  market_context.csv
-  raw_daily/
-  adj_factor/
-```
-
-### 3. 生成处理后回测输入
-
-```bash
-python scripts/build_processed_data.py
-```
-
-输出：
-
-- `data_bundle/processed_qfq/*.csv`
-- `data_bundle/processed_qfq/processing_manifest.csv`
-
-如果你改过以下任一内容，需要重新构建 `processed_qfq/`：
-
-- 涨跌停或停牌约束逻辑
-- 前复权处理逻辑
-- 新增信号特征字段
-- `can_buy_open_t` 等开盘成交约束字段
-
-### 4. 生成主题聚焦股票池
-
-如果你要把股票池缩到 AI、机器人、新能源、有色金属、电网等方向，可以运行：
-
-```bash
-python scripts/build_theme_focus_universe.py
-python scripts/build_theme_focus_universe.py --top-k 100 --out-snapshot data_bundle/universe_snapshot_theme_focus_top100.csv --out-processed-dir data_bundle/processed_qfq_theme_focus_top100
-```
-
-输出：
-
-- `data_bundle/universe_snapshot_theme_focus.csv`
-- `data_bundle/processed_qfq_theme_focus/`
-- `data_bundle/universe_snapshot_theme_focus_top100.csv`
-- `data_bundle/processed_qfq_theme_focus_top100/`
-
-说明：
-
-- `theme_focus` 是按主题规则筛出来的全量主题池
-- `theme_focus_top100` 是在主题池基础上按总市值取前 100
-
-### 4.1 生成统一主题可交易股票池快照
-
-如果要比较 Top500、Top1000 或 L0-L4 市值分层，先不要直接拉 3922 只主题股的四年日线。推荐先生成统一主题可交易母池快照，再决定给哪个派生池补日线数据：
-
-```bash
-python scripts/build_theme_tradeable_universe.py \
-  --as-of 20260508 \
-  --top-sizes 500,1000 \
-  --min-total-mv-yi 30 \
-  --min-listed-days 250
-```
-
-默认输出：
-
-- `sector_research/data/processed/theme_tradeable_universe/theme_tradeable_universe_snapshot.csv`
-- `sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top500_layers.csv`
-- `sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top1000_layers.csv`
-- `sector_research/data/processed/theme_tradeable_universe/current_top100_layer_compare.csv`
-
-说明文档见 `docs/theme-tradeable-universe-data-dictionary.md`。这个步骤只拉 Tushare 最新基础信息和最新 `daily_basic`，不拉四年日线，也不会修改当前模拟账户正在使用的 Top100、板块增强或轮动增强目录。
-
-### 4.2 股票池模板管理
-
-股票池模板系统用于让用户手工维护可复用的股票列表模板。第一阶段保存模板和股票列表；第二阶段已支持共享日线与指标入库、任务日志和补数脚本。第四阶段已把批量回测、每日收盘选股和多账户模拟交易接入股票池模板 SQLite。批量回测、信号质量、导出接口和每日收盘选股后端仍保留 `data_source=csv` 兼容旧脚本；多账户模拟交易账户模板已全面升级，不再填写或读取旧 CSV 处理后目录。单股回测和板块研究暂时仍沿用原 CSV 输入。
-
-页面入口：
-
-```text
-http://127.0.0.1:8083/stock-pools
-```
-
-运行时数据库：
-
-```text
-data_store/stock_pool_templates.sqlite
-```
-
-基础模板：
-
-- `L0_最大市值主题股层`
-- `L1_偏大市值主题股层`
-- `L2_中等市值主题股层`
-- `L3_偏小市值主题股层`
-- `L4_最小市值主题股层`
-- `当前多账户模拟股票池`
-
-基础模板来源分别为 `research_runs/20260509_top500_stock_pool_layer_grid_account/stock_pool_layer_constituents.csv` 和 `data_bundle/processed_qfq_theme_focus_top100/*.csv`。如果来源文件缺失，系统会跳过对应模板；用户仍可手工新建模板。
-
-常用 API：
-
-- `GET /api/stock-pools/templates?username=admin`
-- `GET /api/stock-pools/template?username=admin&template_name=模板名`
-- `POST /api/stock-pools/template`
-- `DELETE /api/stock-pools/template`
-- `POST /api/stock-pools/template/validate`
-- `POST /api/stock-pools/templates/seed?username=admin`
-- `POST /api/stock-pools/template/refresh`（仅 admin）
-- `GET /api/stock-pools/jobs?username=admin&limit=50`（仅 admin）
-- `GET /api/stock-pools/jobs/{job_id}?username=admin`（仅 admin）
-
-
-第二阶段数据入库常用命令：
-
-```bash
-# 全市场首次初始化，默认从 20220101 到最新交易日
-python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
-
-# 只更新当前 admin 活跃模板涉及股票
-python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
-
-# 日常自动更新：由收盘后统一调度第 8 步调用，建议只保留这一条夜间 cron
-scripts/run_after_close_pipeline.sh 20260514
-
-# 股票池很多时，统一调度可连续跑多批并在批次之间暂停
-STOCK_POOL_BATCH_SIZE=200 STOCK_POOL_BATCH_COUNT=5 STOCK_POOL_BATCH_SLEEP_SECONDS=60 scripts/run_after_close_pipeline.sh 20260514
-
-# 小样本验证，避免一次性消耗太多 Tushare 调用
-python scripts/run_stock_pool_template_update.py --source active_templates --max-symbols 3 --sleep-seconds 0.2
-
-# 分批初始化或补数：按完整股票列表顺序切批，batch-index 从 0 开始
-python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101 --batch-size 200 --batch-index 0 --retry-attempts 3 --retry-sleep-seconds 5
-
-# 断点续跑：从指定股票之后继续；常用于某批中途断开后的人工补跑
-python scripts/run_stock_pool_template_update.py --source active_templates --resume-after-symbol 300750 --max-symbols 100 --retry-attempts 3
-```
-
-每次任务会写入 `stock_pool_update_jobs`、`stock_pool_update_job_items`，并在 `logs/stock_pool_template_update/` 输出运行日志、明细 CSV 和 summary JSON。统一调度本身写入 `logs/after_close_pipeline/YYYYMMDD.log`。默认只补库内未更新到截止交易日的股票；已更新股票会在任务前置过滤阶段跳过，避免重复消耗 Tushare。若任务失败，先查 `job_id` 对应明细，再对失败股票用 `--source symbols --stock-text "股票代码" --retry-attempts 3` 单独补跑。
-
-当前多账户模拟交易已经正式读取股票池 SQLite。统一调度默认 `RUN_STOCK_POOL_UPDATE_REQUIRED=0`，股票池更新失败会记录警告并继续模拟账户收盘任务；如果希望严格保证模拟账户只使用当天最新共享行情库，可把该变量改为 `1`，让股票池更新失败时中止后续模拟账户任务。
-
-批处理参数说明：
-
-- `--batch-size` / `--batch-index`：按完整解析股票列表切批，适合 2000 到 3000 只股票的初始化或夜间更新限流。
-- `--offset`：直接从第 N 只开始，填写后优先于 `batch-index` 计算起点。
-- `--resume-after-symbol`：从某只股票之后继续，适合中途断线后人工续跑。
-- `--retry-attempts` / `--retry-sleep-seconds`：单只股票的 Tushare 输入拉取失败后自动重试。
-- `--include-up-to-date`：包含已更新到截止日的股票；默认不建议打开，除非需要强制核对任务明细。
-- `STOCK_POOL_BATCH_COUNT` / `STOCK_POOL_BATCH_SLEEP_SECONDS`：包装脚本专用；在一个统一调度任务内连续跑多个 batch，并在批次间暂停，减少 Tushare 压力。
-
-详细字段定义见 `docs/stock-pool-template-data-dictionary.md`，分阶段设计见 `docs/stock-pool-template-system-plan.md`。
-
-说明：当前未接入登录系统，前端不再提供用户名输入，保存时自动使用 `admin`。所有模板默认参与后续每日更新，第一阶段页面不提供关闭开关。校验股票列表时，系统会尽量从 SQLite `stock_basic`、Top500 分层文件、当前 Top100 处理后 CSV 和已有股票池快照回填股票名称。如果同一只股票重复输入，后端只保留首次出现的顺序，SQLite 主键 `username + template_name + symbol` 不会重复写入，对后续更新任务和模板读取没有额外影响。
-
-股票池数据刷新和任务状态属于 admin-only 能力。`/stock-pools` 页面只有 admin 会看到“模板数据刷新”和“最近任务状态”区域；后端也会拒绝非 admin 调用刷新和任务接口。普通用户后续接入登录后只维护自己的股票池模板，不能主动触发 Tushare 拉取或查看底层更新任务。
-
-### 5. 生成行业强度指标
-
-当前 2000 积分方案不依赖 Tushare 行业指数行情，而是用处理后股票日线里的 `industry` 字段自行聚合行业强度。生成或重建 `processed_qfq_theme_focus_top100/` 后，建议继续运行：
-
-```bash
-python scripts/build_industry_strength.py --processed-dir data_bundle/processed_qfq_theme_focus_top100
-```
-
-默认会把行业指标写回原目录中的每只股票 CSV，并在 `research_runs/YYYYMMDD_HHMMSS_industry_strength/` 生成报告。新增字段包括：
-
-- `industry_m20`、`industry_m60`：行业内股票 20/60 日动量均值
-- `industry_rank_m20`、`industry_rank_m60`：行业强度排名百分位，越小越强
-- `industry_up_ratio`：行业内当日上涨股票占比
-- `industry_strong_ratio`：行业内 `m20>0` 的股票占比
-- `industry_amount_ratio`：行业成交额相对 20 日均额的放大倍数
-- `stock_vs_industry_m20`、`stock_vs_industry_m60`：个股相对所属行业的动量差
-
-运行后前端条件可以直接写：
-
-```text
-industry_rank_m20<0.3,industry_m20>0,industry_up_ratio>0.5,stock_vs_industry_m20>0
-```
-
-如果只是想先生成到新目录核对，不覆盖原目录，可以加 `--output-dir`：
-
-```bash
-python scripts/build_industry_strength.py --processed-dir data_bundle/processed_qfq_theme_focus_top100 --output-dir data_bundle/processed_qfq_theme_focus_top100_industry
-```
-
-### 6. 生成独立板块研究数据
-
-如果你要研究锂矿锂电、光伏新能源、半导体芯片、存储芯片、AI、机器人、医药等方向，可以先独立运行板块研究系统。它默认使用 AKShare 东方财富行业/概念板块、板块历史行情、板块成分股和资金流数据，输出只写入 sector_research/，不会影响当前回测主数据。
-
-```bash
-python scripts/run_sector_research.py --start-date 20230101
-```
-
-主要输出：
-
-- sector_research/data/raw/board_list.csv
-- sector_research/data/raw/board_daily_raw.csv
-- sector_research/data/raw/board_fund_flow_rank.csv
-- sector_research/data/processed/theme_board_mapping.csv
-- sector_research/data/processed/sector_board_daily.csv
-- sector_research/data/processed/theme_strength_daily.csv
-- sector_research/data/processed/theme_constituents_snapshot.csv
-- sector_research/data/processed/stock_theme_exposure.csv
-- sector_research/reports/theme_strength_report.md
-- sector_research/reports/theme_strength_latest.xlsx
-前端查看：
-
-```bash
-python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
-```
-
-启动后打开 `http://127.0.0.1:8083/sector`。页面只读取已经生成的 CSV/JSON，不会触发 AKShare 抓取，也不会触发 Tushare 指数更新。接口为 `GET /api/sector/overview?processed_dir=...&report_dir=...&market_context_path=...`，默认读取 `sector_research/data/processed`、`sector_research/reports` 和 `data_bundle/market_context.csv`。
-
-页面数据来源：大盘环境来自已有 `data_bundle/market_context.csv`，主题排名来自 `theme_strength_daily.csv`，强势板块来自 `sector_board_daily.csv`，个股暴露来自 `stock_theme_exposure.csv`，主题映射来自 `theme_board_mapping.csv`，异常日志来自 `sector_research_errors.csv`。大盘环境面板只展示上证指数、沪深300、创业板指的收盘、日涨跌、5/20/60 日动量；不会写入板块研究目录，也不会和回测、模拟交易已有大盘字段产生重复。个股暴露页签的主题覆盖统计按 `theme_names` 全部命中统计，不按 `primary_theme` 排他统计，因此多主题股票会计入所有命中的主题股票池。
-
-如果要把板块研究字段接入回测，必须写入一个新的处理后目录，例如：
-
-```bash
-python scripts/build_sector_research_features.py \
-  --processed-dir data_bundle/processed_qfq_theme_focus_top100 \
-  --sector-processed-dir sector_research/data/processed \
-  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector \
-  --overwrite
-```
-
-这样会复制原股票 CSV 并增加 `sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_exposure_score` 等字段，原 `data_bundle/processed_qfq_theme_focus_top100` 不会被覆盖。`--overwrite` 会先清理输出目录中的旧 CSV，避免 Top100 更新后增强目录残留旧股票。
-
-### 7. L0-L4 股票池分层实验
-
-如果要验证当前主题股票池是否过度偏向大市值，可以运行 L0-L4 分层实验。这里有两种口径：
-
-- 快速交集口径：脚本默认用 `stock_theme_exposure.csv` 与 `data_bundle/processed_qfq` 的可回测交集，适合先快速判断是否值得继续研究。
-- 推荐 Top500 完整口径：先用统一主题可交易母池生成 Top500 分层，再只给这 500 只股票补最近四年日线，适合做更公平的 L0-L4 对比。
-
-快速交集口径命令：
-
-```bash
-python scripts/run_stock_pool_layer_grid.py \
-  --start-date 20210101 \
-  --end-date 20260508 \
-  --out-dir research_runs/20260509_stock_pool_layer_grid_account \
-  --fast-account \
-  --rolling-months 0 \
-  --overwrite
-```
-
-Top500 完整口径复现流程：
-
-```bash
-python scripts/build_theme_tradeable_universe.py \
-  --as-of 20260508 \
-  --top-sizes 500,1000 \
-  --min-total-mv-yi 30 \
-  --min-listed-days 250
-
-python scripts/build_theme_layer_snapshot.py \
-  --layers-csv sector_research/data/processed/theme_tradeable_universe/theme_tradeable_top500_layers.csv \
-  --out data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
-  --layers L0,L1,L2,L3,L4 \
-  --pool-name Top500
-
-python scripts/sync_tushare_bundle.py \
-  --env .env \
-  --bundle-dir data_bundle/theme_tradeable_top500_4y \
-  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv \
-  --start-date 20210701 \
-  --end-date 20260508 \
-  --sleep-seconds 0.2
-
-python scripts/build_processed_data.py \
-  --bundle-dir data_bundle/theme_tradeable_top500_4y \
-  --output-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
-  --snapshot-csv data_bundle/theme_tradeable_top500_4y/universe_snapshot_top500.csv
-
-python scripts/run_stock_pool_layer_grid.py \
-  --base-processed-dir data_bundle/theme_tradeable_top500_4y/processed_qfq \
-  --start-date 20220101 \
-  --end-date 20260507 \
-  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
-  --out-dir research_runs/20260509_top500_stock_pool_layer_grid_account \
-  --fast-account \
-  --rolling-months 0 \
-  --overwrite
-```
-
-主要输出：
-
-- `stock_pool_layer_constituents.csv`：每层股票成分、主题、市值排名
-- `stock_pool_layer_summary.csv`：每层股票数、市值范围、主题覆盖
-- `stock_pool_layer_grid_summary.csv`：每层、每周期、每策略回测结果
-- `stock_pool_layer_grid_by_layer_case.csv`：按年度聚合的稳定性结果
-- `stock_pool_layer_grid_trade_records.csv`：逐笔买卖记录
-- `stock_pool_layer_grid_report.md`：中文总结报告
-
-字段定义见 `docs/stock-pool-layer-grid-data-dictionary.md`。早期 304 只交集实验记录见 `docs/stock-pool-layer-grid-result-20260509.md`；Top500 完整口径结果见 `docs/stock-pool-layer-grid-top500-result-20260509.md`。Top500 结果显示 L2 中等市值层表现最好：全区间基准动量收益 105.01%、最大回撤 13.70%，2023、2024、2025、2026YTD 四个年度均为正收益。当前脚本不会修改模拟账户正在使用的 `data_bundle/processed_qfq_theme_focus_top100*` 目录。
-
-如果要把“板块轮动诊断”的每日主线字段接入模拟账户，继续生成一个独立轮动增强目录：
-
-```bash
-python scripts/build_sector_rotation_features.py \
-  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
-  --rotation-daily-path research_runs/latest_sector_rotation_diagnosis/sector_rotation_daily.csv \
-  --output-dir data_bundle/processed_qfq_theme_focus_top100_sector_rotation \
-  --overwrite
-```
-
-该目录的数据来源是 `data_bundle/processed_qfq_theme_focus_top100_sector` 与 `sector_rotation_daily.csv`，会给每只股票 CSV 增加 `rotation_state`、`rotation_top_theme`、`rotation_top_cluster`、`stock_matches_rotation_top_cluster` 等字段；`rotation_feature_manifest.csv` 只是生成清单，不会被当成股票日线读取。当前已经提供两个模拟账户模板：`configs/paper_accounts/sector_candidate_score04_rank07_v1.yaml` 对应“板块候选_score0.4_rank0.7”，`configs/paper_accounts/sector_rotation_avoid_new_energy_v1.yaml` 对应“候选_避开新能源主线”。三套目录应保持同一批 Top100 股票池，差异只来自新增字段；正式日常运行建议使用 `scripts/run_after_close_pipeline.sh` 自动重建和校验。更多运行方式见 `docs/paper-trading-system.md`。
-
-组合回测页和每日收盘选股页提供三套策略预设：
-
-| 预设 | 数据目录 | 用途 |
-| --- | --- | --- |
-| 基准动量 | `data_bundle/processed_qfq_theme_focus_top100` | 沿用原条件和评分表达式 |
-| 板块过滤 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 增加 `sector_exposure_score>0`、主题强度和排名过滤 |
-| 板块过滤 + 评分加权 | `data_bundle/processed_qfq_theme_focus_top100_sector` | 在板块过滤基础上把主题强度、暴露分和主题排名纳入评分 |
-
-选择板块增强预设时，后端会校验增强目录是否存在 `sector_feature_manifest.csv`，以及股票 CSV 是否包含 `sector_exposure_score`、`sector_strongest_theme_score`、`sector_strongest_theme_rank_pct`、`sector_strongest_theme_m20`。缺失时会直接报错，不会静默退回原数据。
-
-可用于前端或研究脚本的条件示例：
-
-```text
-sector_strongest_theme_score>=0.65,sector_strongest_theme_rank_pct<=0.4,sector_exposure_score>0
-```
-
-### 7. 板块参数网格探索
-
-板块增强目录生成后，可以用网格探索脚本批量比较“基准动量”“板块硬过滤”“只评分加权”三类参数。脚本只读取已经生成的数据目录，不重新抓取 AKShare 或 Tushare 数据。
-
-```bash
-python scripts/run_sector_parameter_grid.py \
-  --start-date 20230101 \
-  --score-thresholds 0.4,0.5,0.6 \
-  --rank-pcts 0.3,0.5,0.7 \
-  --score-weights 10,20,30
-```
-
-默认输入：
-
-- 基准目录：`data_bundle/processed_qfq_theme_focus_top100`
-- 板块增强目录：`data_bundle/processed_qfq_theme_focus_top100_sector`
-- 买入基础条件：`m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02`
-- 卖出条件：`m20<0.08,hs300_m20<0.02`
-
-默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_parameter_grid/`：
-
-- `sector_parameter_grid_summary.csv`：每组参数的信号质量、账户收益、回撤、交易次数和综合排序分
-- `sector_parameter_grid_trade_records.csv`：每组参数的账户买卖流水，含买入、卖出、价格、股数、手续费、金额和盈亏字段
-- `sector_parameter_grid_config.json`：本次运行参数和展开后的全部策略条件
-- `sector_parameter_grid_report.md`：中文总结报告和 Top 参数排序
-
-字段与使用说明见 `docs/sector-parameter-grid-data-dictionary.md`，指标口径见 `docs/sector-research-indicator-documentation.md` 的 `grid_score` 章节。
-
-### 8. 板块轮动诊断
-
-如果要判断板块增强收益是否来自主题轮动，而不是少数个股或单段行情，可以在参数网格探索后运行轮动诊断脚本。脚本会读取主题强度日频数据和参数网格交易流水，输出每日主线状态、主题切换路径、交易轮动打标和分组收益。
-
-```bash
-python scripts/run_sector_rotation_diagnosis.py \
-  --theme-strength-path sector_research/data/processed/theme_strength_daily.csv \
-  --trade-records-path research_runs/20260501_142052_sector_parameter_grid/sector_parameter_grid_trade_records.csv \
-  --sector-processed-dir data_bundle/processed_qfq_theme_focus_top100_sector \
-  --cases 基准动量,硬过滤_score0.4_rank0.7
-```
-
-默认把主题分为三类：
-
-- 科技成长：`AI`、`半导体芯片`、`存储芯片`、`机器人`
-- 新能源：`光伏新能源`、`锂矿锂电`
-- 医药防御：`医药`
-
-默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_diagnosis/`：
-
-- `sector_rotation_daily.csv`：每日 Top1 主题、主题簇、持续天数和轮动状态
-- `sector_rotation_labeled_trades.csv`：给每笔交易标记信号日主线主题、股票所属主题和是否匹配主线
-- `sector_rotation_trade_summary.csv`：按轮动状态、Top1 主题、主题簇、股票主题统计收益
-- `sector_rotation_report.md`：中文轮动诊断报告
-
-字段说明见 `docs/sector-rotation-diagnosis-data-dictionary.md`。当前轮动状态只用于研究分组，不直接触发买卖。
-
-### 9. 板块轮动状态条件网格
-
-轮动诊断之后，可以继续运行轮动状态条件网格，验证“上一轮最佳板块候选 + 某类轮动状态”是否优于基准动量和原板块候选。
-
-```bash
-python scripts/run_sector_rotation_grid.py \
-  --rotation-daily-path research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv \
-  --start-date 20230101 \
-  --end-date 20260429
-```
-
-默认比较：
-
-- `基准动量`
-- `板块候选_score0.4_rank0.7`
-- `候选_新主线启动`
-- `候选_主线退潮`
-- `候选_轮动观察`
-- `候选_退潮或观察`
-- `候选_避开新主线启动`
-- `候选_科技成长主线`
-- `候选_科技成长且股票匹配`
-- `候选_避开新能源主线`
-
-默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_grid/`：
-
-- `sector_rotation_grid_summary.csv`
-- `sector_rotation_grid_trade_records.csv`
-- `sector_rotation_grid_config.json`
-- `sector_rotation_grid_report.md`
-
-字段说明见 `docs/sector-rotation-grid-data-dictionary.md`。该网格仍然是研究脚本，不会修改模拟账户。
-
-### 10. 板块轮动后续验证
-
-`docs/sector-rotation-grid-result-20260501.md` 建议继续做两类验证：一是把 `基准动量`、`板块候选_score0.4_rank0.7`、`候选_避开新能源主线` 做分年度和最近一年对比；二是把轮动状态从硬过滤改成评分加权。对应脚本为：
-
-```bash
-python scripts/run_sector_rotation_followup.py \
-  --start-date 20230101 \
-  --end-date 20260429 \
-  --out-dir research_runs/20260504_130000_sector_rotation_followup
-```
-
-长实验可以分批续跑：
-
-```bash
-python scripts/run_sector_rotation_followup.py \
-  --start-date 20230101 \
-  --end-date 20260429 \
-  --out-dir research_runs/20260504_130000_sector_rotation_followup \
-  --resume \
-  --max-weighted-runs 2
-```
-
-默认输入：
-
-- 基准目录：`data_bundle/processed_qfq_theme_focus_top100`
-- 板块增强目录：`data_bundle/processed_qfq_theme_focus_top100_sector`
-- 轮动日频文件：`research_runs/20260501_153900_sector_rotation_diagnosis/sector_rotation_daily.csv`
-
-默认输出写入 `research_runs/YYYYMMDD_HHMMSS_sector_rotation_followup/`：
-
-- `sector_rotation_period_comparison.csv`：三条策略的全区间、分年度和最近一年账户/信号对比
-- `sector_rotation_weighted_score_summary.csv`：轮动评分加权网格汇总
-- `sector_rotation_weighted_score_trade_records.csv`：轮动评分加权实验逐笔交易流水
-- `sector_rotation_followup_config.json`：本次运行参数和展开后的策略清单
-- `sector_rotation_followup_report.md`：自动生成的中文总结报告
-
-字段说明见 `docs/sector-rotation-followup-data-dictionary.md`。本次正式结果记录见 `docs/sector-rotation-followup-result-20260504.md`。关键结论是：三条策略收益明显集中在 2025；市场级轮动字段直接加到评分里不会改变日内 TopN，因为同一天所有候选股票获得的是同一个常数加减项。后续如果继续研究轮动加权，应优先使用 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme` 这类股票差异化字段。
-
-### 11. 股票匹配主线轮动 TopN 网格
-
-市场级轮动字段直接加到评分里不会改变同日股票排序。要验证轮动是否能配合 TopN，应改用股票差异化字段，例如股票最强主题是否匹配当日 Top1 主题或主题簇：
-
-```bash
-python scripts/run_sector_rotation_match_grid.py \
-  --start-date 20230101 \
-  --end-date 20260429 \
-  --out-dir research_runs/20260504_191500_sector_rotation_match_grid \
-  --cluster-weights 5,10 \
-  --theme-weights 8,12 \
-  --penalty-weights 5,8
-```
-
-默认比较：
-
-- `板块候选_score0.4_rank0.7`
-- `候选_股票匹配主线簇`
-- `候选_股票匹配Top主题`
-- `主线簇匹配加权_w*`
-- `Top主题匹配加权_w*`
-- `主线匹配加权_新启动惩罚_p*`
-
-输出包括 `sector_rotation_match_grid_summary.csv`、`sector_rotation_match_grid_trade_records.csv`、`sector_rotation_match_grid_pick_records.csv`、`sector_rotation_match_grid_config.json` 和 `sector_rotation_match_grid_report.md`。其中入选记录会补充 `stock_matches_rotation_top_cluster`、`stock_matches_rotation_top_theme`，并在汇总表里计算与原板块候选的 TopN 重合率。字段说明见 `docs/sector-rotation-match-grid-data-dictionary.md`。
-
-### 12. 板块轮动匹配稳定性验证
-
-`docs/sector-rotation-match-grid-result-20260504.md` 的下一步建议是验证 `主线簇匹配加权_w5` 是否在不同年份、最近一年和滚动窗口中稳定。对应脚本为：
-
-```bash
-python scripts/run_sector_rotation_match_stability.py \
-  --start-date 20160101 \
-  --end-date 20260429 \
-  --out-dir research_runs/20260505_120000_sector_rotation_match_stability
-```
-
-脚本会先检查 `sector_strongest_theme_score`、`rotation_top_cluster`、`rotation_state` 的覆盖率。当前股票行情虽然覆盖 2016-2026，但板块/轮动字段从 `20230403` 才满足公平比较要求；2016-2022 只输出 `基准动量` 历史参考，不把缺字段年份纳入板块轮动结论。
-
-默认比较四条策略：
-
-- `基准动量`
-- `板块候选_score0.4_rank0.7`
-- `主线簇匹配加权_w5`
-- `候选_避开新能源主线`
-
-输出包括 `sector_rotation_match_stability_summary.csv`、`sector_rotation_match_stability_by_case.csv`、`sector_rotation_match_stability_coverage.csv`、`sector_rotation_match_stability_trade_records.csv`、`sector_rotation_match_stability_config.json` 和 `sector_rotation_match_stability_report.md`。长实验支持 `--resume` 续跑；如果前一次跳过交易流水，可用 `--fill-missing-trade-records` 补齐。字段说明见 `docs/sector-rotation-match-stability-data-dictionary.md`，正式结果见 `docs/sector-rotation-match-stability-result-20260505.md`。
-
-### 13. 板块效应选股条件探索
-
-如果想回答“优先选择有板块效应的股票，到底是更适合做硬过滤，还是更适合只加权评分”，可以运行新的板块效应网格脚本。它复用现有的基准处理后目录和板块增强目录，不会重新抓取 AKShare 或 Tushare。
-
-```bash
-python scripts/run_sector_effect_grid.py \
-  --start-date 20230101 \
-  --end-date 20260429 \
-  --out-dir research_runs/20260504_181000_sector_effect_grid_fixed \
-  --score-thresholds 0.4,0.5 \
-  --rank-pcts 0.7 \
-  --exposure-mins 0 \
-  --theme-m20-mins any,0 \
-  --amount-ratio-mins any,1.0 \
-  --score-weights 5,10,15 \
-  --resume
-```
-
-默认比较三类策略：
-
-- `baseline`：基准动量，不使用板块字段
-- `hard_filter`：在买入条件里要求板块暴露和最强主题强度/排名/成交额满足阈值
-- `score_weight`：买入条件不变，只把板块强度字段加到评分里
-
-输出目录默认写入 `research_runs/YYYYMMDD_HHMMSS_sector_effect_grid/`，主要文件为：
-
-- `sector_effect_grid_summary.csv`
-- `sector_effect_grid_trade_records.csv`
-- `sector_effect_grid_config.json`
-- `sector_effect_grid_report.md`
-
-字段定义见 `docs/sector-effect-grid-data-dictionary.md`，正式结果见 `docs/sector-effect-grid-result-20260504.md`。
-
-### 14. 补充或重拉主题前 100 股票最新数据
-
-如果 `data_bundle/processed_qfq_theme_focus_top100` 里的股票数据只到某个日期，例如 `20260417`，需要先补 Tushare 原始数据，再重建处理后目录。不要直接手工修改 `processed_qfq_theme_focus_top100`。
-
-注意：`build_processed_data.py`、`build_theme_focus_universe.py`、`build_industry_strength.py` 都只是“重建已有数据”，不会主动拉取 Tushare 最新行情。如果原始目录 `raw_daily/` 和 `adj_factor/` 还停在旧日期，只运行这三个脚本不会得到最新数据。
-
-当前 `scripts/sync_tushare_bundle.py` 是按 `start-date/end-date` 重新拉取并覆盖每只股票的原始 CSV，不是追加合并。因此不要把 `--start-date` 直接填成 `20260418` 做增量，否则历史数据会被截短。推荐用完整起点重新拉到目标结束日期：
-
-```powershell
-cd D:\量化\Momentum\T_0_system
-
-python scripts\build_universe_snapshot.py `
-  --env .env `
-  --out data_bundle\universe_snapshot.csv `
-  --as-of 20260427
-
-python scripts\sync_tushare_bundle.py `
-  --env .env `
-  --bundle-dir data_bundle `
-  --snapshot-csv data_bundle\universe_snapshot.csv `
-  --start-date 20160101 `
-  --end-date 20260427
-```
-
-腾讯云服务器上同样使用相对路径，先进入项目目录并激活虚拟环境：
-
-```bash
-cd /home/ubuntu/T_0_system
 source /home/ubuntu/TencentCloud/myenv/bin/activate
-
-python scripts/build_universe_snapshot.py --env .env --out data_bundle/universe_snapshot.csv --as-of 20260427
-python scripts/sync_tushare_bundle.py --env .env --bundle-dir data_bundle --snapshot-csv data_bundle/universe_snapshot.csv --start-date 20160101 --end-date 20260427
 ```
 
-然后重建全量处理后数据：
+### 2. 配置环境变量
 
-```powershell
-python scripts\build_processed_data.py `
-  --bundle-dir data_bundle `
-  --output-dir data_bundle\processed_qfq
-```
-
-最后重建主题前 100 处理后目录：
-
-```powershell
-python scripts\build_theme_focus_universe.py `
-  --snapshot-csv data_bundle\universe_snapshot.csv `
-  --processed-dir data_bundle\processed_qfq `
-  --out-snapshot data_bundle\universe_snapshot_theme_focus_top100.csv `
-  --out-processed-dir data_bundle\processed_qfq_theme_focus_top100 `
-  --top-k 100
-```
-
-如果你之前误把数据写到了错误目录，或目标目录里残留了旧股票文件，重建 top100 前应先确认并清理目标目录中的旧 CSV，只保留本次 `--top-k 100` 生成的 100 只股票。清理前务必确认目录就是 `data_bundle/processed_qfq_theme_focus_top100`。
-
-然后重新生成行业强度指标：
-
-```powershell
-python scripts\build_industry_strength.py `
-  --processed-dir data_bundle\processed_qfq_theme_focus_top100
-```
-
-执行后可以任选一个股票文件检查最后日期：
-
-```powershell
-Import-Csv data_bundle\processed_qfq_theme_focus_top100\000063.csv | Select-Object -Last 3 trade_date,name,raw_close,qfq_close,m5,m20
-```
-
-建议后续单独开发一个轻量更新脚本，例如 `scripts/update_top100_daily_data.py`，专门更新 `theme_focus_top100` 的最新交易日数据。这个脚本应只拉取最新交易日或缺失日期，并安全合并到 `raw_daily/`、`adj_factor/`、`stk_limit.csv`、`suspend_d.csv`、`market_context.csv`，再只重建主题前 100 对应的处理后 CSV。每日收盘选股页面负责读数据和出计划，不建议在页面里直接拉 Tushare 数据，以免交易计划和数据维护耦合。
-
-### 8. 腾讯云每日自动更新主题前 100
-
-腾讯云上已经提供自动化脚本：
+Tushare token 从环境变量或 `.env` 读取：
 
 ```bash
-/home/ubuntu/T_0_system/scripts/run_daily_top100_update.sh
+export TUSHARE_TOKEN="你的 token"
 ```
 
-脚本逻辑：
-
-- 每天运行时先用 Tushare 交易日历判断当天是否为 A 股交易日。
-- 如果不是交易日，直接跳过，不拉数、不重建。
-- 如果是交易日，依次执行股票池快照、Tushare 原始数据同步、`processed_qfq` 重建、主题前 100 重建、行业强度重算和最终日期校验。
-- 成功日志写入 `logs/top100_daily_update/YYYYMMDD.log`，最近一次成功状态写入 `logs/top100_daily_update/latest_success.txt`。
-
-服务器 crontab 示例：
-
-```cron
-30 19 * * * /home/ubuntu/T_0_system/scripts/run_daily_top100_update.sh >> /home/ubuntu/T_0_system/logs/top100_daily_update/cron.log 2>&1
-```
-
-手动检查脚本和交易日判断：
+管理员默认登录口令不写在代码里。首次初始化用户库前，如果需要启用 `admin` 登录，请在服务器环境或 `.env` 中设置：
 
 ```bash
-cd /home/ubuntu/T_0_system
-scripts/run_daily_top100_update.sh --check-only 20260427
+export T0_ADMIN_DEFAULT_PASSWORD="请替换为强密码"
 ```
 
-查看最近一次是否成功：
+或在本地 `.env` 中配置：
+
+```text
+TUSHARE_TOKEN=你的 token
+T0_ADMIN_DEFAULT_PASSWORD=请替换为强密码
+```
+
+`T0_ADMIN_DEFAULT_PASSWORD` 只在 `admin` 用户没有密码时生效，不会覆盖已有管理员密码。不要把 token、真实管理员口令写入代码、README、文档或提交记录。
+
+### 3. 初始化主股票池
+
+按“非 ST、非退市、市值大于 300 亿”初始化主股票池：
 
 ```bash
-cat /home/ubuntu/T_0_system/logs/top100_daily_update/latest_success.txt
-tail -n 80 /home/ubuntu/T_0_system/logs/top100_daily_update/cron.log
+python scripts/init_main_universe_from_tushare.py \
+  --db-path data_store/market_data.sqlite \
+  --env-path .env \
+  --as-of 20260523 \
+  --market-cap-min-yi 300
 ```
+
+Tushare `daily_basic.total_mv` 单位是万元，因此 300 亿对应 `3,000,000` 万元。
+
+### 4. 采集日线 raw 数据
+
+采集当天主股票池日线 raw 输入：
+
+```bash
+python scripts/collect_stock_daily_raw.py \
+  --source all \
+  --start-date 20260523 \
+  --end-date 20260523
+```
+
+采集区间：
+
+```bash
+python scripts/collect_stock_daily_raw.py \
+  --source all \
+  --start-date 20240101 \
+  --end-date 20260523 \
+  --retry-attempts 3 \
+  --sleep-seconds 0.2
+```
+
+### 5. 计算股票指标
+
+从 SQLite raw 表计算指标：
+
+```bash
+python scripts/compute_stock_daily_features.py \
+  --source all \
+  --start-date 20260523 \
+  --end-date 20260523
+```
+
+指标计算不会重新拉取单股日线；缺 raw 数据时会报错或记录失败项。
 
 ## 启动方式
 
-### 本地或临时前台启动
+### 本地/服务器直接启动
 
 ```bash
-cd /home/ubuntu/T_0_system
-source /home/ubuntu/TencentCloud/myenv/bin/activate
 python -m uvicorn overnight_bt.app:app --host 0.0.0.0 --port 8083
 ```
 
-本机开发时可以把目录换成本机项目目录，并打开 [http://127.0.0.1:8083](http://127.0.0.1:8083)。如果只是开发调试，可以临时加 `--reload`，这样 Python 代码变更后会自动重载；生产或腾讯云后台运行不建议使用 `--reload`。
+打开：
 
-### 腾讯云临时后台启动
-
-如果暂时不配置系统服务，可以用 `nohup` 方式启动 8083 服务。它能在退出 SSH 后继续运行，但服务器重启或进程崩溃后不会自动拉起。
-
-```bash
-cd /home/ubuntu/T_0_system
-mkdir -p logs/t0_server
-source /home/ubuntu/TencentCloud/myenv/bin/activate
-nohup python -m uvicorn overnight_bt.app:app --host 0.0.0.0 --port 8083 > logs/t0_server/server.log 2>&1 &
-echo $! > logs/t0_server/server.pid
+```text
+http://127.0.0.1:8083/
 ```
 
-检查服务状态：
+腾讯云 systemd 服务名通常为：
 
 ```bash
-curl http://127.0.0.1:8083/health
-cat logs/t0_server/server.pid
-ss -ltnp | grep ':8083'
-tail -n 80 logs/t0_server/server.log
-```
-
-停止或重启服务：
-
-```bash
-cd /home/ubuntu/T_0_system
-kill $(cat logs/t0_server/server.pid)
-
-source /home/ubuntu/TencentCloud/myenv/bin/activate
-nohup python -m uvicorn overnight_bt.app:app --host 0.0.0.0 --port 8083 > logs/t0_server/server.log 2>&1 &
-echo $! > logs/t0_server/server.pid
-```
-
-如果希望系统真正长期常驻，推荐改成 `systemd` 服务。当前腾讯云服务器已经按这种方式启用 `t0-system` 服务。`systemd` 可以开机自启，并在程序异常退出后自动重启：
-
-```bash
-sudo tee /etc/systemd/system/t0-system.service >/dev/null <<'EOF'
-[Unit]
-Description=T_0 System FastAPI
-After=network.target
-
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/T_0_system
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/ubuntu/TencentCloud/myenv/bin/python -m uvicorn overnight_bt.app:app --host 0.0.0.0 --port 8083
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now t0-system
+sudo systemctl start t0-system
 sudo systemctl status t0-system
 ```
 
-常用维护命令：
+健康检查：
 
 ```bash
-sudo systemctl restart t0-system
-sudo systemctl stop t0-system
-sudo systemctl status t0-system
-journalctl -u t0-system -n 100 --no-pager
+curl -sS http://127.0.0.1:8083/health
 ```
 
-### 修改代码后是否自动生效
+### 页面入口
 
-不会。生产环境里已经运行的 `uvicorn` 进程会继续使用启动时加载的 Python 代码。修改后端代码、默认参数或依赖后，需要重启服务；如果使用 `systemd`，执行：
+| 页面 | URL | 用途 |
+| --- | --- | --- |
+| 登录 | `/login` | 用户登录 |
+| 注册 | `/register` | 用户注册 |
+| 组合回测 | `/` | 批量回测和导出 |
+| 单股回测 | `/single` | 单股策略验证 |
+| 每日计划 | `/daily` | 收盘选股和卖出提醒 |
+| 多账户模拟 | `/paper` | 模拟账户运行和账本查看 |
+| 模拟账户模板 | `/paper/templates` | 模拟账户模板维护 |
+| 股票池模板 | `/stock-pools` | 用户股票池模板维护 |
+| 系统管理员 | `/admin` | 主股票池、日线采集、指标计算、调度状态 |
+| 用户管理 | `/users` | 管理员管理用户 |
+| 板块看板 | `/sector` | 板块研究看板 |
+
+## 每日核心调度
+
+核心收盘后调度脚本：
 
 ```bash
-cd /home/ubuntu/T_0_system
-git pull
-sudo systemctl restart t0-system
-curl http://127.0.0.1:8083/health
+scripts/run_core_after_close_pipeline.sh 20260523
 ```
 
-如果仍使用 `nohup`，则先 `kill $(cat logs/t0_server/server.pid)`，再重新执行后台启动命令。前端静态文件有时刷新浏览器即可看到变化，但如果改动涉及后端接口、默认值或 Python 逻辑，仍必须重启后端服务。
+执行顺序：
 
-## 核心功能入口
+1. 判断是否 A 股交易日。
+2. `scripts/collect_stock_daily_raw.py --source all` 采集主股票池 raw 输入。
+3. `scripts/compute_stock_daily_features.py --source all` 计算主股票池指标。
+4. `scripts/run_paper_trading_cron.sh after-close` 生成模拟交易盘后计划。
+5. 写入 `scheduler.sqlite` 运行记录。
 
-### 前端页面
-
-- 入口：`/`
-- 股票池模板管理：`/stock-pools`
-- 首页右上角导航提供 `股票池模板` 链接，可直接跳转到股票池模板管理页面
-- 页面布局：顶部紧凑输入区，`组合结果` 固定在结果区上方；明细结果放在页签中切换查看
-- 回测模式：
-- `信号质量回测`：默认模式，不使用初始资金和账户现金约束；每笔目标资金与每手股数只用于交易流水展示估算股数和盈亏核对，适合先判断条件本身是否有效
-  - `实盘账户回测`：模拟现金、仓位、100 股整数倍和资金不足跳过，适合验证真实账户能否执行
-- 主要输入项：
-  - 处理后数据目录
-  - 起止日期
-  - `buy_condition`
-  - `sell_condition`
-  - `score_expression`
-  - `top_n`；在信号质量模式下它也是 TopK 扫描上限，想比较 Top10 就填 10 或更高
-  - `per_trade_budget`，信号质量模式仅用于展示估算股数；实盘账户模式用于实际买入资金约束
-  - `entry_offset`
-  - 退出模式：`卖出条件优先 + 固定兜底`、`固定持有退出`、`仅卖出条件退出`
-  - `exit_offset`：固定退出或兜底退出时必填；选择“仅卖出条件退出”时可不填，未触发卖出条件的持仓按截止日或数据末尾估值
-  - `min_hold_days`
-  - `max_hold_days`
-  - `initial_cash`，仅实盘账户回测使用
-  - `lot_size`，信号质量模式仅用于展示估算股数；实盘账户模式用于实际整手成交约束
-  - 买卖费率、印花税、滑点、最低佣金
-  - 是否启用严格成交
-  - 结束日处理方式：默认“截止日估值”，不使用结束日之后的数据；研究时可切换为“完整结算”
-- 结果区怎么看：
-  - 信号质量模式下，`组合结果` 看入选信号数、完成信号数、平均/中位单笔收益、胜率、收益因子、信号净值收益和回撤
-  - 实盘账户模式下，`组合结果` 看最终权益、现金、持仓市值、收益、回撤、胜率、收益因子和交易成本
-  - `组合结果` 下方的页签按钮用于切换 `条件诊断`、`排名质量`、`曲线与回撤`、`年度稳定性`、`退出原因`、`月度表现`、`期末持仓`、`选股与交易`、`个股贡献`
-  - `排名质量` 先看 `累计TopK扫描`，比较 Top1、Top2、Top3、Top5、Top10 等口径的平均收益、中位收益、胜率、收益因子、回撤和辅助推荐分，用来判断实际买前几只更合适
-  - `排名质量` 里的 `单名次质量` 看第 1 名到第 N 名各自的表现，用来判断评分表达式是否真的有排序能力
-  - `期末持仓` 看截止日仍未卖出的股票市值、浮动盈亏和持有天数
-  - `截止日卖出信号` 看结束日收盘触发但未使用未来开盘价成交的卖出提醒
-  - 截止日当天仍会生成 `每日选股明细`，用于提示下一交易日候选买入股票；这些预测不会在本次回测内成交，也不会读取下一交易日开盘价
-  - `条件诊断` 看信号覆盖、TopN 填满率、执行阻塞、交易质量和时间稳定性；这是判断买入条件是否可靠的主入口
-  - `曲线与回撤` 在信号质量模式下看信号净值，在实盘账户模式下看账户权益；它只适合辅助判断，不应单独决定条件好坏
-  - `年度稳定性` 和 `月度表现` 看条件是否只在少数年份或月份有效
-  - `退出原因` 对比卖出条件触发和固定/最大持有退出的收益质量
-  - `每日选股明细`、`交易流水`、`个股贡献汇总` 用于复核每笔信号、成交和个股盈亏来源
-  - `每日选股明细` 和 `交易流水` 表头各有 `下载Excel` 按钮；点击后按钮会显示生成中，浏览器直接下载对应 Excel，失败原因会显示在状态栏；页面顶部的旧“下载表格压缩包”按钮已隐藏
-  - `交易流水` 一行只代表一个动作，字段固定为：交易日期、信号日期、股票代码、股票名称、排名、评分、动作、价格、价格口径、股数、盈亏、执行说明。买入和卖出拆成两行；卖出行计算盈亏。页面和单表 Excel 中金额、价格、费用、现金、权益、市值、盈亏类字段统一保留两位小数
-  - 交易流水里的价格口径为未复权开盘价（除权价格）；信号指标仍按前复权价格计算
-  - 首页明细区用页签切换模块，当前页签里的表格自然展开；需要查看更多记录时滚动页面，不再套一个额外的固定高度小窗口
-
-### 单股页面
-
-- 入口：`/single`
-- 页面布局：与组合回测一致，上方为紧凑参数区，下方为摘要和页签内容
-- 主要输入项：
-  - 处理后数据目录，与组合回测和每日收盘选股共用同一份数据
-  - 股票代码或股票名称
-  - 起止日期
-  - 买入条件、卖出条件
-  - 买入确认天数、买入冷却天数、卖出确认天数
-  - 执行时点
-  - 初始资金、每笔目标资金、每手股数
-  - 买卖费率、印花税
-- 页面输出：
-  - 单股回测摘要
-  - 页签式结果区：指标解释表、K 线图与买卖点、股票交易日志、股票信号表
-- 买入条件和卖出条件默认沿用组合回测当前推荐值，因为默认读取同一份处理后数据，`hs300_m20` 等大盘字段可直接共用
-
-### 每日收盘选股页面
-
-- 入口：`/daily`
-- 用途：每天收盘采集完数据后，生成“明天准备买入的股票”和“当前持仓里明天需要卖出的股票”
-- 主要输入项：
-  - 处理后数据目录
-  - 信号日期；留空时默认使用数据中的最新交易日
-  - 买入条件、卖出条件、评分表达式
-  - `TopN`
-  - 买入偏移、最短持有天数、最大持有天数
-  - 每笔目标资金、每手股数
-  - 当前持仓，格式为每行 `股票代码,买入日期,买入价,股数,股票名称`
-- 页面输出：
-  - 页签式结果区：候选买入股票、卖出提醒、当前持仓诊断
-  - 候选买入股票：按评分排序，显示股票代码、股票名称、评分、估算股数和明日开盘复核要求
-  - 卖出提醒：根据当前持仓的浮盈、持仓以来最大收益和从高点回撤判断是否触发卖出条件
-  - 当前持仓诊断：帮助复核每只持仓为什么继续观察或需要卖出
-- 页面展示方式与组合回测保持一致：上方为紧凑参数区，下方为摘要和页签内容
-- 注意：每日页面只使用信号日及历史数据，不使用明天开盘价；明天开盘若涨停、跌停、停牌或流动性不足，需要人工或交易程序复核后再执行
-
-### 多账户模拟交易页面
-
-- 入口：`/paper`
-- 模板管理页：`/paper/templates`
-- 用途：把多套中文 YAML 模板当成多个独立模拟账户，每个账户独立生成待执行订单、模拟成交、记录持仓、计算盈亏和写入 Excel 账本
-- 默认模板目录：`configs/paper_accounts/`
-- 默认账本目录：`paper_trading/accounts/`
-- 默认日志目录：`paper_trading/logs/`
-- 主要输入项：
-  - 模板目录
-  - 模拟账户模板
-  - 执行动作：`收盘生成待执行订单`、`开盘执行待成交订单`、`收盘更新持仓估值`
-  - 动作日期；留空时会按数据最新交易日自动识别
-- 页面按钮：
-  - `/paper` 页面：`运行模拟账户`、`获取当前持仓最新价格`、`读取账本`、`刷新模板`、`模板管理`
-  - `/paper/templates` 页面：`载入模板`、`新建模板`、`复制模板`、`保存模板`、`另存为新模板`、`删除模板`
-  - `保存模板`：覆盖保存当前 YAML 模板；如果当前还是新建状态、没有模板路径，前端会自动按“另存为新模板”处理
-  - `复制模板`：把当前模板复制成一个新草稿，自动生成新的模板文件名、账户编号、账户名称和账本路径；只有继续点击 `保存模板` 才会写入 YAML
-  - `删除模板`：只删除 YAML 模板，Excel 账本保留，避免历史记录被误删
-  - `获取当前持仓最新价格`：使用东方财富或腾讯股票最新行情刷新当前持仓、市值、浮动盈亏和每日资产，不生成订单、不执行买卖
-- 页面输出：
-  - 账户摘要
-  - `待执行订单`
-  - `成交流水`
-  - `当前持仓`
-  - `每日资产`
-  - `运行日志`
-- 本地日线模式读取股票池 SQLite 中的 `stock_daily_features.raw_open/raw_close` 作为成交和估值价格；模板中的 `行情源` 字段也可切换到东方财富或腾讯股票实时行情
-- 买入候选支持按 T 日未复权收盘价过滤，例如在 YAML 中配置 `买入价格筛选.最高收盘价: 100` 后，超过 100 元的股票不会进入最终 TopN
-- 买入股数支持最低买入金额下限：`买入数量.股数` 是基础股数，`买入数量.最低买入金额` 会按 T 日收盘价和 `每手股数` 向上补足，例如 25 元股票基础 200 股会补到 400 股以超过 10000 元
-- 实时刷新在交易时段通常使用盘中最新价，收盘后通常使用当日收盘价或收盘后的最新可用价格，非交易日或节假日通常使用最近交易日收盘价或行情源最后可用价格；页面摘要和运行日志会写明行情状态
-- 每个模板互不影响：不同模板写入不同 Excel 账本，适合同步观察 Top3、Top5、行业增强、大盘过滤等多套实盘模拟效果
-- `/paper` 现在只负责模板选择和交易执行；模板字段编辑已独立到 `/paper/templates`
-- 模板管理会检查模板文件名、账户编号、账户名称和账本路径冲突；新模板或另存为不能复用已经存在的 Excel 账本路径，避免新策略和旧历史记录混在一起
-
-命令行示例：
+结构检查：
 
 ```bash
-python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action generate --date 20260416
-python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action execute --date 20260417
-python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action mark --date 20260417
-python scripts/run_paper_trading.py --config configs/paper_accounts/momentum_top5_v1.yaml --action refresh
+scripts/run_core_after_close_pipeline.sh --check-only 20260523
 ```
 
-运行全部模板：
+辅助研究链路：
 
 ```bash
-python scripts/run_paper_trading.py --config-dir configs/paper_accounts --all --action generate --date 20260416
+scripts/run_aux_research_pipeline.sh 20260523
 ```
 
-腾讯云定时任务脚本：
+## 管理员后台功能
 
-```bash
-scripts/run_paper_trading_cron.sh execute 20260429
-scripts/run_paper_trading_cron.sh after-close 20260429
-scripts/run_paper_trading_cron.sh --check-only after-close 20260429
+`/admin` 当前包含：
+
+- 主股票池读取、解析、追加、替换活跃集合。
+- 一键采集当天所有主股票池股票日线 raw 数据。
+- 一键计算当天所有主股票池股票指标。
+- 一键采集指定开始/结束日期的主股票池日线 raw 数据。
+- 一键计算指定开始/结束日期的主股票池指标。
+- 调度运行记录查看和失败任务登记安全重跑。
+
+如果当前主股票池新增股票，默认采集会对新增股票补 raw 数据；已有股票按 `only_missing`、`force_full_rebuild`、日期区间和批次参数决定是否跳过或重采。
+
+## 回测与模拟交易口径
+
+默认口径：
+
+- 初始资金常用 `100000`。
+- 每笔目标资金常用 `10000`。
+- 买入股数必须为 100 股整数倍。
+- 买卖手续费默认 `0.003%`，无最低消费。
+- 信号指标使用前复权价格。
+- 买入和卖出成交使用原始除权价格。
+- 回测严格按时间顺序执行，禁止未来函数。
+
+20 日动量公式：
+
+```text
+m20 = (T日close - (T-19)日close) / (T-19)日close
 ```
 
-推荐 crontab：
+例如五日动量：
 
-```cron
-35 9 * * 1-5 /home/ubuntu/T_0_system/scripts/run_paper_trading_cron.sh execute >> /home/ubuntu/T_0_system/logs/paper_trading_cron/cron.log 2>&1
-30 21 * * * /home/ubuntu/T_0_system/scripts/run_paper_trading_cron.sh after-close >> /home/ubuntu/T_0_system/logs/paper_trading_cron/cron.log 2>&1
+```text
+m5 = (T日close - (T-4)日close) / (T-4)日close
 ```
-
-脚本会先判断当天是否为 A 股交易日；非交易日自动跳过。`execute` 用于开盘后执行所有账户已有的待成交订单，`after-close` 用于在数据更新完成后更新估值并生成下一交易日订单。
-
-详细字段和账本解释见 `docs/paper-trading-system.md`。
-
-### 股票池模板管理页面
-
-- 入口：`/stock-pools`
-- 默认用户：`admin`
-- 用途：维护用户手工股票列表模板，作为后续批量回测、每日收盘选股、多账户模拟交易、单股回测和板块研究统一股票池输入的基础。
-- 当前阶段：模板写入 `data_store/stock_pool_templates.sqlite`；日线和指标写入共享表 `stock_daily_features`。批量回测页面、每日收盘选股页面和多账户模拟交易账户模板已经使用股票池模板读取 SQLite；单股回测和板块研究暂时仍保持 CSV 输入。
-- 页面按钮：
-  - `刷新模板`：重新读取当前用户模板列表。
-  - `载入模板`：把下拉框选中的模板载入编辑区。
-  - `新建模板`：初始化空白模板草稿。
-  - `复制模板`：把当前模板复制成未落盘的新草稿，便于改名后保存。
-  - `保存模板`：保存模板名称、说明和手工股票列表；所有模板默认参与后续每日更新。
-  - `删除模板`：只删除模板和模板股票关系，不删除 SQLite 中后续可能存在的日线事实数据。
-  - `校验股票列表`：检查有效股票、重复股票和格式错误项。
-  - `初始化基础模板`：从 Top500 L0-L4 分层结果和当前多账户模拟 Top100 目录生成基础模板。
-- 手工股票列表支持 `300750`、`600941.SH` 等格式；系统保存 6 位股票代码和 Tushare 风格代码。
-- 模板名称在同一用户下唯一；保存时会检查名称冲突。
-- 第二阶段入库脚本会写 `logs/stock_pool_template_update/`，失败时按 `job_id` 查看任务表和日志。
-- 批量回测页面 `/` 不再填写“处理后数据目录”，而是读取当前用户 `admin` 下的股票池模板下拉框；点击“刷新模板”会重新读取 `/api/stock-pools/templates?username=admin`。
-- 每日收盘选股页面 `/daily` 也不再填写“处理后数据目录”，而是选择当前用户 `admin` 的股票池模板，提交时向 `/api/daily-plan` 发送 `data_source=stock_pool`、`stock_pool_username` 和 `stock_pool_template_name`。
-- 现阶段 SQLite `stock_daily_features` 还没有入库 `sector_*` 板块增强字段，所以批量回测页和每日收盘选股页的“板块过滤”和“板块过滤 + 评分加权”预设先禁用；需要板块增强时仍使用旧 CSV 增强目录或等后续把板块字段写入 SQLite。
-
-### API
-
-- `GET /health`
-- `POST /api/run-signal-quality`
-- `POST /api/run-backtest`
-- `POST /api/run-backtest-export`
-- `POST /api/daily-plan`
-- `GET /api/paper/templates`
-- `GET /api/paper/template`
-- `POST /api/paper/template`
-- `DELETE /api/paper/template`
-- `GET /api/paper/ledger`
-- `POST /api/paper/run`
-- `POST /api/run-single-stock`
-
-`/api/run-backtest` 返回：
-
-- `summary`
-- `daily_rows`
-- `pick_rows`
-- `trade_rows`
-- `contribution_rows`
-- `condition_rows`
-- `year_rows`
-- `month_rows`
-- `exit_reason_rows`
-- `open_position_rows`
-- `pending_sell_rows`
-- `diagnostics`
-
-`/api/run-signal-quality` 返回：
-
-- `summary`
-- `daily_rows`，信号净值曲线和每日完成信号统计
-- `pick_rows`，每日入选信号，包含完成、买入阻塞、未完成和截止日估值状态
-- `trade_rows`，已完成的独立信号样本
-- `topk_rows`，累计 TopK 扫描结果，用于比较 Top1、Top2、Top3、Top5、Top10 等买入数量
-- `rank_rows`，按评分排名分组的收益质量
-- `contribution_rows`
-- `condition_rows`
-- `year_rows`
-- `month_rows`
-- `exit_reason_rows`
-- `diagnostics`
-
-说明：该接口不使用 `initial_cash` 和账户现金占用；`per_trade_budget`、`lot_size` 只用于交易流水按整手估算展示股数和买卖净额，便于核对卖出盈亏。同一股票在虚拟持仓或待买期间不会重复入选，避免连续加仓高估信号质量。
-
-`/api/run-backtest-export` 返回 ZIP，包含：
-
-- `汇总.csv`
-- `每日资金曲线.csv`
-- `每日选股明细.csv`
-- `交易流水.csv`
-- `个股贡献汇总.csv`
-- `条件诊断.csv`
-- `年度稳定性.csv`
-- `月度表现.csv`
-- `退出原因统计.csv`
-- `期末持仓.csv`
-- `截止日卖出提醒.csv`
-
-说明：导出的 CSV 文件名和表头均为中文，便于直接用 Excel 打开核对。
-
-`/api/daily-plan` 返回：
-
-- `summary`
-- `buy_rows`
-- `sell_rows`
-- `holding_rows`
-- `diagnostics`
-
-`/api/paper/run` 返回：
-
-- `summary`
-- `pending_order_rows`
-- `trade_rows`
-- `holding_rows`
-- `asset_rows`
-- `log_rows`
-- `diagnostics`
-
-`/api/paper/ledger` 是只读接口，用于前端打开 `/paper` 时直接读取已有 Excel 账本，不会生成新订单或执行成交。
-
-`/api/paper/template` 用于前端模板管理：`GET` 读取单个 YAML 模板为编辑表单字段，`POST` 保存或另存模板，`DELETE` 删除 YAML 模板。前端“复制模板”是在页面里生成新草稿，保存前不会调用写接口。删除模板不会删除 Excel 账本；保存新模板会拒绝复用其他模板或既有账本路径。
-
-`/api/run-single-stock` 返回：
-
-- `stock_code`
-- `stock_name`
-- `summary`
-- `metric_definitions`
-- `trade_rows`
-- `signal_rows`
-
-## 回测逻辑
-
-当前系统有两种回测口径。
-
-### 信号质量回测
-
-1. `T` 日收盘后扫描全部股票。
-2. 用 `buy_condition` 过滤候选。
-3. 用 `score_expression` 排序。
-4. 取 `TopN` 作为入选信号；同时按累计 TopK 口径统计 Top1、Top2、Top3、Top5、Top10 等组合质量。
-5. 每个入选信号默认在 `T+1` 日开盘虚拟买入。
-6. 不检查账户现金、不按账户资金占用限制买入数量；交易流水会按 `per_trade_budget` 和 `lot_size` 估算整手股数，用买入净额和卖出净额计算盈亏，便于按一万元左右单笔金额复核。
-7. 持有期间按 `sell_condition`、`min_hold_days` 和 `max_hold_days` 计算退出。
-8. 默认“截止日估值”不读取结束日之后的数据；无法完成买卖的信号只展示为未完成或截止日估值，不进入已完成信号统计。
-9. 输出重点是平均单笔收益、中位单笔收益、胜率、收益因子、累计 TopK 扫描、单名次排名质量和年度/月度稳定性。
-10. `累计TopK扫描` 的辅助推荐分只用于排序提示，会轻微惩罚过大的 TopK，避免把“买几乎所有候选”误判成最佳；最终要结合样本数量、最差年份、最大回撤和实盘账户资金约束判断。
-
-### 实盘账户回测
-
-实盘账户回测使用以下口径：
-
-1. `T` 日收盘后扫描全部股票。
-2. 用 `buy_condition` 过滤候选。
-3. 用 `score_expression` 排序。
-4. 取 `TopN` 作为信号列表。
-5. 对入选信号在 `T+1` 日开盘尝试买入。
-6. 每笔按 `per_trade_budget` 计算可买手数，股数必须为 `lot_size` 的整数倍。
-7. 如果未配置 `sell_condition`，默认在 `T+N` 日开盘卖出。
-8. 如果配置了 `sell_condition`，系统会在每个收盘后判断是否触发；满足 `min_hold_days` 后若触发，则安排下一交易日开盘卖出。
-9. 若设置了 `max_hold_days`，则达到最大持有天数后，不论卖出条件是否触发，都会在下一到期开盘强制退出。
-10. 若严格成交模式下卖出日开盘跌停或停牌，则顺延到下一个可卖开盘。
-11. 若严格成交模式下买入日开盘接近涨停、接近跌停或停牌，则该信号取消，不追买。
-
-默认成交口径：
-
-- 信号字段：`qfq_*`
-- 买卖成交：`raw_open`
-- 资金估值：持仓期间按 `raw_close` 逐日估值
-
-## 研究脚本
-
-### 1. 特征分层扫描
-
-按 `T+1 open -> T+N open` 的标签看哪些日线特征更值得研究：
-
-```bash
-python scripts/run_overnight_feature_scan.py --processed-dir data_bundle/processed_qfq --start-date 20190101 --end-date 20251231 --exit-offset 2
-```
-
-主要参数：
-
-- `--entry-offset`：默认 `1`
-- `--exit-offset`：默认 `2`，支持 `2~5`
-- `--per-trade-notional`：默认 `10000`
-
-输出：
-
-- `scan_overview.json`
-- `feature_bucket_report.csv`
-- `feature_scan_summary.md`
-
-### 2. 训练期/验证期参数探索
-
-```bash
-python scripts/run_overnight_research.py --processed-dir data_bundle/processed_qfq --preset swing_v1 --exit-offsets 2,3,4,5
-```
-
-主要参数：
-
-- `--preset`：默认 `swing_v1`
-- `--entry-offset`：默认 `1`
-- `--exit-offsets`：默认 `2,3,4,5`
-- `--top-k`：训练期保留多少组进入验证
-- `--per-trade-budget`：默认 `10000`
-
-输出文件：
-
-- `train_results.csv`
-- `selected_train_cases.csv`
-- `validation_results.csv`
-- `leaderboard.csv`
-- `research_summary.json`
-- `research_summary.md`
-- `selected_case_trade_records.csv`
-
-其中：
-
-- `research_summary.md` 用于记录本次探索的条件与结果
-- `selected_case_trade_records.csv` 用于记录验证期优先组合的逐笔买卖明细，包含日期、买卖动作、股票代码、股票名称、价格、数量、手续费、总金额、收益率与价差
-
-### 3. 买入条件网格测试
-
-如果你要系统化搜索更稳定的买入条件，可以运行：
-
-```bash
-python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_focus_grid_v1 --exit-offsets 4,5
-```
-
-如果你要围绕首轮胜出条件做第二轮更细的搜索，可以运行：
-
-```bash
-python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_focus_grid_v2 --exit-offsets 5
-```
-
-如果你要专门测试“每次只买 TopM 个”的影响，可以运行：
-
-```bash
-python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_topm_grid_v1 --exit-offsets 5
-```
-
-如果你要继续细化 `Top1` 或 `Top2` 下最合适的买入条件，可以运行：
-
-```bash
-python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_top1_focus_grid_v1 --exit-offsets 5
-python scripts/run_buy_condition_grid.py --processed-dir data_bundle/processed_qfq --grid-preset buy_condition_top2_focus_grid_v1 --exit-offsets 5
-```
-
-### 4. 卖出指标网格测试
-
-如果你要固定当前最优买入条件，转而探索不同卖出逻辑，可以运行：
-
-```bash
-python scripts/run_sell_condition_grid.py --processed-dir data_bundle/processed_qfq
-```
-
-如果你要测试更高级的退出逻辑，例如止损和浮盈回撤保护，可以运行：
-
-```bash
-python scripts/run_sell_condition_grid.py --sell-grid-preset sell_grid_advanced_v1 --processed-dir data_bundle/processed_qfq_theme_focus_top100 --top-n 5
-```
-
-如果你要围绕当前最佳的高级退出继续微调参数，可以运行：
-
-```bash
-python scripts/run_sell_condition_grid.py --sell-grid-preset sell_grid_advanced_v2_micro --processed-dir data_bundle/processed_qfq_theme_focus_top100 --top-n 5 --top-k 28
-```
-
-输出文件包括：
-
-- `sell_grid_cases.json`
-- `train_results.csv`
-- `selected_train_cases.csv`
-- `validation_results.csv`
-- `leaderboard.csv`
-- `sell_grid_summary.json`
-- `sell_grid_summary.md`
-- `selected_case_trade_records.csv`
-
-高级退出支持的动态字段包括：
-
-- `holding_return`
-- `best_return_since_entry`
-- `drawdown_from_peak`
-- `days_held`
-
-### 5. 股票池与固定持有期对比
-
-如果你要在固定 `Top1` 和固定买入条件下，比较不同股票池与 `T+4/T+5/T+6/T+7` 固定卖出的差异，可以运行：
-
-```bash
-python scripts/run_universe_hold_compare.py
-```
-
-默认会比较：
-
-- 原始全量股票池
-- 主题聚焦股票池
-- 主题聚焦前100市值股票池
-
-输出文件包括：
-
-- `train_results.csv`
-- `validation_results.csv`
-- `leaderboard.csv`
-- `universe_hold_summary.json`
-- `universe_hold_summary.md`
-- `selected_case_trade_records.csv`
-
-### 6. 主题前100池 TopN 与固定持有期对比
-
-如果你要固定 `theme_focus_top100` 股票池，再比较 `Top1 / Top3 / Top5` 与 `T+4 / T+5 / T+6 / T+7` 的差异，可以运行：
-
-```bash
-python scripts/run_topn_hold_compare.py
-```
-
-输出文件包括：
-
-- `train_results.csv`
-- `validation_results.csv`
-- `leaderboard.csv`
-- `topn_hold_summary.json`
-- `topn_hold_summary.md`
-- `selected_case_trade_records.csv`
-
-### 7. 信号中位收益优化扫描
-
-如果信号质量回测出现“平均收益为正、但中位单笔收益为负”，可以运行中位收益优化扫描，重点寻找让普通一笔更接近不亏的买入过滤、卖出条件和 TopK：
-
-```bash
-python scripts/run_signal_median_scan.py --processed-dir data_bundle/processed_qfq_theme_focus_top100 --start-date 20230101 --end-date 20251231
-```
-
-默认扫描：
-
-- 基础买入条件：`m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1`
-- 基础卖出条件：`m20<0.08,hs300_m20<0.02`
-- TopK：`1,2,3,5,10,20`
-- 买入过滤：短期动量为正、短期不过热、动量形态向上、大盘动量、K线质量、主板成熟股、行业强度等组合
-- 卖出条件：当前卖出条件、十日转弱退出、五日转弱退出
-
-如果已经运行 `scripts/build_industry_strength.py`，该扫描还会测试 `industry_rank_m20`、`industry_up_ratio`、`stock_vs_industry_m20` 等行业过滤组合，用来验证“强市场里的强行业里的强个股”是否更稳。
-
-可选参数：
-
-- `--pool-top-n`：每个信号日先取多少名候选进入复用池，默认 `20`
-- `--top-k-values`：扫描哪些累计 TopK，默认 `1,2,3,5,10,20`
-- `--min-completed`：推荐结果要求的最低完成信号数，默认 `200`
-- `--sell-scope current`：只扫描当前卖出条件，适合快速验证买入过滤方向
-
-输出目录默认在 `research_runs/YYYYMMDD_HHMMSS_signal_median_scan/`，包含：
-
-- `中位收益优化结果.csv`：全部组合的中位收益、平均收益、胜率、收益因子、回撤和样本数
-- `最佳组合信号明细.csv`：最佳组合下逐笔信号明细，包含买入日期、卖出日期、股票代码、股票名称、执行价、费用、收益率和关键指标
-- `中位收益优化总结.md`：中文总结与前 20 名结果
-- `扫描配置.json`：本次扫描参数
-
-注意：该脚本仍是信号质量口径，不模拟账户现金和仓位金额占用，但会跳过同一股票持仓期内的重复信号。它适合先找到“普通信号更稳”的条件，再回到前端或账户回测验证可执行性。
-
-## 单股回测使用说明
-
-当前单股页面默认读取组合回测同一份处理后数据，因此大盘指标、行业强度指标和个股指标口径保持一致：
-
-1. 打开 `http://127.0.0.1:8083/single`
-2. 填入处理后数据目录，例如 `D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100`
-3. 填入股票代码或名称，例如 `000063` 或 `中兴通讯`
-4. 填入买入条件、卖出条件和确认参数
-5. 点击“运行单股回测”
-6. 查看：
-   - 回测摘要
-   - 指标解释
-   - K 线图上的买卖点
-   - 交易日志
-   - 每日信号表
-
-说明：
-
-- 鼠标移动到 K 线图任意一天，会显示这一天的开盘、收盘、最高、最低、成交量和买卖信号
-- 交易日志会展示买卖后剩余现金、持仓股数、持仓市值、总资产和已实现盈亏
-
-### 7. 当前推荐结果的前端复现
-
-当前这条“主题前100池 + Top2 + 动量买入 + 大盘强度过滤 + 大盘卖出门槛”的推荐结果，已经设置为组合回测和每日收盘选股的默认值；单股表格回测页也默认使用同一组买入和卖出条件。也可以按下面参数复现：
-
-- 处理后数据目录：`D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100`
-- 开始日期：`20230101`
-- 结束日期：`20251231`
-- 买入条件：`m120>0.02,m60>0.01,m20>0.08,m10<0.16,m5<0.1,hs300_m20>0.02`
-- 卖出条件：`m20<0.08,hs300_m20<0.02`
-- 评分表达式：`m20 * 140 + (m20 - m60 / 3) * 90 + (m20 - m120 / 6) * 40 - abs(m5 - 0.03) * 55 - abs(m10 - 0.08) * 30`
-- `TopN`：`2`
-- 买入偏移：`1`
-- 固定卖出偏移：`5`
-- 最短持有天数：`3`
-- 最大持有天数：`15`
-- 初始资金：`100000`
-- 每笔目标资金：`10000`
-- 每手股数：`100`
-- 买卖费率：`0.00003`
-- 印花税：`0`
-- 滑点(bps)：`3`
-- 最低佣金：`0`
-- 严格成交：`是`
-
-说明：
-
-- 这组参数对应的中位收益优化结果见 `research_runs/20260427_171050_signal_median_scan_strict_all/`
-- 大盘指标同时放在买入和卖出条件里：买入时要求沪深300二十日动量 `hs300_m20>0.02`，卖出时当个股 `m20<0.08` 且沪深300 `hs300_m20<0.02` 才触发退出，避免弱市买入、强市中过早下车。
-
-当前脚本会输出两类核心结果：
-
-- `sell_grid_summary.md`
-  这次网格测试的总结书，包含测试范围、稳定性筛选口径、推荐条件和排行榜
-- `selected_case_trade_records.csv`
-  推荐组合的逐笔交易记录，包含买入、卖出、股票代码、股票名称、价格、数量、手续费、总金额、收益率和价差
-
-完整输出通常包括：
-
-- `sell_grid_cases.json`
-- `train_results.csv`
-- `selected_train_cases.csv`
-- `validation_results.csv`
-- `leaderboard.csv`
-- `sell_grid_summary.json`
-- `sell_grid_summary.md`
-- `selected_case_trade_records.csv`
 
 ## 复现结果
 
-1. 准备好完整 `data_bundle/`
-2. 确认其中包含 `processed_qfq/`
-3. 启动服务
-4. 打开前端并填写：
-   - 处理后数据目录
-   - 起止日期
-   - `buy_condition`
-   - 如有需要，填写 `sell_condition`
-   - `score_expression`
-   - `top_n`
-   - `per_trade_budget`
-   - `entry_offset=1`
-   - 退出模式；如选择“仅卖出条件退出”，`exit_offset` 可不填
-   - `exit_offset`
-   - 可选 `min_hold_days` / `max_hold_days`
-   - 资金与交易成本参数
-5. 点击“运行回测”
-6. 查看：
-   - 组合 summary
-   - 资金曲线
-   - 每日信号明细
-   - 交易流水
-   - 个股贡献
-7. 如需归档，在“每日选股明细”或“交易流水”表头点击“下载Excel”；按钮会显示生成中并触发浏览器下载，旧压缩包导出接口保留但前端入口已隐藏
-
-## 文档入口
-
-- 数据文档：[backtest-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/backtest-data-dictionary.md)
-- 指标文档：[indicator-reference.md](/D:/量化/Momentum/T_0_system/docs/indicator-reference.md)
-- 表达式文档：[expression-reference.md](/D:/量化/Momentum/T_0_system/docs/expression-reference.md)
-- 系统文档：[system-documentation.md](/D:/量化/Momentum/T_0_system/docs/system-documentation.md)
-- 主题股票池文档：[theme-focus-universe-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/theme-focus-universe-data-dictionary.md)
-- 板块研究使用说明：[sector-research-system-guide.md](/D:/量化/Momentum/T_0_system/docs/sector-research-system-guide.md)
-- 板块研究数据文档：[sector-research-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-research-data-dictionary.md)
-- 板块研究指标文档：[sector-research-indicator-documentation.md](/D:/量化/Momentum/T_0_system/docs/sector-research-indicator-documentation.md)
-- 板块轮动后续验证数据说明：[sector-rotation-followup-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-data-dictionary.md)
-- 板块轮动后续验证结果：[sector-rotation-followup-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-followup-result-20260504.md)
-- 股票匹配主线轮动 TopN 数据说明：[sector-rotation-match-grid-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-grid-data-dictionary.md)
-- 股票匹配主线轮动 TopN 结果：[sector-rotation-match-grid-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-grid-result-20260504.md)
-- 板块轮动匹配稳定性数据说明：[sector-rotation-match-stability-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-stability-data-dictionary.md)
-- 板块轮动匹配稳定性结果：[sector-rotation-match-stability-result-20260505.md](/D:/量化/Momentum/T_0_system/docs/sector-rotation-match-stability-result-20260505.md)
-- 板块效应选股条件数据说明：[sector-effect-grid-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-data-dictionary.md)
-- 板块效应选股条件结果：[sector-effect-grid-result-20260504.md](/D:/量化/Momentum/T_0_system/docs/sector-effect-grid-result-20260504.md)
-- 股票池模板系统规划：[stock-pool-template-system-plan.md](/D:/量化/Momentum/T_0_system/docs/stock-pool-template-system-plan.md)
-- 股票池模板数据说明：[stock-pool-template-data-dictionary.md](/D:/量化/Momentum/T_0_system/docs/stock-pool-template-data-dictionary.md)
-
-## 交付前校验
+### 1. 基础交付检查
 
 ```bash
 python scripts/verify_delivery.py
-python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-如果本次改动涉及 API 或前端，交付前还应做一次本地启动冒烟验证。当前项目推荐最少执行：
+### 2. 关键测试
 
 ```bash
-python -m unittest tests.test_backtest tests.test_api_integration tests.test_feature_scan tests.test_research tests.test_processing -v
-python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 8083
+env -u PYTEST_ADDOPTS python -m pytest \
+  tests/test_main_universe.py \
+  tests/test_market_data_store.py \
+  tests/test_stock_pool_templates.py \
+  tests/test_api_integration.py \
+  tests/test_paper_trading.py \
+  tests/test_sqlite_only_guard.py \
+  tests/test_sqlite_only_pipeline_scripts.py \
+  tests/test_trade_calendar.py \
+  -q
 ```
+
+完整测试：
+
+```bash
+env -u PYTEST_ADDOPTS python -m pytest -q
+```
+
+### 3. 核心链路冒烟
+
+```bash
+scripts/run_core_after_close_pipeline.sh --check-only 20260523
+curl -sS http://127.0.0.1:8083/health
+```
+
+## 兼容旧链路
+
+以下脚本仍保留，用于历史研究、对照或迁移，不是当前默认主链路：
+
+```bash
+python scripts/build_universe_snapshot.py --as-of 20260523
+python scripts/sync_tushare_bundle.py --start-date 20160101 --end-date 20260523
+python scripts/build_processed_data.py
+python scripts/init_stock_pool_feature_store.py --source all --start-date 20220101
+python scripts/run_stock_pool_template_update.py --source active_templates --username admin --start-date 20220101
+scripts/run_after_close_pipeline.sh 20260523
+```
+
+这些旧脚本可能读写 `data_bundle/`、per-stock CSV 或旧模板库。SQLite-only 收口时，应优先使用 `scripts/audit_sqlite_only_read_paths.py` 审计默认路径。
+
+## 板块与研究脚本
+
+板块看板入口为 `/sector`。
+
+常用研究脚本：
+
+```bash
+python scripts/run_sector_research.py --start-date 20230101
+python scripts/run_sector_parameter_grid.py
+python scripts/run_sector_rotation_diagnosis.py
+python scripts/run_sector_rotation_grid.py
+python scripts/run_stock_pool_layer_grid.py
+```
+
+这些脚本主要用于研究和报告生成，不属于每日核心日线/模拟交易闭环。相关数据字典和结果说明在 `docs/` 下。
+
+## 主要文档
+
+| 文档 | 用途 |
+| --- | --- |
+| `PROJECT_MAP.md` | 当前项目结构、SQLite 主线和迁移地图 |
+| `docs/system-documentation.md` | 系统功能使用说明 |
+| `docs/paper-trading-system.md` | 多账户模拟交易说明 |
+| `docs/stock-pool-template-data-dictionary.md` | 股票池模板和任务表数据字典 |
+| `docs/sector-dashboard-sqlite-data-dictionary.md` | 板块看板 SQLite 数据字典 |
+| `docs/indicator-reference.md` | 指标说明 |
+| `docs/expression-reference.md` | 条件表达式说明 |
+
+## GitHub 初始化版本说明
+
+本仓库提交代码、前端、测试和文档；不提交：
+
+- `.env` / `.env.*`
+- `data_store/` SQLite 运行库
+- `logs/`、`runtime_logs/`
+- `data_bundle/`
+- `research_runs/`
+- `sector_research/data/`、`sector_research/reports/`
+- Python 缓存和临时备份文件
+
+如果需要在新环境恢复完整生产数据，应单独备份和恢复 SQLite 数据库，而不是通过 GitHub 分发运行数据。

@@ -6,7 +6,7 @@
     <title>单股表格回测</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
-  <body>
+  <body class="single-page">
     <div class="shell">
       <aside class="controls compact-controls">
         <div class="brand-block">
@@ -15,19 +15,19 @@
             <h1>单股表格回测</h1>
           </div>
           <div class="brand-actions">
+            <div class="user-badge">
+              <span>当前用户</span>
+              <strong data-current-user>未登录</strong>
+            </div>
+
             <p class="subtle">
-              从组合回测同一份处理后数据中选择单只股票，查看蜡烛图、买卖点、交易日志和每日信号。
+              输入单只股票，查看蜡烛图、买卖点、交易日志和每日信号。
             </p>
-            <p class="subtle"><a href="/">返回组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a></p>
+            <p class="subtle"><a href="/">返回组合回测</a> · <a href="/daily">每日收盘选股</a> · <a href="/paper">多账户模拟交易</a> · <a href="/users" data-admin-only>用户管理</a> · <a href="#" data-logout>退出</a></p>
           </div>
         </div>
 
         <form id="singleForm" class="form-grid compact-form">
-          <label class="field-wide">
-            <span>处理后数据目录</span>
-            <input id="processedDir" type="text" value="D:/量化/Momentum/T_0_system/data_bundle/processed_qfq_theme_focus_top100" />
-          </label>
-
           <label class="field-symbol">
             <span>股票代码或名称</span>
             <input id="stockQuery" type="text" placeholder="例如：000063 或 中兴通讯" />
@@ -90,7 +90,7 @@
           <div class="three-col">
             <label>
               <span>每手股数</span>
-              <input id="lotSize" type="number" value="100" min="1" />
+              <input id="lotSize" type="number" value="100" min="1" step="1" />
             </label>
             <label>
               <span>买入费率</span>
@@ -108,8 +108,12 @@
               <input id="stampTaxSell" type="number" value="0" min="0" step="0.0001" />
             </label>
             <label>
-              <span>说明</span>
-              <input type="text" value="默认读取组合回测同一份处理后数据" readonly />
+              <span>最大持有天数</span>
+              <input id="maxHoldDays" type="number" value="0" min="0" max="120" />
+            </label>
+            <label class="check-field">
+              <input id="strictExecution" type="checkbox" checked />
+              <span>严格成交</span>
             </label>
           </div>
 
@@ -155,14 +159,15 @@
           </div>
 
           <div class="tab-panel" data-tab-panel="kline" role="tabpanel">
-            <section class="panel compact-panel">
+            <section class="panel compact-panel kline-panel">
               <div class="panel-head">
                 <div>
                   <p class="eyebrow">蜡烛图</p>
                   <h3>蜡烛图与买卖点</h3>
+                  <p id="singleKlineBasis" class="panel-note tab-note">当前使用前复权价格绘制蜡烛图；交易成交仍按除权价格。</p>
                 </div>
               </div>
-              <div id="singleKlineChart" class="chart-box"></div>
+              <div id="singleKlineChart" class="chart-box single-kline-chart"></div>
             </section>
           </div>
 
@@ -197,7 +202,8 @@
       </main>
     </div>
 
+    <script src="/static/auth.js"></script>
     <script src="/static/vendor/echarts.min.js"></script>
-    <script src="/static/single.js"></script>
+    <script src="/static/single.js?v=20260520-qfq-kline"></script>
   </body>
 </html>

@@ -7,6 +7,18 @@ from typing import Any
 
 import pandas as pd
 
+from .sqlite_only_guard import assert_sqlite_only_allowed
+from .sector_dashboard_store import (
+    DATASET_BOARD_STRENGTH,
+    DATASET_ERRORS,
+    DATASET_MAPPING,
+    DATASET_MARKET_CONTEXT,
+    DATASET_STOCK_EXPOSURE,
+    DATASET_THEME_STRENGTH,
+    read_sector_dashboard_rows,
+    upsert_sector_dashboard_rows,
+)
+
 
 DEFAULT_SECTOR_PROCESSED_DIR = "sector_research/data/processed"
 DEFAULT_SECTOR_REPORT_DIR = "sector_research/reports"
@@ -157,22 +169,49 @@ def build_sector_dashboard_payload(
     processed_dir: str | Path = DEFAULT_SECTOR_PROCESSED_DIR,
     report_dir: str | Path = DEFAULT_SECTOR_REPORT_DIR,
     market_context_path: str | Path = DEFAULT_MARKET_CONTEXT_PATH,
+    db_path: str | Path | None = None,
+    source: str = "sqlite",
 ) -> dict[str, Any]:
     """Read sector research outputs and shape them for the read-only dashboard."""
 
     base = Path(base_dir).resolve()
-    processed = _resolve_under_base(base, processed_dir)
-    report = _resolve_under_base(base, report_dir)
-    market_path = _resolve_under_base(base, market_context_path)
     messages: list[str] = []
+    clean_source = str(source or "sqlite").strip().lower()
+    if clean_source not in {"sqlite", "csv"}:
+        raise ValueError("source must be sqlite or csv")
 
-    theme_strength = _read_csv(processed / "theme_strength_daily.csv", base, messages)
-    board_strength = _read_csv(processed / "sector_board_daily.csv", base, messages)
-    stock_exposure = _read_csv(processed / "stock_theme_exposure.csv", base, messages)
-    mapping = _read_csv(processed / "theme_board_mapping.csv", base, messages)
-    errors = _read_csv(report / "sector_research_errors.csv", base, messages, required=False)
-    summary_json = _read_json(report / "sector_research_summary.json", base, messages)
-    market_context_frame = _read_csv(market_path, base, messages, required=False)
+    if clean_source == "csv":
+        processed = _resolve_under_base(base, processed_dir)
+        report = _resolve_under_base(base, report_dir)
+        market_path = _resolve_under_base(base, market_context_path)
+        assert_sqlite_only_allowed("sector dashboard processed CSV directory", str(processed))
+        assert_sqlite_only_allowed("sector dashboard report directory", str(report))
+        assert_sqlite_only_allowed("sector dashboard market context CSV", str(market_path))
+        theme_strength = _read_csv(processed / "theme_strength_daily.csv", base, messages)
+        board_strength = _read_csv(processed / "sector_board_daily.csv", base, messages)
+        stock_exposure = _read_csv(processed / "stock_theme_exposure.csv", base, messages)
+        mapping = _read_csv(processed / "theme_board_mapping.csv", base, messages)
+        errors = _read_csv(report / "sector_research_errors.csv", base, messages, required=False)
+        summary_json = _read_json(report / "sector_research_summary.json", base, messages)
+        market_context_frame = _read_csv(market_path, base, messages, required=False)
+        paths = _file_paths(base, processed, report, market_path)
+        source_name = "csv"
+    else:
+        sqlite_payload = read_sector_dashboard_rows(db_path)
+        datasets = sqlite_payload["datasets"]
+        theme_strength = _frame_from_rows(datasets.get(DATASET_THEME_STRENGTH, []))
+        board_strength = _frame_from_rows(datasets.get(DATASET_BOARD_STRENGTH, []))
+        stock_exposure = _frame_from_rows(datasets.get(DATASET_STOCK_EXPOSURE, []))
+        mapping = _frame_from_rows(datasets.get(DATASET_MAPPING, []))
+        errors = _frame_from_rows(datasets.get(DATASET_ERRORS, []))
+        summary_json = sqlite_payload.get("summary") or {}
+        market_context_frame = _frame_from_rows(datasets.get(DATASET_MARKET_CONTEXT, []))
+        paths = _sqlite_paths(sqlite_payload["db_path"])
+        db_display = f"{Path(sqlite_payload['db_path']).name}:sector_dashboard_rows"
+        processed = Path(db_display)
+        report = Path(f"{Path(sqlite_payload['db_path']).name}:sector_dashboard_meta")
+        market_path = Path(f"{Path(sqlite_payload['db_path']).name}:sector_market_context")
+        source_name = "sqlite"
 
     latest_date = _latest_trade_date(theme_strength, board_strength, summary_json)
     market_context = _build_market_context(
@@ -201,17 +240,21 @@ def build_sector_dashboard_payload(
         processed=processed,
         report=report,
         base=base,
+        source_name=source_name,
     )
 
     has_data = any(not frame.empty for frame in [theme_strength, board_strength, stock_exposure, mapping])
     status = "ready" if has_data else "empty"
     if not has_data:
-        messages.append("尚未读取到板块研究结果；请先运行 scripts/run_sector_research.py 生成数据。")
+        if source_name == "sqlite":
+            messages.append("SQLite 板块研究数据未初始化；请先运行板块研究采集/导入流程写入 market_data.sqlite。")
+        else:
+            messages.append("尚未读取到板块研究结果；请先运行 scripts/run_sector_research.py 生成数据。")
 
     return {
         "status": status,
         "messages": messages,
-        "paths": _file_paths(base, processed, report, market_path),
+        "paths": paths,
         "summary": summary,
         "market_context": market_context,
         "latest_themes": latest_themes,
@@ -381,7 +424,7 @@ def _build_market_context(
     messages: list[str],
 ) -> dict[str, Any]:
     display_path = _display_path(base, path)
-    if not path.exists():
+    if not path.exists() and market_context_frame.empty:
         return {
             "status": "missing",
             "path": display_path,
@@ -390,7 +433,7 @@ def _build_market_context(
             "row_count": 0,
             "indexes": [],
             "history": [],
-            "note": f"未找到本地大盘环境文件 {display_path}，板块页不触发行情抓取。",
+            "note": f"未找到大盘环境数据 {display_path}，板块页不触发行情抓取。",
         }
     if market_context_frame.empty:
         return {
@@ -560,6 +603,7 @@ def _build_summary(
     processed: Path,
     report: Path,
     base: Path,
+    source_name: str = "csv",
 ) -> dict[str, Any]:
     theme_count = int(mapping["theme_name"].nunique()) if not mapping.empty and "theme_name" in mapping.columns else 0
     board_count = int(mapping[["board_type", "board_name"]].drop_duplicates().shape[0]) if not mapping.empty and {"board_type", "board_name"}.issubset(mapping.columns) else 0
@@ -577,7 +621,35 @@ def _build_summary(
     }
     for key, value in summary_json.items():
         summary.setdefault(key, _clean_value(value))
+    summary["source"] = source_name
     return summary
+
+
+def _frame_from_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).fillna("")
+
+
+def _sqlite_paths(db_path: str) -> dict[str, Any]:
+    files = {
+        "theme_strength_daily": "sector_theme_strength_daily",
+        "sector_board_daily": "sector_board_strength_daily",
+        "stock_theme_exposure": "sector_stock_theme_exposure",
+        "theme_board_mapping": "sector_theme_board_mapping",
+        "sector_research_errors": "sector_research_errors",
+        "sector_research_summary": "sector_dashboard_meta:summary",
+        "theme_strength_report": "SQLite-only: not generated by dashboard read path",
+        "theme_strength_latest": "SQLite-only: not generated by dashboard read path",
+        "market_context": "sector_market_context",
+    }
+    return {
+        "storage": "SQLite",
+        "db_path": db_path,
+        "processed_dir": f"{Path(db_path).name}:sector_dashboard_rows",
+        "report_dir": f"{Path(db_path).name}:sector_dashboard_meta",
+        "files": {key: {"path": f"{Path(db_path).name}:{value}", "exists": True} for key, value in files.items()},
+    }
 
 
 def _file_paths(base: Path, processed: Path, report: Path, market_context_path: Path) -> dict[str, Any]:

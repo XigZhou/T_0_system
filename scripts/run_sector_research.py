@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--processed-dir", default="sector_research/data/processed", help="处理后指标输出目录")
     parser.add_argument("--report-dir", default="sector_research/reports", help="报告输出目录")
     parser.add_argument("--skip-constituents", action="store_true", help="跳过板块成分股抓取，加快调试")
+    parser.add_argument("--market-db", default="data_store/market_data.sqlite", help="SQLite 主行情库路径；板块看板结果会同步写入此库")
     args = parser.parse_args()
 
     result = run_sector_research(
@@ -30,6 +31,7 @@ def main() -> None:
         processed_dir=args.processed_dir,
         report_dir=args.report_dir,
         fetch_constituents=not args.skip_constituents,
+        market_db_path=args.market_db,
     )
     print(
         "板块研究完成："

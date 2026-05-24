@@ -6,6 +6,7 @@ const metricExplainTable = document.getElementById("metricExplainTable");
 const singleTradeTable = document.getElementById("singleTradeTable");
 const singleSignalTable = document.getElementById("singleSignalTable");
 const singleKlineChart = document.getElementById("singleKlineChart");
+const singleKlineBasis = document.getElementById("singleKlineBasis");
 const singleTabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const singleTabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 
@@ -51,6 +52,8 @@ const SINGLE_COLUMN_LABELS = {
 const SINGLE_VALUE_LABELS = {
   BUY: "买入",
   SELL: "卖出",
+  BUY_BLOCKED: "买入阻塞",
+  SELL_BLOCKED: "卖出阻塞",
   "(ending_equity / initial_cash)^(252 / N) - 1": "(期末总资产 / 初始资金)^(252 / 交易日数) - 1",
   "(last_close - avg_cost_per_share) * ending_position": "(期末收盘价 - 每股平均成本) * 期末持仓股数",
   "ending_cash + ending_market_value": "期末现金 + 期末持仓市值",
@@ -95,25 +98,48 @@ if (singleTabButtons.length) {
   setSingleActiveTab(initialTab);
 }
 
+function singleTextValue(id, fallback = "") {
+  const element = document.getElementById(id);
+  if (!element) {
+    return fallback;
+  }
+  return String(element.value ?? "").trim();
+}
+
+function singleNumberValue(id, fallback) {
+  const text = singleTextValue(id, String(fallback));
+  const value = Number(text);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function singleCheckedValue(id, fallback = false) {
+  const element = document.getElementById(id);
+  return element ? Boolean(element.checked) : fallback;
+}
+
 function buildSinglePayload() {
   return {
-    processed_dir: document.getElementById("processedDir")?.value.trim() || "",
-    symbol: document.getElementById("stockQuery")?.value.trim() || "",
-    excel_path: document.getElementById("excelPath")?.value.trim() || "",
-    start_date: document.getElementById("startDate").value.trim(),
-    end_date: document.getElementById("endDate").value.trim(),
-    buy_condition: document.getElementById("buyCondition").value.trim(),
-    buy_confirm_days: Number(document.getElementById("buyConfirmDays").value),
-    buy_cooldown_days: Number(document.getElementById("buyCooldownDays").value),
-    sell_condition: document.getElementById("sellCondition").value.trim(),
-    sell_confirm_days: Number(document.getElementById("sellConfirmDays").value),
-    initial_cash: Number(document.getElementById("initialCash").value),
-    per_trade_budget: Number(document.getElementById("perTradeBudget").value),
-    lot_size: Number(document.getElementById("lotSize").value),
-    execution_timing: document.getElementById("executionTiming").value,
-    buy_fee_rate: Number(document.getElementById("buyFeeRate").value),
-    sell_fee_rate: Number(document.getElementById("sellFeeRate").value),
-    stamp_tax_sell: Number(document.getElementById("stampTaxSell").value),
+    data_source: "stock_pool",
+    stock_pool_username: "admin",
+    stock_pool_template_name: "",
+    symbol: singleTextValue("stockQuery"),
+    excel_path: "",
+    start_date: singleTextValue("startDate"),
+    end_date: singleTextValue("endDate"),
+    buy_condition: singleTextValue("buyCondition"),
+    buy_confirm_days: singleNumberValue("buyConfirmDays", 1),
+    buy_cooldown_days: singleNumberValue("buyCooldownDays", 0),
+    sell_condition: singleTextValue("sellCondition"),
+    sell_confirm_days: singleNumberValue("sellConfirmDays", 1),
+    initial_cash: singleNumberValue("initialCash", 100000),
+    per_trade_budget: singleNumberValue("perTradeBudget", 10000),
+    lot_size: singleNumberValue("lotSize", 100),
+    execution_timing: singleTextValue("executionTiming", "next_day_open"),
+    buy_fee_rate: singleNumberValue("buyFeeRate", 0.00003),
+    sell_fee_rate: singleNumberValue("sellFeeRate", 0.00003),
+    stamp_tax_sell: singleNumberValue("stampTaxSell", 0),
+    max_hold_days: singleNumberValue("maxHoldDays", 0),
+    strict_execution: singleCheckedValue("strictExecution", true),
   };
 }
 
@@ -166,6 +192,8 @@ function renderSingleSummary(summary = {}) {
     ["trade_count", "交易次数", false],
     ["buy_count", "买入次数", false],
     ["sell_count", "卖出次数", false],
+    ["blocked_buy_count", "买入阻塞", false],
+    ["blocked_sell_count", "卖出阻塞", false],
     ["win_rate", "胜率", true],
     ["profit_factor", "盈亏比", false],
     ["sharpe_ratio", "夏普比率", false],
@@ -211,15 +239,38 @@ function renderMetricDefinitions(rows) {
   renderSimpleTable(metricExplainTable, rows, ["label", "formula", "meaning"]);
 }
 
-function buildTradeMarkers(tradeRows) {
-  return tradeRows
-    .filter((trade) => trade && trade.trade_date && typeof trade.price === "number")
+function resolveTradeMarkerChartPrice(trade, signalRow) {
+  const fallback = Number(trade.price);
+  if (!signalRow) {
+    return fallback;
+  }
+  const reason = String(trade.reason || "");
+  let chartValue = signalRow.open;
+  if (reason.includes("same_day_close")) {
+    chartValue = signalRow.close;
+  } else if (!reason.includes("next_day_open") && !reason.includes("current_open")) {
+    chartValue = signalRow.close ?? signalRow.open;
+  }
+  const numeric = Number(chartValue);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function buildTradeMarkers(tradeRows, signalRows) {
+  const signalRowsByDate = new Map((signalRows || []).map((row) => [String(row.trade_date || ""), row]));
+  return (tradeRows || [])
+    .filter((trade) => trade && ["BUY", "SELL"].includes(trade.action) && trade.trade_date && Number.isFinite(Number(trade.price)))
     .map((trade) => {
       const isBuy = trade.action === "BUY";
+      const tradeDate = String(trade.trade_date || "");
+      const chartPrice = resolveTradeMarkerChartPrice(trade, signalRowsByDate.get(tradeDate));
+      if (!Number.isFinite(chartPrice)) {
+        return null;
+      }
       return {
         name: isBuy ? "买入" : "卖出",
-        coord: [String(trade.trade_date), Number(trade.price)],
-        value: Number(trade.price),
+        coord: [tradeDate, chartPrice],
+        value: chartPrice,
+        tradePrice: Number(trade.price),
         symbol: isBuy ? "triangle" : "pin",
         symbolRotate: isBuy ? 0 : 180,
         symbolSize: isBuy ? 12 : 16,
@@ -236,10 +287,17 @@ function buildTradeMarkers(tradeRows) {
           borderRadius: 3,
         },
       };
-    });
+    })
+    .filter(Boolean);
 }
 
-function renderSingleKline(signalRows, tradeRows) {
+function updateSingleKlineBasis(priceBasis = "前复权价格") {
+  if (singleKlineBasis) {
+    singleKlineBasis.textContent = `当前使用${priceBasis || "前复权价格"}绘制蜡烛图；交易成交仍按除权价格。`;
+  }
+}
+
+function renderSingleKline(signalRows, tradeRows, attempt = 0) {
   if (!signalRows || signalRows.length === 0) {
     singleKlineChart.innerHTML = '<div class="empty">暂无可绘制的行情数据</div>';
     return;
@@ -249,9 +307,15 @@ function renderSingleKline(signalRows, tradeRows) {
     return;
   }
 
+  if ((singleKlineChart.clientWidth < 40 || singleKlineChart.clientHeight < 40) && attempt < 20) {
+    window.setTimeout(() => renderSingleKline(signalRows, tradeRows, attempt + 1), 120);
+    return;
+  }
+
   if (klineChart) {
     klineChart.dispose();
   }
+  singleKlineChart.innerHTML = "";
   klineChart = echarts.init(singleKlineChart);
 
   const dates = signalRows.map((row) => String(row.trade_date || ""));
@@ -262,17 +326,20 @@ function renderSingleKline(signalRows, tradeRows) {
     Number(row.high ?? row.close ?? 0),
   ]);
   const volumes = signalRows.map((row) => Number(row.vol ?? 0));
-  const markers = buildTradeMarkers(tradeRows || []);
+  const ma5 = signalRows.map((row) => (row.ma5 == null ? null : Number(row.ma5)));
+  const ma10 = signalRows.map((row) => (row.ma10 == null ? null : Number(row.ma10)));
+  const ma20 = signalRows.map((row) => (row.ma20 == null ? null : Number(row.ma20)));
+  const markers = buildTradeMarkers(tradeRows || [], signalRows || []);
 
   const option = {
     animation: false,
-    legend: { top: 6, data: ["蜡烛图", "成交量"] },
+    legend: { top: 8, data: ["K线", "MA5", "MA10", "MA20", "成交量"] },
     axisPointer: { link: [{ xAxisIndex: [0, 1] }] },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "cross" },
       formatter: (params) => {
-        const candle = params.find((item) => item.seriesName === "蜡烛图");
+        const candle = params.find((item) => item.seriesName === "K线");
         if (!candle) {
           return "";
         }
@@ -284,30 +351,60 @@ function renderSingleKline(signalRows, tradeRows) {
           `低: ${formatSingleValue(row.low)}`,
           `收: ${formatSingleValue(row.close)}`,
           `量: ${formatSingleValue(row.vol)}`,
+          `MA5: ${formatSingleValue(row.ma5)}`,
+          `MA10: ${formatSingleValue(row.ma10)}`,
+          `MA20: ${formatSingleValue(row.ma20)}`,
+          `M20: ${formatSingleValue(row.m20)}`,
+          `M10: ${formatSingleValue(row.m10)}`,
+          `M5: ${formatSingleValue(row.m5)}`,
           `买入信号: ${row.buy_signal ? "是" : "否"}`,
           `卖出信号: ${row.sell_signal ? "是" : "否"}`,
         ].join("<br/>");
       },
     },
     grid: [
-      { left: "7%", right: "3%", top: 36, height: "56%" },
-      { left: "7%", right: "3%", top: "74%", height: "16%" },
+      { left: "5.5%", right: "2.5%", top: 48, height: "58%" },
+      { left: "5.5%", right: "2.5%", top: "76%", height: "13%" },
     ],
     xAxis: [
-      { type: "category", data: dates, boundaryGap: false, min: "dataMin", max: "dataMax" },
-      { type: "category", gridIndex: 1, data: dates, boundaryGap: false, axisLabel: { show: false }, min: "dataMin", max: "dataMax" },
+      { type: "category", data: dates, boundaryGap: false, axisLine: { onZero: false }, splitLine: { show: false }, min: "dataMin", max: "dataMax" },
+      { type: "category", gridIndex: 1, data: dates, boundaryGap: false, axisLine: { onZero: false }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, min: "dataMin", max: "dataMax" },
     ],
     yAxis: [
-      { scale: true },
+      { scale: true, splitArea: { show: false } },
       { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { formatter: (value) => `${(value / 10000).toFixed(1)}w` } },
     ],
     dataZoom: [
-      { type: "inside", xAxisIndex: [0, 1], start: 70, end: 100 },
-      { type: "slider", xAxisIndex: [0, 1], bottom: 10, height: 22, start: 70, end: 100 },
+      { type: "inside", xAxisIndex: [0, 1], zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: true, preventDefaultMouseMove: true, start: 65, end: 100 },
+      {
+        show: true,
+        type: "slider",
+        xAxisIndex: [0, 1],
+        bottom: 10,
+        height: 24,
+        borderColor: "rgba(28, 26, 23, 0.16)",
+        backgroundColor: "rgba(255, 250, 243, 0.72)",
+        fillerColor: "rgba(172, 79, 42, 0.16)",
+        dataBackground: {
+          lineStyle: { color: "rgba(106, 98, 86, 0.55)", width: 1 },
+          areaStyle: { color: "rgba(106, 98, 86, 0.16)" },
+        },
+        selectedDataBackground: {
+          lineStyle: { color: "rgba(172, 79, 42, 0.72)", width: 1.2 },
+          areaStyle: { color: "rgba(172, 79, 42, 0.18)" },
+        },
+        handleSize: "86%",
+        moveHandleSize: 8,
+        handleStyle: { color: "#fffdf9", borderColor: "rgba(172, 79, 42, 0.72)", borderWidth: 1, shadowBlur: 2, shadowColor: "rgba(0,0,0,0.18)" },
+        moveHandleStyle: { color: "rgba(172, 79, 42, 0.82)", opacity: 0.68 },
+        textStyle: { color: "#6a6256" },
+        start: 65,
+        end: 100,
+      },
     ],
     series: [
       {
-        name: "蜡烛图",
+        name: "K线",
         type: "candlestick",
         data: ohlc,
         itemStyle: {
@@ -319,9 +416,41 @@ function renderSingleKline(signalRows, tradeRows) {
         markPoint: {
           data: markers,
           tooltip: {
-            formatter: (point) => `${point.name}<br/>日期: ${point.data.coord[0]}<br/>价格: ${point.value}`,
+            formatter: (point) => [
+              point.name,
+              `日期: ${point.data.coord[0]}`,
+              `图表价: ${formatSingleValue(point.value)}`,
+              `成交价: ${formatSingleValue(point.data.tradePrice)}`,
+            ].join("<br/>"),
           },
         },
+      },
+      {
+        name: "MA5",
+        type: "line",
+        data: ma5,
+        smooth: true,
+        showSymbol: false,
+        connectNulls: true,
+        lineStyle: { width: 1.4, color: "#f0a21a" },
+      },
+      {
+        name: "MA10",
+        type: "line",
+        data: ma10,
+        smooth: true,
+        showSymbol: false,
+        connectNulls: true,
+        lineStyle: { width: 1.4, color: "#2f75d6" },
+      },
+      {
+        name: "MA20",
+        type: "line",
+        data: ma20,
+        smooth: true,
+        showSymbol: false,
+        connectNulls: true,
+        lineStyle: { width: 1.4, color: "#7d55c7" },
       },
       {
         name: "成交量",
@@ -343,6 +472,7 @@ function renderSingleKline(signalRows, tradeRows) {
 async function postSingleStock(payload) {
   const response = await fetch("/api/run-single-stock", {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -397,7 +527,9 @@ async function runSingleStockBacktest(event) {
       "equity",
       "reason",
     ]);
+    updateSingleKlineBasis(result.chart_price_basis || "前复权价格");
     renderSingleKline(result.signal_rows, result.trade_rows);
+    setSingleActiveTab("kline");
     setSingleStatus("单股回测完成。");
   } catch (error) {
     setSingleStatus(`回测失败: ${error.message}`, true);

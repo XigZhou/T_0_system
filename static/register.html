@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>注册 T_0 系统</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="auth-page">
+    <div class="shell">
+      <main class="panel compact-panel auth-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">用户注册</p>
+            <h1>创建普通用户</h1>
+          </div>
+        </div>
+        <form id="registerForm" class="form-grid auth-form">
+          <label>
+            <span>用户名</span>
+            <input id="registerUsername" type="text" autocomplete="username" placeholder="3-32位字母数字下划线" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="registerPassword" type="password" autocomplete="new-password" placeholder="至少8位" />
+          </label>
+          <div class="auth-actions">
+            <button type="submit">注册并登录</button>
+            <a class="secondary-link" href="/login">已有账号登录</a>
+          </div>
+          <p id="registerStatus" class="status">注册后会自动登录。</p>
+        </form>
+      </main>
+    </div>
+    <script>
+      const registerForm = document.getElementById("registerForm");
+      const registerStatus = document.getElementById("registerStatus");
+      function setRegisterStatus(text, error = false) {
+        registerStatus.textContent = text;
+        registerStatus.style.color = error ? "#8a2f13" : "";
+      }
+      registerForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setRegisterStatus("正在注册...");
+        try {
+          const response = await fetch("/api/auth/register", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: document.getElementById("registerUsername").value.trim(),
+              password: document.getElementById("registerPassword").value,
+            }),
+          });
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || `注册失败：${response.status}`);
+          }
+          window.location.href = "/";
+        } catch (error) {
+          setRegisterStatus(error.message, true);
+        }
+      });
+    </script>
+  </body>
+</html>

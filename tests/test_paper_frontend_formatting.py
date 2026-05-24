@@ -191,10 +191,10 @@ const copiedLedger = element("tplLedgerPath").value;
 const checks = [
   [element("configPath").value, ""],
   [copiedFile.startsWith("sector_l2_top500_v1_"), true],
-  [copiedFile.endsWith("_copy.yaml"), true],
+  [copiedFile.endsWith("_copy"), true],
+  [copiedFile.endsWith(".yaml"), false],
   [copiedAccount.startsWith("sector_l2_top500_v1_"), true],
-  [copiedLedger.startsWith("paper_trading/accounts/sector_l2_top500_v1_"), true],
-  [copiedLedger.endsWith("_copy.xlsx"), true],
+  [copiedLedger, "data_store/paper_trading.sqlite"],
   [element("tplAccountName").value.startsWith("L2 Top500 模拟账户_副本_"), true],
   [element("templateStatus").textContent.includes("已复制当前模板为新草稿"), true],
 ];
@@ -312,14 +312,14 @@ if (!element("poolStockRows").innerHTML.includes("宁德时代")) {
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
 
-    def test_stock_pool_js_admin_refresh_and_jobs(self) -> None:
+    def test_admin_js_loads_operations_dashboard_without_template_refresh(self) -> None:
         if shutil.which("node") is None:
             self.skipTest("node is not available")
         repo_root = Path(__file__).resolve().parents[1]
         script = """
 const fs = require("fs");
 const vm = require("vm");
-const code = fs.readFileSync("static/stock_pools.js", "utf8");
+const code = fs.readFileSync("static/admin.js", "utf8");
 const elements = new Map();
 const handlers = new Map();
 function element(id) {
@@ -330,7 +330,13 @@ function element(id) {
       type: "text",
       textContent: "",
       style: {},
-      value: "",
+      value: {
+        mainUniverseMode: "append",
+        stockDataRangeStart: "20240108",
+        stockDataRangeEnd: "20240112",
+        stockDataMaxSymbols: "0",
+        stockDataSleepSeconds: "0.2",
+      }[id] || "",
       checked: false,
       disabled: false,
       hidden: false,
@@ -358,17 +364,22 @@ const context = {
   },
   fetch: (url, options = {}) => {
     calls.push({ url, options });
-    if (url.startsWith("/api/stock-pools/templates")) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ templates: [{ template_name: "测试池", stock_count: 1 }] }) });
+    if (url === "/api/admin/overview") {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({
+        scheduler: { run_count: 1, latest_run: { status: "success" } },
+        core_tasks: {
+          daily_sync: { run_count: 1, status_counts: { success: 1 }, latest_run: { status: "success", target_date: "20240108" } },
+          feature_build: { run_count: 0, status_counts: {}, latest_run: null },
+          core_after_close_generate: { run_count: 0, status_counts: {}, latest_run: null },
+          safe_retry: { run_count: 0, status_counts: {}, latest_run: null },
+        },
+      }) });
     }
-    if (url.startsWith("/api/stock-pools/template?")) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ username: "admin", template_name: "测试池", stock_count: 1, stock_text: "300750", stocks: [{ symbol: "300750", ts_code: "300750.SZ", stock_name: "宁德时代", latest_trade_date: "20260514" }] }) });
+    if (url.startsWith("/api/admin/main-universe")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 1, rows: [{ symbol: "300750", ts_code: "300750.SZ", name: "宁德时代", source: "pytest", is_active: 1, updated_at: "2024-01-08 20:00:00" }], message: "已读取 1 只股票" }) });
     }
-    if (url.startsWith("/api/stock-pools/jobs")) {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ jobs: [{ job_id: "abcdef123456", status: "success", job_type: "manual_refresh", template_name: "测试池", stock_count: 1, success_count: 1, failed_count: 0, end_date: "20260514", finished_at: "2026-05-14 20:00:00", log_file: "logs/job.log" }] }) });
-    }
-    if (url === "/api/stock-pools/template/refresh") {
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: "success", message: "刷新完成" }) });
+    if (url.startsWith("/api/admin/scheduler/runs")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [{ run_id: "run123456789", job_name: "daily_sync", target_date: "20240108", status: "success", started_at: "2024-01-08 20:00:00", finished_at: "2024-01-08 20:05:00", failed_stage: "", error_summary: "", log_file: "logs/scheduler.log" }] }) });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
   },
@@ -380,24 +391,60 @@ const context = {
   Boolean,
   Math,
   console,
+  setTimeout,
 };
 vm.createContext(context);
 vm.runInContext(code, context);
-if (element("stockPoolAdminPanel").hidden !== false) {
-  throw new Error("admin panel should be visible for admin");
-}
-context.populatePoolEditor({ username: "admin", template_name: "测试池", original_template_name: "测试池", stock_text: "300750", stocks: [] });
-handlers.get("refreshPoolDataBtn:click")();
-setTimeout(() => {
-  const refreshCall = calls.find((call) => call.url === "/api/stock-pools/template/refresh");
-  if (!refreshCall) {
-    throw new Error("refresh api not called");
-  }
-  const payload = JSON.parse(refreshCall.options.body);
-  if (payload.username !== "admin" || payload.template_name !== "测试池" || payload.only_missing !== true) {
-    throw new Error("refresh payload is wrong");
-  }
-}, 0);
+Promise.resolve()
+  .then(() => new Promise((resolve) => setTimeout(resolve, 0)))
+  .then(() => {
+    for (const endpoint of ["/api/admin/overview", "/api/admin/main-universe?include_inactive=false", "/api/admin/scheduler/runs?limit=50"]) {
+      if (!calls.some((call) => call.url === endpoint)) {
+        throw new Error(`expected ${endpoint} to be called`);
+      }
+    }
+    if (calls.some((call) => String(call.url).startsWith("/api/stock-pools/"))) {
+      throw new Error("admin dashboard should not call stock pool template refresh/jobs endpoints");
+    }
+    if (!element("adminSummaryGrid").innerHTML.includes("日线同步")) {
+      throw new Error("overview cards were not rendered");
+    }
+    const actionIds = [
+      "collectTodayDailyBtn",
+      "computeTodayIndicatorsBtn",
+      "collectRangeDailyBtn",
+      "computeRangeIndicatorsBtn",
+    ];
+    for (const id of actionIds) {
+      const handler = handlers.get(`${id}:click`);
+      if (!handler) {
+        throw new Error(`missing click handler for ${id}`);
+      }
+    }
+    const beforeActionCount = calls.length;
+    handlers.get("collectTodayDailyBtn:click")();
+    return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+      if (!calls.slice(beforeActionCount).some((call) => call.url === "/api/admin/stock-data/daily/today")) {
+        throw new Error("today daily action did not call its endpoint");
+      }
+      handlers.get("computeRangeIndicatorsBtn:click")();
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  })
+  .then(() => {
+    const rangeCall = calls.find((call) => call.url === "/api/admin/stock-data/indicators/range");
+    if (!rangeCall) {
+      throw new Error("range indicator action did not call its endpoint");
+    }
+    const payload = JSON.parse(rangeCall.options.body || "{}");
+    if (payload.start_date !== "20240108" || payload.end_date !== "20240112") {
+      throw new Error(`unexpected range payload: ${rangeCall.options.body}`);
+    }
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 """
         result = subprocess.run(
             ["node", "-e", script],
@@ -407,6 +454,7 @@ setTimeout(() => {
             check=False,
         )
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
 
 
 if __name__ == "__main__":

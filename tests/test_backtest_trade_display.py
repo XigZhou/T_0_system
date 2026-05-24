@@ -11,7 +11,7 @@ from tests.helpers import make_processed_stock, write_processed_dir
 
 
 class BacktestTradeDisplayTest(unittest.TestCase):
-    def test_signal_quality_trade_rows_use_budget_sized_shares(self) -> None:
+    def test_signal_quality_trade_rows_use_fixed_100_shares(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             stock_a = make_processed_stock(
@@ -27,6 +27,7 @@ class BacktestTradeDisplayTest(unittest.TestCase):
             processed_dir = write_processed_dir(base, [stock_a])
             body = run_signal_quality_api(
                 SignalQualityRequest(
+                    data_source="csv",
                     processed_dir=str(processed_dir),
                     start_date="20240102",
                     end_date="20240102",
@@ -48,12 +49,52 @@ class BacktestTradeDisplayTest(unittest.TestCase):
 
             buy_row = next(row for row in body["trade_rows"] if row["action"] == "BUY")
             sell_row = next(row for row in body["trade_rows"] if row["action"] == "SELL")
-            self.assertEqual(buy_row["shares"], 900)
-            self.assertEqual(sell_row["shares"], 900.0)
-            self.assertNotEqual(sell_row["shares"], 1)
-            self.assertAlmostEqual(buy_row["net_amount"], 9180.28, places=2)
-            self.assertAlmostEqual(sell_row["pnl"], 449.44, places=2)
+            self.assertEqual(buy_row["shares"], 100.0)
+            self.assertEqual(sell_row["shares"], 100.0)
+            self.assertAlmostEqual(buy_row["net_amount"], 1020.03, places=2)
+            self.assertAlmostEqual(sell_row["pnl"], 49.94, places=2)
             self.assertEqual(round(sell_row["pnl"], 2), sell_row["pnl"])
+
+    def test_signal_quality_ignores_account_budget_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            stock_a = make_processed_stock(
+                "000001",
+                "平安银行",
+                [
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.8, "raw_close": 10.0, "m20": 0.2, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240103", "raw_open": 10.2, "raw_high": 10.4, "raw_low": 10.1, "raw_close": 10.3, "m20": 0.18, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240104", "raw_open": 10.5, "raw_high": 10.7, "raw_low": 10.4, "raw_close": 10.6, "m20": 0.05, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240105", "raw_open": 10.7, "raw_high": 10.8, "raw_low": 10.6, "raw_close": 10.7, "m20": 0.04, "can_buy_open_t": True, "can_sell_t": True},
+                ],
+            )
+            processed_dir = write_processed_dir(base, [stock_a])
+            base_req = dict(
+                data_source="csv",
+                processed_dir=str(processed_dir),
+                start_date="20240102",
+                end_date="20240102",
+                buy_condition="m20>0",
+                sell_condition="m20<0.1",
+                score_expression="m20",
+                top_n=1,
+                entry_offset=1,
+                exit_offset=2,
+                min_hold_days=0,
+                max_hold_days=2,
+                settlement_mode="complete",
+                realistic_execution=True,
+                slippage_bps=0.0,
+                lot_size=100,
+            )
+            small = run_signal_quality_api(SignalQualityRequest(**base_req, per_trade_budget=10000.0))
+            large = run_signal_quality_api(SignalQualityRequest(**base_req, per_trade_budget=20000.0))
+            self.assertEqual(small["summary"]["avg_trade_return"], large["summary"]["avg_trade_return"])
+            for small_row, large_row in zip(small["trade_rows"], large["trade_rows"]):
+                self.assertEqual(small_row["shares"], large_row["shares"])
+                self.assertEqual(small_row["net_amount"], large_row["net_amount"])
+                self.assertEqual(small_row.get("trade_return"), large_row.get("trade_return"))
+                self.assertEqual(small_row.get("pnl"), large_row.get("pnl"))
 
     def test_backtest_js_formats_money_fields_to_two_decimals(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
