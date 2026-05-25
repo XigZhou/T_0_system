@@ -174,10 +174,18 @@ if (accountPayload.per_trade_budget !== 20000) {
         self.assertIn("股票池模板", html)
         self.assertIn("downloadPickRowsBtn", html)
         self.assertIn("downloadTradeRowsBtn", html)
+        self.assertIn("tradePanelTitle", html)
+        self.assertIn("tradePanelNote", html)
 
         js = (Path(__file__).resolve().parents[1] / "static" / "app.js").read_text(encoding="utf-8")
         self.assertIn("document.body.appendChild(a)", js)
         self.assertIn("URL.revokeObjectURL(url)", js)
+        self.assertIn("SIGNAL_TRADE_TABLE_COLUMNS", js)
+        self.assertIn("ACCOUNT_TRADE_TABLE_COLUMNS", js)
+        self.assertIn("信号质量回测_信号样本流水", js)
+        self.assertIn("实盘账户回测_真实交易流水", js)
+        self.assertIn("固定100股样本流水", js)
+        self.assertIn("真实交易流水", js)
 
     def test_paper_pages_render_expected_entry_points(self) -> None:
         paper_html = paper_trading_page()

@@ -8,8 +8,8 @@
 
 - 主股票池维护：`main_stock_universe` 控制默认采集、指标计算、回测和模拟交易范围。
 - 日线 raw 采集：Tushare `daily`、`adj_factor`、`stk_limit`、`suspend_d`、`daily_basic`、`trade_cal`、指数环境统一写入 `market_data.sqlite`。
-- 指标计算：从 SQLite raw 表计算 `stock_daily_features`，信号指标使用前复权价格，交易成交使用原始除权价格。
-- 批量回测：组合回测、信号质量评估、交易流水导出。
+- 指标计算：从 SQLite raw 表计算 `stock_daily_features`，信号指标使用前复权价格；买入、卖出、现金、持仓市值和权益使用未复权除权价格与真实成交股数，交易股数不随 `adj_factor` 调整。
+- 批量回测：实盘账户回测、信号质量评估和交易流水导出；实盘账户流水可用于审计，信号质量流水是固定100股样本。
 - 每日计划：每日收盘选股、持仓卖出提醒、次日计划。
 - 单股回测：单只股票策略验证。
 - 多账户模拟交易：账户模板、待执行订单、成交、持仓、资产、日志落在 SQLite。

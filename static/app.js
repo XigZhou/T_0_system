@@ -21,6 +21,16 @@ const exitReasonTable = document.getElementById("exitReasonTable");
 const openPositionTable = document.getElementById("openPositionTable");
 const pendingSellTable = document.getElementById("pendingSellTable");
 const diagText = document.getElementById("diagText");
+const equityTabButton = document.getElementById("equityTabButton");
+const yearTabButton = document.getElementById("yearTabButton");
+const monthTabButton = document.getElementById("monthTabButton");
+const contributionTabButton = document.getElementById("contributionTabButton");
+const tradePanelEyebrow = document.getElementById("tradePanelEyebrow");
+const tradePanelTitle = document.getElementById("tradePanelTitle");
+const tradePanelNote = document.getElementById("tradePanelNote");
+const rankPanelNote = document.getElementById("rankPanelNote");
+const accountRankNotice = document.getElementById("accountRankNotice");
+const signalRankContent = document.getElementById("signalRankContent");
 const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
 const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const modeInputs = Array.from(document.querySelectorAll('input[name="backtestMode"]'));
@@ -118,6 +128,7 @@ const COLUMN_LABELS = {
   avg_holding_days: "平均持有天数",
   avg_signals_per_day: "平均每日信号数",
   avg_trade_return: "平均单笔收益",
+  best_trade_return: "最好单笔收益",
   board: "板块",
   blocked_entry_count: "买入阻塞信号数",
   blocked_reentry_count: "持仓期跳过信号数",
@@ -134,7 +145,8 @@ const COLUMN_LABELS = {
   completed_days: "完成信号日数",
   data_profile: "数据口径",
   drawdown: "回撤",
-  ending_equity: "期末权益",
+  drawdown_from_peak: "较高点回撤",
+  ending_equity: "期末权益/信号净值",
   entry_can_buy_open: "买入日可开盘买入",
   entry_raw_open: "买入日未复权开盘价",
   entry_price: "买入执行价",
@@ -147,6 +159,7 @@ const COLUMN_LABELS = {
   exit_type: "退出类型",
   exit_price: "卖出执行价",
   exit_mode: "退出模式",
+  best_return_since_entry: "持仓以来最高收益",
   fees: "费用",
   gross_amount: "成交金额",
   holding_days: "持有天数",
@@ -176,6 +189,8 @@ const COLUMN_LABELS = {
   period: "周期",
   period_return: "周期收益",
   pct_chg: "当日涨跌幅",
+  p10_trade_return: "单笔收益P10",
+  p90_trade_return: "单笔收益P90",
   picked_count: "入选数",
   picked_days: "触发选股日数",
   planned_entry_date: "计划买入日",
@@ -227,6 +242,7 @@ const COLUMN_LABELS = {
   vol_ratio_5: "五日量比",
   vr: "量比",
   win_rate: "胜率",
+  worst_trade_return: "最差单笔收益",
   year_count: "年份数",
   profitable_years: "盈利年份数",
   best_year_return: "最好年份收益",
@@ -766,7 +782,25 @@ function selectColumns(rows, columns) {
   );
 }
 
-const TRADE_TABLE_COLUMNS = [
+const SIGNAL_TRADE_TABLE_COLUMNS = [
+  "signal_date",
+  "trade_date",
+  "symbol",
+  "name",
+  "rank",
+  "score",
+  "action",
+  "price",
+  "price_basis",
+  "shares",
+  "pnl",
+  "trade_return",
+  "holding_days",
+  "exit_type",
+  "execution_note",
+];
+
+const ACCOUNT_TRADE_TABLE_COLUMNS = [
   "trade_date",
   "signal_date",
   "symbol",
@@ -777,9 +811,62 @@ const TRADE_TABLE_COLUMNS = [
   "price",
   "price_basis",
   "shares",
+  "gross_amount",
+  "fees",
+  "net_amount",
+  "cash_after",
   "pnl",
+  "trade_return",
+  "holding_days",
+  "price_pnl",
+  "exit_reason",
   "execution_note",
 ];
+
+function updateResultLabels(isSignalQuality) {
+  if (equityTabButton) {
+    equityTabButton.textContent = isSignalQuality ? "信号净值与回撤" : "账户权益与回撤";
+  }
+  if (yearTabButton) {
+    yearTabButton.textContent = isSignalQuality ? "年度信号稳定性" : "年度账户表现";
+  }
+  if (monthTabButton) {
+    monthTabButton.textContent = isSignalQuality ? "月度信号表现" : "月度账户表现";
+  }
+  if (contributionTabButton) {
+    contributionTabButton.textContent = isSignalQuality ? "个股信号贡献" : "个股已实现盈亏";
+  }
+  if (tradePanelEyebrow) {
+    tradePanelEyebrow.textContent = isSignalQuality ? "信号样本" : "账户审计";
+  }
+  if (tradePanelTitle) {
+    tradePanelTitle.textContent = isSignalQuality ? "信号样本流水" : "真实交易流水";
+  }
+  if (tradePanelNote) {
+    tradePanelNote.textContent = isSignalQuality
+      ? "固定100股样本流水，只用于观察单笔信号收益率，不代表账户真实成交。"
+      : "按账户现金、每笔目标资金和100股整数倍生成，可用于核对成交金额、费用和盈亏。";
+  }
+  if (rankPanelNote) {
+    rankPanelNote.textContent = isSignalQuality
+      ? "先看累计TopK扫描决定买前几只，再看单名次质量判断评分表达式是否有排序能力。想比较Top10，请把选股数量填到10或更高。"
+      : "实盘账户回测不展示排名质量；请使用信号质量回测评估评分表达式排序能力。";
+  }
+  if (accountRankNotice) {
+    accountRankNotice.hidden = isSignalQuality;
+    accountRankNotice.textContent = "实盘账户回测不展示排名质量；请使用信号质量回测评估评分表达式排序能力。";
+  }
+  if (signalRankContent) {
+    signalRankContent.hidden = !isSignalQuality;
+  }
+}
+
+function tradeDownloadLabel(mode, tableKey) {
+  if (tableKey === "pick_rows") {
+    return "每日选股明细";
+  }
+  return mode === "signal_quality" ? "信号质量回测_信号样本流水" : "实盘账户回测_真实交易流水";
+}
 
 function renderTable(el, rows, preferredOrder = []) {
   const wrap = el.closest(".table-wrap");
@@ -901,8 +988,9 @@ function renderChart(rows, valueLabel = "权益") {
 function applyResult(result) {
   result = ensureDiagnosticRows(result);
   const isSignalQuality = result.summary?.result_mode === "signal_quality";
+  updateResultLabels(isSignalQuality);
   renderSummary(result.summary);
-  renderChart(result.daily_rows, isSignalQuality ? "信号净值" : "权益");
+  renderChart(result.daily_rows, isSignalQuality ? "信号净值" : "账户权益");
   renderTable(conditionTable, result.condition_rows, ["category", "metric", "value", "reading"]);
   renderTable(topKTable, result.topk_rows, ["recommended", "top_k", "signal_count", "completed_signal_count", "picked_days", "topk_fill_rate", "win_rate", "avg_trade_return", "median_trade_return", "profit_factor", "signal_curve_return", "max_drawdown", "profitable_years", "year_count", "recommendation_score", "quality_note"]);
   renderTable(rankTable, result.rank_rows, ["rank", "signal_count", "win_rate", "avg_trade_return", "median_trade_return", "p10_trade_return", "p90_trade_return", "avg_holding_days"]);
@@ -913,13 +1001,13 @@ function applyResult(result) {
   renderTable(pendingSellTable, result.pending_sell_rows, ["signal_date", "planned_sell_date", "symbol", "name", "shares", "buy_date", "buy_price", "current_raw_close", "holding_return", "best_return_since_entry", "drawdown_from_peak", "sell_condition", "reason"]);
   if (isSignalQuality) {
     renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "status", "planned_entry_date", "planned_exit_date", "trade_date", "entry_raw_open", "exit_raw_open", "trade_return", "holding_days", "exit_type", "execution_note"]);
-    renderTable(tradeTable, selectColumns(result.trade_rows, TRADE_TABLE_COLUMNS), TRADE_TABLE_COLUMNS);
+    renderTable(tradeTable, selectColumns(result.trade_rows, SIGNAL_TRADE_TABLE_COLUMNS), SIGNAL_TRADE_TABLE_COLUMNS);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "signal_count", "total_signal_return", "win_rate", "avg_trade_return", "median_trade_return"]);
     const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
     diagText.textContent = `信号质量回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，完成信号 ${result.diagnostics.completed_signal_count} 条，持仓期跳过 ${result.diagnostics.blocked_reentry_count || 0} 条重复信号；资金输入未参与计算。`;
   } else {
     renderTable(pickTable, result.pick_rows, ["signal_date", "symbol", "name", "rank", "score", "planned_entry_date", "planned_exit_date", "max_exit_date", "entry_raw_open", "exit_raw_open", "sell_condition_enabled", "execution_note"]);
-    renderTable(tradeTable, selectColumns(result.trade_rows, TRADE_TABLE_COLUMNS), TRADE_TABLE_COLUMNS);
+    renderTable(tradeTable, selectColumns(result.trade_rows, ACCOUNT_TRADE_TABLE_COLUMNS), ACCOUNT_TRADE_TABLE_COLUMNS);
     renderTable(contributionTable, result.contribution_rows, ["symbol", "name", "realized_pnl", "trade_count", "win_rate", "avg_trade_return"]);
     const sourceLabel = result.diagnostics.data_source === "stock_pool" ? `股票池模板 ${result.diagnostics.stock_pool_template_name}` : `${result.diagnostics.file_count} 个文件`;
     diagText.textContent = `实盘账户回测：${formatCellValue("data_profile", result.diagnostics.data_profile)}，载入 ${sourceLabel}，信号日 ${result.diagnostics.signal_days} 天，出现候选日 ${result.diagnostics.candidate_days} 天，触发选股日 ${result.diagnostics.picked_days} 天。`;
@@ -1004,7 +1092,7 @@ async function downloadResultTable(tableKey, button) {
     return;
   }
   const mode = getBacktestMode();
-  const label = tableKey === "pick_rows" ? "每日选股明细" : "交易流水";
+  const label = tradeDownloadLabel(mode, tableKey);
   const previousText = setButtonBusy(button, "生成中...");
   setStatus(`正在生成${label}Excel...`);
   try {
