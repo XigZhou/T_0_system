@@ -1,260 +1,98 @@
-# T 日信号摆动回测系统数据字典
+# 回测数据字典
 
-本文档说明本项目数据包中各类文件的来源接口、输出路径、数据粒度、主键、字段含义，以及缺失值、停牌和复权处理逻辑。
+本文档说明组合回测、信号质量、每日计划和单股回测当前使用的 SQLite 输入、关键字段、输出结构和交易口径。当前正式输入是 `data_store/market_data.sqlite.stock_daily_features`。
 
-## 1. `universe_snapshot.csv`
+## 1. 输入数据集
 
-- 来源接口：`stock_basic` + `daily_basic`
-- 输出文件路径：`data_bundle/universe_snapshot.csv`
-- 数据粒度：快照日每只股票一行
-- 主键字段：`ts_code`
-- 更新时间：执行 `python scripts/build_universe_snapshot.py --as-of YYYYMMDD` 时生成
-- 缺失值处理：`total_mv` 缺失按不满足筛选处理，其余元信息允许缺失
-- 停牌/复权处理：不涉及
+- 来源：`scripts/compute_stock_daily_features.py` 从 SQLite raw 表计算。
+- 输入路径：`data_store/market_data.sqlite`。
+- 输入表：`stock_daily_features`。
+- 数据粒度：每只股票每个交易日一行。
+- 主键：`symbol + trade_date`。
+- 更新时间：管理员指标计算按钮或每日核心调度。
+- 缺失值处理：指标窗口不足时为空；停牌或价格缺失时不可成交；回测不会对缺失指标做未来填充。
+- 复权处理：信号字段使用前复权价格，成交和估值字段使用原始除权价格。
 
-关键字段：
+## 2. 股票范围
 
-| 字段名 | 解释 |
+默认股票范围来自 `main_stock_universe` 的活跃股票。`source=all` 在采集和计算中等价于主股票池，不代表全市场。
+
+股票池模板只用于用户自选范围和模拟账户配置；普通用户模板中的股票必须属于主股票池活跃集合。
+
+## 3. 关键输入字段
+
+| 字段 | 说明 | 用途 |
+| --- | --- | --- |
+| `symbol` / `ts_code` / `name` | 股票标识 | 展示、交易、导出 |
+| `trade_date` | 交易日，`YYYYMMDD` | 时间推进 |
+| `open/high/low/close` | 前复权开高低收 | 买入条件、卖出条件、评分、技术指标 |
+| `raw_open/raw_high/raw_low/raw_close` | 原始除权开高低收 | 买入、卖出、估值成交价格 |
+| `adj_factor` | 复权因子 | 复权和历史对齐 |
+| `pct_chg` | 日涨跌幅百分数 | 条件过滤 |
+| `can_buy_open_t` | 当日开盘是否允许买入 | 严格成交 |
+| `can_sell_t` | 当日开盘是否允许卖出 | 严格成交 |
+| `m5/m10/m20/m30/m60/m120` | N 日价格动量 | 买入条件和评分 |
+| `ma5/ma10/ma20` | 移动均线 | 趋势过滤 |
+| `ret1/ret2/ret3` | 短期收益 | 节奏过滤 |
+| `vol/vol5/vol10/vr` | 成交量和量比 | 量能过滤 |
+| `amount/amount5/amount10` | 成交额和均额 | 流动性过滤 |
+| `board/market` | 市场分类字段 | 分类过滤 |
+| `sh_* / hs300_* / cyb_*` | 指数环境字段 | 大盘过滤 |
+
+## 4. 组合回测请求字段
+
+| 字段 | 说明 |
 | --- | --- |
-| ts_code | Tushare 股票代码 |
-| symbol | 6 位股票代码 |
-| name | 股票名称 |
-| industry | 行业 |
-| market | 市场类型 |
-| list_date | 上市日期 |
-| total_mv | 总市值，单位万元 |
-| turnover_rate_f | 自由流通换手率 |
+| `start_date` / `end_date` | 回测区间 |
+| `buy_condition` | 买入条件，逗号分隔表示全部满足 |
+| `sell_condition` | 卖出条件，满足后下一交易日开盘卖出 |
+| `score_expression` | 候选排序表达式 |
+| `top_n` | 每日最多买入数量 |
+| `initial_cash` | 初始资金 |
+| `target_position_value` | 每只股票目标买入金额 |
+| `max_hold_days` | 最大持有交易日数 |
+| `min_hold_days` | 卖出条件生效前最短持有天数 |
+| `fee_rate` | 买卖手续费率 |
+| `slippage_bps` | 滑点，单位 bps |
+| `strict_execution` | 是否启用严格成交约束 |
+| `stock_pool_market_db_path` | 行情指标 SQLite 路径，空值使用默认主库 |
 
-## 2. `raw_daily/<symbol>.csv`
+## 5. 组合回测输出字段
 
-- 来源接口：`daily`
-- 输出文件路径：`data_bundle/raw_daily/<symbol>.csv`
-- 数据粒度：每股每交易日一行
-- 主键字段：`ts_code + trade_date`
-- 更新时间：执行 `python scripts/sync_tushare_bundle.py` 时生成
-- 缺失值处理：不插值，不前向填充
-- 停牌处理：原始日线只保留有行情的日期，停牌缺口在 `processed_qfq` 加工阶段用交易日历补齐
-- 复权处理：保留原始除权价格，不直接复权
+摘要字段：`initial_cash`、`final_equity`、`total_return`、`annual_return`、`max_drawdown`、`trade_count`、`win_rate`、`cash`、`market_value`。
 
-更新提醒：`raw_daily/`、`adj_factor/`、`trade_calendar.csv`、`stk_limit.csv`、`suspend_d.csv`、`market_context.csv` 只有执行 `scripts/sync_tushare_bundle.py` 才会连接 Tushare 更新。`build_processed_data.py`、`build_theme_focus_universe.py`、`build_industry_strength.py` 只是基于现有文件重建处理后数据，不会拉取新交易日。
+交易流水字段：`trade_date`、`symbol`、`name`、`side`、`price`、`shares`、`amount`、`fee`、`cash_after`、`realized_pnl`、`reason`。
 
-常用字段：
+每日资产字段：`trade_date`、`cash`、`market_value`、`equity`、`positions`、`daily_return`、`drawdown`。
 
-| 字段名 | 解释 |
+候选列表用于排查买入条件和评分结果，包含信号日期、股票、评分、关键指标和未买入原因。持仓列表包含买入日期、成本、当前价格、市值、持有天数和浮动盈亏。
+
+## 6. 每日计划输出
+
+| 字段 | 说明 |
 | --- | --- |
-| open/high/low/close | 原始开高低收 |
-| pre_close | 昨收 |
-| change | 涨跌额 |
-| pct_chg | 涨跌幅，百分比 |
-| vol | 成交量，手 |
-| amount | 成交额，千元 |
+| `trade_date` | 信号日期 |
+| `buy_candidates` | 通过买入条件的候选股票 |
+| `buy_plan` | 次日计划买入列表 |
+| `sell_alerts` | 已持仓股票的卖出提醒 |
+| `diagnostics` | 数据缺失、字段缺失、过滤数量等诊断 |
 
-## 3. `adj_factor/<symbol>.csv`
+## 7. 单股回测输出
 
-- 来源接口：`adj_factor`
-- 输出文件路径：`data_bundle/adj_factor/<symbol>.csv`
-- 数据粒度：每股每交易日一行
-- 主键字段：`ts_code + trade_date`
-- 更新时间：执行 `python scripts/sync_tushare_bundle.py` 时生成
-- 缺失值处理：加工时按日期前向填充
-- 停牌处理：停牌日若缺少复权因子，沿用最近有效值
-- 复权处理：用于生成离线前复权价格 `qfq_*`
+| 字段 | 说明 |
+| --- | --- |
+| `trades` | 单股买卖流水 |
+| `summary` | 收益、胜率、最大回撤、持有天数统计 |
+| `signals` | 命中买入/卖出条件的日期 |
+| `diagnostics` | 股票解析和数据可用性诊断 |
 
-复权规则：
+## 8. 交易约束
+
+买入数量按目标金额折算后向下取 100 股整数倍；不足一手时按配置决定是否跳过。默认手续费为 `0.003%`，无最低消费。滑点按 bps 调整成交价：
 
 ```text
-scale(T) = adj_factor(T) / latest_adj_factor
-qfq_close(T) = raw_close(T) * scale(T)
-qfq_open/qfq_high/qfq_low 同理
+买入成交价 = raw_open * (1 + slippage_bps / 10000)
+卖出成交价 = raw_open * (1 - slippage_bps / 10000)
 ```
 
-## 4. `trade_calendar.csv`
-
-- 来源接口：`trade_cal`
-- 输出文件路径：`data_bundle/trade_calendar.csv`
-- 数据粒度：每个开市日一行
-- 主键字段：`trade_date`
-- 更新时间：执行 `python scripts/sync_tushare_bundle.py` 时生成
-- 缺失值处理：不允许缺失
-- 停牌处理：个股加工时先按该表补齐所有交易日
-- 复权处理：不涉及
-
-## 5. `stk_limit.csv`
-
-- 来源接口：`stk_limit`
-- 输出文件路径：`data_bundle/stk_limit.csv`
-- 数据粒度：每股每交易日一行
-- 主键字段：`ts_code + trade_date`
-- 更新时间：执行 `python scripts/sync_tushare_bundle.py` 时生成
-- 缺失值处理：缺失时不做涨跌停约束
-- 停牌处理：不直接标停牌，只提供价格边界
-- 复权处理：保留原始涨跌停价
-
-关键字段：
-
-| 字段名 | 解释 |
-| --- | --- |
-| up_limit | 涨停价 |
-| down_limit | 跌停价 |
-
-## 6. `suspend_d.csv`
-
-- 来源接口：`suspend_d`
-- 输出文件路径：`data_bundle/suspend_d.csv`
-- 数据粒度：每股每停复牌日期一行
-- 主键字段：`ts_code + trade_date`
-- 更新时间：执行 `python scripts/sync_tushare_bundle.py` 时生成
-- 缺失值处理：空表表示没有停牌记录
-- 停牌处理：加工阶段与交易日历合并，生成布尔停牌标记
-- 复权处理：不涉及
-
-## 7. `market_context.csv`
-
-- 来源接口：`index_daily`
-- 输出文件路径：`data_bundle/market_context.csv`
-- 数据粒度：每个交易日一行
-- 主键字段：`trade_date`
-- 更新时间：执行 `python scripts/sync_tushare_bundle.py` 时生成
-- 缺失值处理：指数缺失时相关上下文字段留空
-- 停牌处理：不涉及
-- 复权处理：指数指标按各自日线计算
-
-当前指数范围：
-
-- 上证综指 `000001.SH`
-- 沪深300 `000300.SH`
-- 创业板指 `399006.SZ`
-
-使用方式：
-
-- 回测与模拟交易：加工到处理后股票 CSV 后，可直接在买入/卖出条件中使用 `hs300_m20`、`sh_m20`、`cyb_m20` 等字段作为大盘过滤条件。
-- 独立板块研究前端：`/sector` 只读本文件展示“大盘环境”，不会重新抓取指数数据；接口会选取不晚于板块最新交易日的最近一行，避免板块研究日期较旧时误用未来大盘。
-- 字段命名规则：`sh_` 表示上证指数，`hs300_` 表示沪深300，`cyb_` 表示创业板指；`*_pct_chg` 为日涨跌幅百分数，`*_m5`、`*_m20`、`*_m60`、`*_m120` 为对应窗口动量小数。
-
-## 8. `processed_qfq/<symbol>.csv`
-
-- 来源接口：由 `raw_daily`、`adj_factor`、`trade_calendar`、`stk_limit`、`suspend_d`、`market_context` 加工得到
-- 输出文件路径：`data_bundle/processed_qfq/<symbol>.csv`
-- 数据粒度：每股每交易日一行
-- 主键字段：`symbol + trade_date`
-- 更新时间：执行 `python scripts/build_processed_data.py` 时生成；如需行业强度字段，再执行 `python scripts/build_industry_strength.py --processed-dir data_bundle/processed_qfq`
-- 缺失值处理：
-  - 价格与成交量字段允许在停牌日为空
-  - 技术指标样本不足时为空
-  - 快照字段允许为空但不会前向扩散为其他股票
-- 停牌处理：
-  - 先按交易日历补齐日期
-  - 若日期在 `suspend_d` 中或原始价格缺失，则 `is_suspended_t=true`
-  - 严格成交模式依赖停牌和涨跌停标记决定能否买卖
-- 复权处理：
-  - `open/high/low/close` 是 `qfq_*` 的别名，专供信号与指标计算
-  - 实际买卖默认仍用 `raw_open/raw_close`
-  - 持仓跨复权因子变化时，按 `adj_factor` 比例近似修正持股数量对应价值
-
-### 8.1 核心字段
-
-| 字段名 | 解释 |
-| --- | --- |
-| trade_date | 交易日，`YYYYMMDD`，升序且不重复 |
-| symbol/name | 股票代码与名称 |
-| raw_open/raw_high/raw_low/raw_close | 原始除权价格 |
-| qfq_open/qfq_high/qfq_low/qfq_close | 前复权价格 |
-| open/high/low/close | `qfq_*` 别名 |
-| adj_factor | 复权因子 |
-| next_open/next_close | 下一交易日前复权开盘/收盘价，主要用于单日参考标签 |
-| next_raw_open/next_raw_close | 下一交易日原始开盘/收盘价，主要用于调试和对照 |
-| r_on/r_on_raw | 单日隔夜参考标签，不再是当前主回测收益口径 |
-
-### 8.2 交易约束字段
-
-| 字段名 | 解释 |
-| --- | --- |
-| is_suspended_t | 当日停牌标记 |
-| is_suspended_t1 | 下一交易日停牌标记 |
-| can_buy_t | 当日按原始收盘价近似可买标记，保留兼容旧逻辑 |
-| can_buy_open_t | 当日按原始开盘价可买标记，当前主回测买入约束字段 |
-| can_buy_open_t1 | 下一交易日按原始开盘价可买标记，诊断辅助 |
-| can_sell_t | 当日按原始开盘价可卖标记，当前主回测卖出约束字段 |
-| can_sell_t1 | 下一交易日按原始开盘价可卖标记，诊断辅助 |
-
-约束口径：
-
-```text
-can_buy_open_t:
-  非停牌
-  且 raw_open 非空
-  且 (up_limit 缺失 或 raw_open < up_limit * 0.9995)
-  且 (down_limit 缺失 或 raw_open > down_limit * 1.0005)
-
-can_sell_t:
-  非停牌 且 raw_open 非空 且 (down_limit 缺失 或 raw_open > down_limit * 1.0005)
-```
-
-### 8.3 信号与研究特征字段
-
-| 字段名 | 解释 |
-| --- | --- |
-| m5/m10/m20/m30/m60/m120 | N 日价格动量，按前复权收盘价计算 |
-| ma5/ma10/ma20 | N 日均线 |
-| ret1/ret2/ret3 | 1/2/3 日收益 |
-| amp/amp5 | 振幅与 5 日平均振幅 |
-| vol5/vol10/vr | 均量与量比 |
-| amount5/amount10 | 均额 |
-| bias_ma5/bias_ma10 | 均线偏离率 |
-| high_5/high_10/high_20 | N 日最高价 |
-| low_5/low_10/low_20 | N 日最低价 |
-| close_to_up_limit | 收盘价相对涨停价比例 |
-| high_to_up_limit | 最高价相对涨停价比例 |
-| close_pos_in_bar | 收盘在日内振幅中的位置 |
-| body_pct | 实体涨跌幅 |
-| upper_shadow_pct/lower_shadow_pct | 上下影线比例 |
-| vol_ratio_5 | 当日量相对 5 日均量比例 |
-| ret_accel_3 | 1 日收益相对 3 日收益均速的加速度 |
-| vol_ratio_3/amount_ratio_3 | 当日相对 3 日均量/均额比例 |
-| body_pct_3avg | 最近 3 日实体均值 |
-| close_to_up_limit_3max | 最近 3 日收盘接近涨停的最大程度 |
-| listed_days | 上市天数 |
-| total_mv_snapshot | 快照总市值 |
-| turnover_rate_snapshot | 快照换手率 |
-| board/market | 板块与市场分类字段 |
-| sh_* / hs300_* / cyb_* | 指数上下文字段 |
-
-### 8.4 行业强度字段
-
-这些字段由 `scripts/build_industry_strength.py` 在处理后目录上二次生成，来源是同目录内所有股票的 `industry`、`m20`、`m60`、`pct_chg`、`amount` 字段，不依赖高积分行业指数行情接口。
-
-| 字段名 | 解释 |
-| --- | --- |
-| industry_m20 | 所属行业当日股票 `m20` 均值 |
-| industry_m60 | 所属行业当日股票 `m60` 均值 |
-| industry_rank_m20 | 行业 `industry_m20` 当日降序排名百分位，越小越强，0 表示最强 |
-| industry_rank_m60 | 行业 `industry_m60` 当日降序排名百分位，越小越强 |
-| industry_up_ratio | 行业内当日 `pct_chg>0` 的股票占比 |
-| industry_strong_ratio | 行业内当日 `m20>0` 的股票占比 |
-| industry_amount | 行业当日成交额合计 |
-| industry_amount20 | 行业成交额 20 日均值，默认最少 5 个样本 |
-| industry_amount_ratio | `industry_amount / industry_amount20` |
-| industry_stock_count | 行业内当日股票数量 |
-| industry_valid_m20_count | 行业内当日有效 `m20` 样本数量 |
-| stock_vs_industry_m20 | 个股 `m20 - industry_m20` |
-| stock_vs_industry_m60 | 个股 `m60 - industry_m60` |
-
-缺失值处理：
-
-- 行业为空的股票不参与聚合，写回时对应行业字段为空
-- 个股 `m20/m60/pct_chg/amount` 为空时，不参与对应均值或比例分母
-- 行业成交额均值不足最少样本时，`industry_amount20` 与 `industry_amount_ratio` 为空
-
-### 8.5 当前主回测口径
-
-当前系统实际回测不是直接使用 `next_raw_open` 做卖出，而是：
-
-1. `T` 日根据 `buy_condition + score_expression` 选出信号。
-2. `T+1` 日开盘按 `raw_open` 买入。
-3. `T+N` 日开盘按 `raw_open` 卖出，`N` 由回测请求参数决定，当前支持 `2~5`。
-4. 若严格成交模式下卖出日不可卖，则顺延到下一个可卖开盘。
-
-因此：
-
-- `r_on`、`r_on_raw` 属于参考标签
-- 当前研究主标签应以 `T+1 open -> T+N open` 的净收益为准
+回测严格按日期升序推进。T 日收盘生成信号，T+1 开盘成交；卖出条件在收盘后判断，下一交易日开盘执行，避免未来函数。

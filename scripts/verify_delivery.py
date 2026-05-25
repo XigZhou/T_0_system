@@ -17,9 +17,71 @@ from overnight_bt.delivery_checks import (  # noqa: E402
 
 PROJECT_EXTRA_PATHS = (
     Path("AGENTS.md"),
+    Path("PROJECT_MAP.md"),
+    Path("docs/system-documentation.md"),
+    Path("docs/sqlite-data-dictionary.md"),
     Path("docs/backtest-data-dictionary.md"),
     Path("docs/indicator-reference.md"),
-    Path("docs/system-documentation.md"),
+    Path("docs/expression-reference.md"),
+    Path("docs/paper-trading-system.md"),
+    Path("docs/after-close-pipeline.md"),
+    Path("docs/data-dictionary-template.md"),
+    Path("docs/indicator-documentation-template.md"),
+    Path("static/index.html"),
+    Path("static/daily.html"),
+    Path("static/single.html"),
+    Path("static/paper.html"),
+    Path("static/paper_templates.html"),
+    Path("static/stock_pools.html"),
+    Path("static/admin.html"),
+    Path("static/users.html"),
+    Path("static/sector.html"),
+    Path("static/app.js"),
+    Path("static/daily.js"),
+    Path("static/single.js"),
+    Path("static/paper.js"),
+    Path("static/paper_templates.js"),
+    Path("static/stock_pools.js"),
+    Path("static/admin.js"),
+    Path("static/users.js"),
+    Path("static/sector.js"),
+    Path("static/style.css"),
+    Path("overnight_bt/app.py"),
+    Path("overnight_bt/main_universe.py"),
+    Path("overnight_bt/market_data_store.py"),
+    Path("overnight_bt/stock_pool_feature_store.py"),
+    Path("overnight_bt/backtest.py"),
+    Path("overnight_bt/daily_plan.py"),
+    Path("overnight_bt/single_stock.py"),
+    Path("overnight_bt/paper_trading.py"),
+    Path("overnight_bt/scheduler.py"),
+    Path("scripts/init_main_universe_from_tushare.py"),
+    Path("scripts/collect_stock_daily_raw.py"),
+    Path("scripts/compute_stock_daily_features.py"),
+    Path("scripts/run_core_after_close_pipeline.sh"),
+    Path("scripts/run_after_close_pipeline.sh"),
+    Path("scripts/run_paper_trading.py"),
+    Path("scripts/run_paper_trading_cron.sh"),
+)
+PROJECT_README_PHRASES = (
+    "TUSHARE_TOKEN",
+    "T0_ADMIN_DEFAULT_PASSWORD",
+    "scripts/init_main_universe_from_tushare.py",
+    "scripts/collect_stock_daily_raw.py",
+    "scripts/compute_stock_daily_features.py",
+    "scripts/run_core_after_close_pipeline.sh",
+    "python -m uvicorn overnight_bt.app:app",
+    "source=all",
+    "market_data.sqlite",
+    "stock_daily_features",
+    "/admin",
+    "/paper",
+    "/sector",
+    "/stock-pools",
+)
+PROJECT_REMOVED_PATHS = (
+    Path("docs/superpowers"),
+    Path("docs/sector-dashboard-sqlite-data-dictionary.md"),
     Path("docs/sector-research-system-guide.md"),
     Path("docs/sector-parameter-grid-data-dictionary.md"),
     Path("docs/sector-rotation-diagnosis-data-dictionary.md"),
@@ -27,35 +89,8 @@ PROJECT_EXTRA_PATHS = (
     Path("docs/stock-pool-layer-grid-data-dictionary.md"),
     Path("docs/stock-pool-template-data-dictionary.md"),
     Path("docs/stock-pool-template-system-plan.md"),
-    Path("docs/after-close-pipeline.md"),
-    Path("static/index.html"),
-    Path("static/single.html"),
-    Path("static/sector.html"),
-    Path("static/stock_pools.html"),
-    Path("static/app.js"),
-    Path("static/single.js"),
-    Path("static/sector.js"),
-    Path("static/stock_pools.js"),
-    Path("static/style.css"),
-    Path("overnight_bt/app.py"),
-    Path("overnight_bt/single_stock.py"),
-    Path("overnight_bt/sector_dashboard.py"),
-    Path("overnight_bt/stock_pool_templates.py"),
-    Path("scripts/run_after_close_pipeline.sh"),
-)
-PROJECT_README_PHRASES = (
-    "TUSHARE_TOKEN",
-    "scripts/build_universe_snapshot.py",
-    "scripts/sync_tushare_bundle.py",
-    "scripts/build_processed_data.py",
-    "python -m uvicorn overnight_bt.app:app",
-    "/sector",
-    "scripts/run_sector_parameter_grid.py",
-    "scripts/run_sector_rotation_diagnosis.py",
-    "scripts/run_sector_rotation_grid.py",
-    "scripts/run_stock_pool_layer_grid.py",
-    "/stock-pools",
-    "stock_pool_templates.sqlite",
+    Path("docs/theme-focus-universe-data-dictionary.md"),
+    Path("docs/theme-tradeable-universe-data-dictionary.md"),
 )
 
 
@@ -69,6 +104,10 @@ def _build_project_extra_issues(root: Path) -> list[str]:
         if not (root / rel_path).exists():
             issues.append(f"缺少项目交付文件: {rel_path.as_posix()}")
 
+    for rel_path in PROJECT_REMOVED_PATHS:
+        if (root / rel_path).exists():
+            issues.append(f"历史文档未清理: {rel_path.as_posix()}")
+
     readme_path = root / "README.md"
     readme_text = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
     for phrase in PROJECT_README_PHRASES:
@@ -76,8 +115,8 @@ def _build_project_extra_issues(root: Path) -> list[str]:
             issues.append(f"README 缺少关键说明: {phrase}")
 
     docs_dir = root / "docs"
-    if docs_dir.exists() and len(list(docs_dir.glob("*.md"))) < 4:
-        issues.append("docs/ 文档数量不足，至少应包含模板与正式说明文档")
+    if docs_dir.exists() and len(list(docs_dir.glob("*.md"))) < 9:
+        issues.append("docs/ 文档数量不足，至少应包含当前系统说明、数据字典、指标、表达式、模拟交易、调度和模板文档")
     return issues
 
 
