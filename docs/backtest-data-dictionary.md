@@ -11,7 +11,7 @@
 - 主键：`symbol + trade_date`。
 - 更新时间：管理员指标计算按钮或每日核心调度。
 - 缺失值处理：指标窗口不足时为空；停牌或价格缺失时不可成交；回测不会对缺失指标做未来填充。
-- 复权处理：信号字段使用前复权价格，成交和估值字段使用原始除权价格。
+- 复权处理：信号字段使用前复权价格，成交和估值字段使用原始除权价格；实盘账户回测的现金、持仓市值、期末权益、真实交易流水和个股已实现盈亏使用真实成交股数，`adj_factor` 不调整交易股数。
 
 ## 2. 股票范围
 
@@ -61,7 +61,7 @@
 
 摘要字段：`initial_cash`、`final_equity`、`total_return`、`annual_return`、`max_drawdown`、`trade_count`、`win_rate`、`cash`、`market_value`。
 
-交易流水字段：`trade_date`、`symbol`、`name`、`side`、`price`、`shares`、`amount`、`fee`、`cash_after`、`realized_pnl`、`reason`。
+真实交易流水字段：`trade_date`、`signal_date`、`symbol`、`name`、`rank`、`score`、`action`、`price`、`price_basis`、`shares`、`gross_amount`、`fees`、`net_amount`、`cash_after`、`pnl`、`trade_return`、`holding_days`、`exit_reason`、`execution_note`。实盘账户模式中 `shares` 是买入按 `lot_size` 向下取整后的真实成交股数，卖出沿用持仓真实股数。信号质量模式的样本流水固定按 100 股计算金额，不代表真实账户成交。
 
 每日资产字段：`trade_date`、`cash`、`market_value`、`equity`、`positions`、`daily_return`、`drawdown`。
 
@@ -96,3 +96,11 @@
 ```
 
 回测严格按日期升序推进。T 日收盘生成信号，T+1 开盘成交；卖出条件在收盘后判断，下一交易日开盘执行，避免未来函数。
+
+### 8.1 价格与股数口径
+
+- 信号条件、评分表达式和动量指标读取 `open/high/low/close`，这些字段是前复权价格。
+- 实盘账户回测买卖成交使用 `raw_open`，截止日持仓估值使用 `raw_close`。
+- 实盘账户回测的账户权益、年度稳定性、月度表现和个股贡献按真实账户资金与真实成交股数统计，可用于交易审计。
+- 信号质量回测的权益曲线是从 100000 起步、按完成信号平均收益率复利得到的“信号净值”；交易流水是固定 100 股样本流水，不用于账户审计。
+- `adj_factor` 只参与前复权价格和指标构造，不会把交易流水、持仓市值或盈亏里的股数乘以复权因子比例。

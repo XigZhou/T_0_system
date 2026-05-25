@@ -204,13 +204,13 @@
           <div class="tab-list" role="tablist" aria-label="组合结果明细">
             <button type="button" class="tab-button active" data-tab="condition" role="tab" aria-selected="true">条件诊断</button>
             <button type="button" class="tab-button" data-tab="rank" role="tab" aria-selected="false">排名质量</button>
-            <button type="button" class="tab-button" data-tab="equity" role="tab" aria-selected="false">曲线与回撤</button>
-            <button type="button" class="tab-button" data-tab="year" role="tab" aria-selected="false">年度稳定性</button>
+            <button id="equityTabButton" type="button" class="tab-button" data-tab="equity" role="tab" aria-selected="false">曲线与回撤</button>
+            <button id="yearTabButton" type="button" class="tab-button" data-tab="year" role="tab" aria-selected="false">年度稳定性</button>
             <button type="button" class="tab-button" data-tab="exit" role="tab" aria-selected="false">退出原因</button>
-            <button type="button" class="tab-button" data-tab="month" role="tab" aria-selected="false">月度表现</button>
+            <button id="monthTabButton" type="button" class="tab-button" data-tab="month" role="tab" aria-selected="false">月度表现</button>
             <button type="button" class="tab-button account-only-tab" data-tab="cutoff" role="tab" aria-selected="false">期末持仓</button>
             <button type="button" class="tab-button" data-tab="signals" role="tab" aria-selected="false">选股与交易</button>
-            <button type="button" class="tab-button" data-tab="contribution" role="tab" aria-selected="false">个股贡献</button>
+            <button id="contributionTabButton" type="button" class="tab-button" data-tab="contribution" role="tab" aria-selected="false">个股贡献</button>
           </div>
 
           <div class="tab-panel active" data-tab-panel="condition" role="tabpanel">
@@ -235,15 +235,18 @@
                   <p class="eyebrow">评分排序</p>
                   <h3>排名质量</h3>
                 </div>
-                <p class="panel-note">先看累计TopK扫描决定买前几只，再看单名次质量判断评分表达式是否有排序能力。想比较Top10，请把选股数量填到10或更高。</p>
+                <p id="rankPanelNote" class="panel-note">先看累计TopK扫描决定买前几只，再看单名次质量判断评分表达式是否有排序能力。想比较Top10，请把选股数量填到10或更高。</p>
               </div>
-              <h4 class="subsection-title">累计TopK扫描</h4>
-              <div class="table-wrap">
-                <table id="topKTable"></table>
-              </div>
-              <h4 class="subsection-title">单名次质量</h4>
-              <div class="table-wrap">
-                <table id="rankTable"></table>
+              <p id="accountRankNotice" class="panel-note" hidden>实盘账户回测不展示排名质量；请使用信号质量回测评估评分表达式排序能力。</p>
+              <div id="signalRankContent">
+                <h4 class="subsection-title">累计TopK扫描</h4>
+                <div class="table-wrap">
+                  <table id="topKTable"></table>
+                </div>
+                <h4 class="subsection-title">单名次质量</h4>
+                <div class="table-wrap">
+                  <table id="rankTable"></table>
+                </div>
               </div>
             </section>
           </div>
@@ -356,8 +359,9 @@
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <p class="eyebrow">交易记录</p>
-                    <h3>交易流水</h3>
+                    <p id="tradePanelEyebrow" class="eyebrow">交易记录</p>
+                    <h3 id="tradePanelTitle">交易流水</h3>
+                    <p id="tradePanelNote" class="panel-note">信号质量模式显示固定100股样本流水；实盘账户模式显示真实账户成交流水。</p>
                   </div>
                   <div class="panel-actions">
                     <button id="downloadTradeRowsBtn" type="button" class="secondary table-download-btn">下载Excel</button>

@@ -13,7 +13,6 @@ from .backtest import (
     _count_holding_days,
     _effective_max_exit_offset,
     _exit_mode,
-    _effective_shares,
     _fmt_count,
     _fmt_num,
     _fmt_pct,
@@ -846,7 +845,7 @@ def run_signal_quality_loaded(
             if sell_price is None:
                 open_signal_count += 1
                 continue
-            sell_shares = _effective_shares(pos, exit_row)
+            sell_shares = float(pos.shares)
             trade_return = _net_return(
                 sell_price=sell_price,
                 sell_shares=sell_shares,
@@ -938,6 +937,10 @@ def run_signal_quality_loaded(
     recommended_topk = next((row for row in topk_rows if row.get("recommended")), {})
     summary = {
         "result_mode": "signal_quality",
+        "metric_basis": "signal_return_diagnostic",
+        "equity_label": "信号净值",
+        "trade_flow_basis": "固定100股样本流水，不代表真实账户成交",
+        "auditable": False,
         "data_profile": diagnostics.get("data_profile", "base"),
         "start_date": signal_dates[0],
         "end_date": signal_dates[-1],

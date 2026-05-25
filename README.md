@@ -9,8 +9,8 @@ T_0_system 是运行在腾讯云 `/home/ubuntu/T_0_system` 的 A 股日线量化
 - 系统管理员后台：维护主股票池，一键采集日线 raw，一键计算指标，查看和登记调度重跑。
 - 主股票池：`main_stock_universe` 控制默认采集、指标计算、回测、每日计划和模拟交易范围。
 - 日线 raw 采集：Tushare `daily`、`adj_factor`、`stk_limit`、`suspend_d`、`daily_basic`、`trade_cal` 和指数环境统一写入 `market_data.sqlite`。
-- 指标计算：从 SQLite raw 表生成 `stock_daily_features`，信号指标使用前复权价格，买卖成交使用原始除权价格。
-- 批量回测、信号质量、每日计划、单股回测：默认读取 SQLite 指标表。
+- 指标计算：从 SQLite raw 表生成 `stock_daily_features`，信号指标使用前复权价格；买入、卖出、现金、持仓市值和权益使用未复权除权价格与真实成交股数，交易股数不随 `adj_factor` 调整。
+- 批量回测、信号质量、每日计划、单股回测：默认读取 SQLite 指标表；实盘账户回测流水可用于审计，信号质量流水是固定 100 股样本。
 - 多账户模拟交易：账户模板、待执行订单、成交、持仓、资产和日志写入 `paper_trading.sqlite`。
 - 认证与用户管理：用户、登录 session 和股票池模板写入 `stock_pool_templates.sqlite`。
 - 板块看板：AKShare 板块研究结果可写入 SQLite，并通过 `/sector` 展示。

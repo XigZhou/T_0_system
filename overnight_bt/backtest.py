@@ -214,22 +214,11 @@ def _build_eval_row(df: pd.DataFrame, idx: int, max_offset: int) -> dict[str, An
     return row
 
 
-def _position_share_ratio(position: Position, row: pd.Series) -> float:
-    current_adj = to_float(row.get("adj_factor"))
-    if current_adj is None or position.buy_adj_factor is None or position.buy_adj_factor == 0:
-        return 1.0
-    return float(current_adj) / float(position.buy_adj_factor)
-
-
-def _effective_shares(position: Position, row: pd.Series) -> float:
-    return float(position.shares) * _position_share_ratio(position, row)
-
-
 def _mark_to_market_close(position: Position, row: pd.Series, fallback_price: float | None) -> float:
     close_px = to_float(row.get("raw_close"))
     if close_px is None:
         close_px = fallback_price if fallback_price is not None else position.buy_price
-    return float(close_px) * _effective_shares(position, row)
+    return float(close_px) * float(position.shares)
 
 
 def _annualized_return(start_equity: float, end_equity: float, n_days: int) -> float:
@@ -706,7 +695,7 @@ def run_portfolio_backtest_loaded(
             exec_price = float(open_px)
             if req.realistic_execution:
                 exec_price *= 1.0 - (req.slippage_bps / 10000.0)
-            sell_shares = _effective_shares(pos, row)
+            sell_shares = float(pos.shares)
             gross = exec_price * sell_shares
             commission = gross * req.sell_fee_rate
             if req.realistic_execution and gross > 0:
@@ -1275,6 +1264,11 @@ def run_portfolio_backtest_loaded(
     )
 
     summary = {
+        "result_mode": "account",
+        "metric_basis": "real_account",
+        "equity_label": "账户权益",
+        "trade_flow_basis": "真实账户成交流水",
+        "auditable": True,
         "start_date": signal_dates[0],
         "end_date": signal_dates[-1],
         "simulation_end_date": daily_rows[-1]["trade_date"] if daily_rows else signal_dates[-1],
@@ -1344,6 +1338,7 @@ def run_portfolio_backtest(req: BacktestRequest) -> dict[str, Any]:
 
 _EXPORT_COLUMN_LABELS = {
     "action": "动作",
+    "auditable": "是否可用于账户审计",
     "annualized_return": "年化收益率",
     "avg_holding_days": "平均持有天数",
     "avg_trade_return": "平均单笔收益",
@@ -1371,6 +1366,7 @@ _EXPORT_COLUMN_LABELS = {
     "entry_can_buy_open": "买入日可开盘买入",
     "entry_offset": "买入偏移",
     "entry_raw_open": "买入日未复权开盘价",
+    "equity_label": "权益字段含义",
     "equity": "权益",
     "execution_note": "执行说明",
     "estimated_budget": "目标资金",
@@ -1395,6 +1391,7 @@ _EXPORT_COLUMN_LABELS = {
     "max_hold_exit_count": "固定或最大持有退出次数",
     "median_trade_return": "中位单笔收益",
     "metric": "指标",
+    "metric_basis": "统计口径",
     "min_hold_days": "最短持有天数",
     "name": "股票名称",
     "net_amount": "净金额",
@@ -1426,6 +1423,7 @@ _EXPORT_COLUMN_LABELS = {
     "sell_condition_enabled": "启用卖出条件",
     "sell_condition_exit_count": "卖出条件触发次数",
     "sell_count": "卖出次数",
+    "result_mode": "回测模式",
     "sell_fee_rate": "卖出费率",
     "settlement_mode": "结束日处理方式",
     "shares": "股数",
@@ -1442,6 +1440,7 @@ _EXPORT_COLUMN_LABELS = {
     "symbol": "股票代码",
     "total_fees": "总费用",
     "total_return": "总收益率",
+    "trade_flow_basis": "流水口径",
     "trade_count": "交易次数",
     "trade_date": "交易日期",
     "trade_days": "交易日数",
@@ -1471,7 +1470,13 @@ _EXPORT_TABLE_COLUMNS = {
         "price",
         "price_basis",
         "shares",
+        "gross_amount",
+        "fees",
+        "net_amount",
+        "cash_after",
         "pnl",
+        "trade_return",
+        "exit_reason",
         "execution_note",
     ]
 }
@@ -1508,6 +1513,30 @@ _EXPORT_MONEY_COLUMNS = {
 }
 
 
+def _export_basis_rows(result: dict[str, Any]) -> list[dict[str, str]]:
+    summary = result.get("summary", {}) or {}
+    auditable = bool(summary.get("auditable"))
+    return [
+        {"项目": "回测模式", "说明": str(summary.get("result_mode") or "")},
+        {"项目": "本表是否可用于账户审计", "说明": "是" if auditable else "否"},
+        {"项目": "统计口径", "说明": str(summary.get("metric_basis") or "")},
+        {"项目": "权益字段含义", "说明": str(summary.get("equity_label") or "")},
+        {"项目": "流水口径", "说明": str(summary.get("trade_flow_basis") or "")},
+    ]
+
+
+def _export_table_name(result: dict[str, Any], table_key: str) -> str:
+    if table_key == "pick_rows":
+        return "每日选股明细"
+    summary = result.get("summary", {}) or {}
+    if table_key == "trade_rows":
+        if summary.get("result_mode") == "signal_quality":
+            return "信号样本流水"
+        if summary.get("result_mode") == "account":
+            return "真实交易流水"
+    return "交易流水"
+
+
 def export_backtest_table_excel(result: dict[str, Any], table_key: str) -> bytes:
     table_names = {
         "pick_rows": "每日选股明细",
@@ -1525,7 +1554,10 @@ def export_backtest_table_excel(result: dict[str, Any], table_key: str) -> bytes
         frame[column] = pd.to_numeric(frame[column], errors="coerce").round(2)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        _localize_export_frame(frame).to_excel(writer, index=False, sheet_name=table_names[table_key])
+        if table_key == "trade_rows":
+            pd.DataFrame(_export_basis_rows(result)).to_excel(writer, index=False, sheet_name="口径说明")
+        sheet_name = _export_table_name(result, table_key)
+        _localize_export_frame(frame).to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
 
