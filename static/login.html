@@ -3,45 +3,63 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>登录 T_0 系统</title>
+    <title>&#x767b;&#x5f55; &#x80a1;&#x6d4b;&#x901a;</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
-  <body class="auth-page">
-    <div class="shell">
-      <main class="panel compact-panel auth-card">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">用户登录</p>
-            <h1>进入回测系统</h1>
-          </div>
+  <body class="auth-page stock-auth-page stock-auth-login-page">
+    <div class="stock-auth-shell">
+      <header class="stock-auth-brand">
+        <img class="stock-auth-logo" src="/static/assets/stock-predictions-logo.svg" alt="&#x80a1;&#x6d4b;&#x901a;" />
+        <h1>&#x80a1;&#x6d4b;&#x901a;</h1>
+        <p>A&#x80a1;&#x56de;&#x6d4b;&#x4e0e;&#x6a21;&#x62df;&#x4ea4;&#x6613;&#x7814;&#x7a76;&#x5e73;&#x53f0;</p>
+      </header>
+
+      <main class="stock-auth-card" aria-labelledby="loginTitle">
+        <div class="stock-auth-card-head">
+          <h2 id="loginTitle">&#x6b22;&#x8fce;&#x56de;&#x6765;</h2>
+          <p>&#x767b;&#x5f55;&#x60a8;&#x7684;&#x8d26;&#x6237;&#x4ee5;&#x7ee7;&#x7eed;</p>
         </div>
-        <form id="loginForm" class="form-grid auth-form">
+        <form id="loginForm" class="stock-auth-form">
           <label>
-            <span>用户名</span>
-            <input id="loginUsername" type="text" autocomplete="username" value="admin" />
+            <span>&#x7528;&#x6237;&#x540d;</span>
+            <span class="stock-auth-field">
+              <span class="stock-auth-field-icon" aria-hidden="true">ID</span>
+              <input id="loginUsername" type="text" autocomplete="username" value="admin" />
+            </span>
           </label>
           <label>
-            <span>密码</span>
-            <input id="loginPassword" type="password" autocomplete="current-password" />
+            <span>&#x5bc6;&#x7801;</span>
+            <span class="stock-auth-field">
+              <span class="stock-auth-field-icon" aria-hidden="true">PW</span>
+              <input id="loginPassword" type="password" autocomplete="current-password" />
+              <button class="stock-auth-ghost" type="button" data-toggle-password="loginPassword" aria-label="&#x663e;&#x793a;&#x6216;&#x9690;&#x85cf;&#x5bc6;&#x7801;">&#x67e5;&#x770b;</button>
+            </span>
           </label>
-          <div class="auth-actions">
-            <button type="submit">登录</button>
-            <a class="secondary-link" href="/register">注册普通用户</a>
-          </div>
-          <p id="loginStatus" class="status">请输入账号密码。</p>
+          <button class="stock-auth-primary" type="submit">&#x767b;&#x5f55;</button>
+          <p id="loginStatus" class="stock-auth-status">&#x8bf7;&#x8f93;&#x5165;&#x8d26;&#x53f7;&#x5bc6;&#x7801;&#x3002;</p>
         </form>
       </main>
+
+      <p class="stock-auth-switch">&#x8fd8;&#x6ca1;&#x6709;&#x8d26;&#x6237;&#xff1f; <a href="/register">&#x6ce8;&#x518c;</a></p>
+      <footer class="stock-auth-footer">&copy; 2026 &#x80a1;&#x6d4b;&#x901a;. All rights reserved.</footer>
     </div>
     <script>
       const loginForm = document.getElementById("loginForm");
       const loginStatus = document.getElementById("loginStatus");
       function setLoginStatus(text, error = false) {
         loginStatus.textContent = text;
-        loginStatus.style.color = error ? "#8a2f13" : "";
+        loginStatus.classList.toggle("error", error);
       }
+      document.querySelectorAll("[data-toggle-password]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = document.getElementById(button.dataset.togglePassword);
+          if (!input) return;
+          input.type = input.type === "password" ? "text" : "password";
+        });
+      });
       loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        setLoginStatus("正在登录...");
+        setLoginStatus("\u6b63\u5728\u767b\u5f55...");
         try {
           const response = await fetch("/api/auth/login", {
             method: "POST",
@@ -54,7 +72,7 @@
           });
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            throw new Error(data.detail || `登录失败：${response.status}`);
+            throw new Error(data.detail || `\u767b\u5f55\u5931\u8d25\uff1a${response.status}`);
           }
           window.location.href = "/";
         } catch (error) {

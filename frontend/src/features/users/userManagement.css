@@ -1,0 +1,169 @@
+.user-management-page {
+  display: flex;
+  min-height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px 24px;
+  overflow: auto;
+}
+
+.user-management-header,
+.user-management-actions,
+.user-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.user-management-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.user-management-header h1 {
+  font-size: 24px;
+}
+
+.user-management-note,
+.user-management-panel-head > p {
+  color: var(--muted-fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.user-management-note {
+  margin-top: 4px;
+}
+
+.user-management-actions,
+.user-row-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.user-management-panel,
+.user-management-denied {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.user-management-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.user-management-status {
+  min-height: 28px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 11px;
+  color: var(--muted-fg);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.user-management-status.error,
+.user-management-denied.error {
+  color: var(--negative);
+}
+
+.user-management-panel {
+  overflow: hidden;
+}
+
+.user-management-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.user-management-panel-head h2 {
+  font-size: 16px;
+}
+
+.user-management-panel-head > p {
+  max-width: 560px;
+  text-align: right;
+}
+
+.user-management-table-wrap {
+  max-height: 620px;
+  overflow: auto;
+}
+
+.user-management-table-wrap table {
+  min-width: 1120px;
+  font-size: 12px;
+}
+
+.user-management-table-wrap td:last-child,
+.user-management-table-wrap th:last-child {
+  width: 220px;
+}
+
+.user-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 22px;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.user-status-pill.active {
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 12%, transparent);
+}
+
+.user-status-pill.inactive {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.user-row-actions .small-action {
+  min-height: 26px;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.user-management-denied {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  color: var(--muted-fg);
+  font-size: 13px;
+}
+
+@media (max-width: 920px) {
+  .user-management-header,
+  .user-management-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .user-management-panel-head > p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .user-management-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .user-management-actions,
+  .user-row-actions,
+  .user-management-metrics {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+}
