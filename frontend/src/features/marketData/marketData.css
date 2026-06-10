@@ -1,0 +1,239 @@
+.market-data-page {
+  display: flex;
+  min-height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px 24px;
+  overflow: auto;
+}
+
+.market-data-header,
+.market-data-header-actions,
+.market-data-tabs,
+.market-data-searchbar {
+  display: flex;
+  align-items: center;
+}
+
+.market-data-header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.market-data-header h1 {
+  font-size: 24px;
+}
+
+.market-data-note,
+.market-data-summary .summary-intro p:last-child,
+.market-data-panel-head > p,
+.market-data-metrics .metric-tile small {
+  color: var(--muted-fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.market-data-note {
+  margin-top: 4px;
+}
+
+.market-data-header-actions,
+.market-data-tabs,
+.market-data-searchbar {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.market-data-tabs,
+.market-data-summary,
+.market-data-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.market-data-tabs {
+  padding: 8px;
+  background: var(--panel-muted);
+}
+
+.market-data-tabs button {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  background: transparent;
+  color: var(--muted-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.market-data-tabs button.active {
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(20, 18, 15, 0.08);
+}
+
+.market-data-summary {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.26fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+}
+
+.market-data-summary .summary-intro {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+
+.market-data-summary .summary-intro h2,
+.market-data-panel-head h2 {
+  font-size: 16px;
+}
+
+.market-data-summary .summary-intro p:last-child {
+  margin-top: 8px;
+}
+
+.market-data-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.market-data-metrics .metric-tile strong,
+.market-data-metrics .metric-tile small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-data-panel {
+  overflow: hidden;
+}
+
+.market-data-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.market-data-panel-head > p {
+  max-width: 720px;
+  text-align: right;
+}
+
+.market-data-searchbar {
+  border-bottom: 1px solid var(--border);
+  padding: 12px;
+}
+
+.market-data-searchbar label {
+  display: flex;
+  min-width: 260px;
+  flex: 0 1 360px;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted-fg);
+  font-size: 12px;
+}
+
+.market-data-searchbar input {
+  min-height: 32px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  background: var(--panel-muted);
+  color: var(--fg);
+}
+
+.market-data-search-result {
+  color: var(--negative);
+  font-size: 12px;
+}
+
+.market-data-search-result.ok {
+  color: var(--positive);
+}
+
+.market-data-table-wrap {
+  max-height: 560px;
+  overflow: auto;
+}
+
+.market-data-table-wrap table {
+  font-size: 12px;
+}
+
+.market-data-table-wrap.factors table {
+  min-width: 1280px;
+}
+
+.market-data-table-wrap.stocks table {
+  min-width: 840px;
+}
+
+.market-data-table-wrap td {
+  vertical-align: top;
+  line-height: 1.45;
+}
+
+.market-data-status {
+  min-height: 28px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 11px;
+  color: var(--muted-fg);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.market-data-status.error {
+  color: var(--negative);
+}
+
+@media (max-width: 1180px) {
+  .market-data-summary,
+  .market-data-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .market-data-summary .summary-intro {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0;
+    padding-bottom: 10px;
+  }
+
+  .market-data-panel-head {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .market-data-panel-head > p {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 760px) {
+  .market-data-header,
+  .market-data-searchbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .market-data-searchbar label,
+  .market-data-searchbar button {
+    width: 100%;
+  }
+}

@@ -3,6 +3,7 @@ import {
   BarChart2,
   BookOpen,
   Briefcase,
+  Database,
   FlaskConical,
   HeartPulse,
   Layers,
@@ -44,6 +45,19 @@ export const navGroups: NavGroup[] = [
         description: "\u627f\u8f7d\u65e7\u7248\u677f\u5757\u7814\u7a76\u9875\u9762\uff0c\u5148\u4fdd\u7559\u539f\u8868\u5355\u3001\u56fe\u8868\u548c API \u884c\u4e3a\u3002",
         legacyPath: "/sector",
         icon: <BarChart2 size={15} />
+      }
+    ]
+  },
+  {
+    id: "market-data",
+    label: "\u6570\u636e\u884c\u60c5",
+    items: [
+      {
+        path: "/market-data",
+        label: "\u6570\u636e\u884c\u60c5",
+        groupLabel: "\u6570\u636e\u884c\u60c5",
+        description: "\u53ea\u8bfb\u67e5\u770b\u5f53\u524d\u7cfb\u7edf\u5df2\u6709\u7684\u56e0\u5b50\u5e93\u548c\u80a1\u7968\u65e5\u7ebf\u6570\u636e\u3002",
+        icon: <Database size={15} />
       }
     ]
   },

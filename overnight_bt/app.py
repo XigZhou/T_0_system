@@ -19,6 +19,7 @@ from .main_universe import (
     resolve_stock_names,
     save_main_universe,
 )
+from .market_data_view import check_market_stock, list_market_factors, list_market_stocks
 from .models import (
     UserStatusUpdateRequest,
     UserPasswordResetRequest,
@@ -464,6 +465,32 @@ def paper_template_delete_api(config_path: str = "", config_dir: str = "configs/
         return delete_paper_account_template(config_path=config_path, config_dir=config_dir, username=username, account_id=account_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/market-data/factors")
+def market_data_factors_api(current_user: dict = Depends(auth.require_user)):
+    try:
+        return list_market_factors(db_path=MAIN_UNIVERSE_DB_PATH)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/market-data/stocks")
+def market_data_stocks_api(limit: int = 500, current_user: dict = Depends(auth.require_user)):
+    try:
+        return list_market_stocks(limit=limit, db_path=MAIN_UNIVERSE_DB_PATH)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/market-data/stocks/check")
+def market_data_stock_check_api(stock_name: str, current_user: dict = Depends(auth.require_user)):
+    try:
+        return check_market_stock(stock_name, db_path=MAIN_UNIVERSE_DB_PATH)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

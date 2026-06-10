@@ -10,6 +10,7 @@ import { SectorResearchPage } from "../features/sectors/SectorResearchPage";
 import { SystemRunPage } from "../features/systemRun/SystemRunPage";
 import { UserManagementPage } from "../features/users/UserManagementPage";
 import { LegacyFrame } from "../features/legacy/LegacyFrame";
+import { MarketDataPage } from "../features/marketData/MarketDataPage";
 import { PlaceholderPage } from "../features/placeholders/PlaceholderPage";
 import { HealthPage } from "../features/system/HealthPage";
 import { routes } from "../navigation/menu";
@@ -48,6 +49,10 @@ export function App() {
 
           if (route.path === "/research/sectors") {
             return <Route key={route.path} path={route.path} element={<SectorResearchPage />} />;
+          }
+
+          if (route.path === "/market-data") {
+            return <Route key={route.path} path={route.path} element={<MarketDataPage />} />;
           }
 
           if (route.path === "/trading/daily-plan") {
