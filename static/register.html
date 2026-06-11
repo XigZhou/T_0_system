@@ -3,45 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>注册 T_0 系统</title>
+    <title>&#x6ce8;&#x518c; &#x80a1;&#x6d4b;&#x901a;</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
-  <body class="auth-page">
-    <div class="shell">
-      <main class="panel compact-panel auth-card">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">用户注册</p>
-            <h1>创建普通用户</h1>
-          </div>
+  <body class="auth-page stock-auth-page stock-auth-register-page">
+    <div class="stock-auth-shell">
+      <header class="stock-auth-brand">
+        <img class="stock-auth-logo" src="/static/assets/stock-predictions-logo.svg" alt="&#x80a1;&#x6d4b;&#x901a;" />
+        <h1>&#x80a1;&#x6d4b;&#x901a;</h1>
+        <p>A&#x80a1;&#x56de;&#x6d4b;&#x4e0e;&#x6a21;&#x62df;&#x4ea4;&#x6613;&#x7814;&#x7a76;&#x5e73;&#x53f0;</p>
+      </header>
+
+      <main class="stock-auth-card" aria-labelledby="registerTitle">
+        <div class="stock-auth-card-head">
+          <h2 id="registerTitle">&#x521b;&#x5efa;&#x8d26;&#x6237;</h2>
+          <p>&#x6ce8;&#x518c;&#x4ee5;&#x5f00;&#x59cb;&#x4f7f;&#x7528; &#x80a1;&#x6d4b;&#x901a;</p>
         </div>
-        <form id="registerForm" class="form-grid auth-form">
+        <form id="registerForm" class="stock-auth-form">
           <label>
-            <span>用户名</span>
-            <input id="registerUsername" type="text" autocomplete="username" placeholder="3-32位字母数字下划线" />
+            <span>&#x7528;&#x6237;&#x540d;</span>
+            <span class="stock-auth-field">
+              <span class="stock-auth-field-icon" aria-hidden="true">ID</span>
+              <input id="registerUsername" type="text" autocomplete="username" placeholder="3-32&#x4f4d;&#x5b57;&#x6bcd;&#x6570;&#x5b57;&#x4e0b;&#x5212;&#x7ebf;" />
+            </span>
           </label>
           <label>
-            <span>密码</span>
-            <input id="registerPassword" type="password" autocomplete="new-password" placeholder="至少8位" />
+            <span>&#x5bc6;&#x7801;</span>
+            <span class="stock-auth-field">
+              <span class="stock-auth-field-icon" aria-hidden="true">PW</span>
+              <input id="registerPassword" type="password" autocomplete="new-password" placeholder="&#x81f3;&#x5c11;8&#x4f4d;" />
+              <button class="stock-auth-ghost" type="button" data-toggle-password="registerPassword" aria-label="&#x663e;&#x793a;&#x6216;&#x9690;&#x85cf;&#x5bc6;&#x7801;">&#x67e5;&#x770b;</button>
+            </span>
+            <small>&#x7528;&#x6237;&#x540d;&#x652f;&#x6301;&#x5b57;&#x6bcd;&#x3001;&#x6570;&#x5b57;&#x3001;&#x4e0b;&#x5212;&#x7ebf;&#x548c;&#x77ed;&#x6a2a;&#x7ebf;&#x3002;</small>
           </label>
-          <div class="auth-actions">
-            <button type="submit">注册并登录</button>
-            <a class="secondary-link" href="/login">已有账号登录</a>
-          </div>
-          <p id="registerStatus" class="status">注册后会自动登录。</p>
+          <button class="stock-auth-primary" type="submit">&#x521b;&#x5efa;&#x8d26;&#x6237;</button>
+          <p id="registerStatus" class="stock-auth-status">&#x6ce8;&#x518c;&#x540e;&#x4f1a;&#x81ea;&#x52a8;&#x767b;&#x5f55;&#x3002;</p>
         </form>
       </main>
+
+      <p class="stock-auth-switch">&#x5df2;&#x6709;&#x8d26;&#x6237;&#xff1f; <a href="/login">&#x767b;&#x5f55;</a></p>
+      <footer class="stock-auth-footer">&copy; 2026 &#x80a1;&#x6d4b;&#x901a;. All rights reserved.</footer>
     </div>
     <script>
       const registerForm = document.getElementById("registerForm");
       const registerStatus = document.getElementById("registerStatus");
       function setRegisterStatus(text, error = false) {
         registerStatus.textContent = text;
-        registerStatus.style.color = error ? "#8a2f13" : "";
+        registerStatus.classList.toggle("error", error);
       }
+      document.querySelectorAll("[data-toggle-password]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = document.getElementById(button.dataset.togglePassword);
+          if (!input) return;
+          input.type = input.type === "password" ? "text" : "password";
+        });
+      });
       registerForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        setRegisterStatus("正在注册...");
+        setRegisterStatus("\u6b63\u5728\u6ce8\u518c...");
         try {
           const response = await fetch("/api/auth/register", {
             method: "POST",
@@ -54,7 +73,7 @@
           });
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            throw new Error(data.detail || `注册失败：${response.status}`);
+            throw new Error(data.detail || `\u6ce8\u518c\u5931\u8d25\uff1a${response.status}`);
           }
           window.location.href = "/";
         } catch (error) {

@@ -2,9 +2,11 @@
 
 本文档说明当前系统各功能模块的用途、输入参数、输出结果与异常处理方式。当前实现以 SQLite 为主数据链路：主股票池、日线 raw、指标、模拟交易账本和调度状态都写入 `data_store/` 下的 SQLite 数据库。
 
+新控制台文档优先使用规范路径；`/single`、`/daily`、`/paper` 等短路径仍作为兼容入口保留，会直接进入对应的新控制台页面。
+
 ## 1. 登录、注册与用户管理
 
-入口：`/login`、`/register`、`/users`
+入口：`/login`、`/register`、`/system/users`
 
 主要 API：
 
@@ -24,7 +26,7 @@
 
 ## 2. 系统管理员后台
 
-入口：`/admin`
+入口：`/system/admin`
 
 后台包含运维总览、主股票池维护、日线 raw 采集、指标计算、调度运行记录和失败任务安全重跑登记。
 
@@ -101,7 +103,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 4. 组合回测
 
-入口：`/`
+入口：`/backtests/portfolio`
 
 主要 API：`POST /api/run-backtest`、`POST /api/run-signal-quality`、导出接口 `/api/run-backtest-table-export`、`/api/run-backtest-export`
 
@@ -142,7 +144,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 5. 每日计划
 
-入口：`/daily`
+入口：`/trading/daily-plan`
 
 主要 API：`POST /api/daily-plan`
 
@@ -154,7 +156,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 6. 单股回测
 
-入口：`/single`
+入口：`/backtests/single-stock`
 
 主要 API：`POST /api/run-single-stock`
 
@@ -166,7 +168,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 7. 股票池模板
 
-入口：`/stock-pools`
+入口：`/portfolio/stock-pools`
 
 主要 API：
 
@@ -180,9 +182,35 @@ python scripts/init_main_universe_from_tushare.py \
 
 当前规则：用户模板中的股票必须在主股票池中处于活跃状态，避免普通用户模板绕过系统主范围。模板库存放在 `stock_pool_templates.sqlite`，不是行情主库。
 
-## 8. 多账户模拟交易
 
-入口：`/paper`、`/paper/templates`
+## 8. 数据行情
+
+控制台入口：`/market-data`
+
+功能：只读展示当前系统已有的行情与指标数据，不执行采集、不执行指标计算，不创建或迁移数据表。页面内部有两个子页签：`因子库` 和 `股票日线数据`。
+
+主要 API：
+
+| API | 用途 |
+| --- | --- |
+| `GET /api/market-data/factors` | 读取 `stock_daily_features` 中已有的因子字段、公式说明、因子数量和数据时间范围 |
+| `GET /api/market-data/stocks` | 读取已有日线数据的股票数量、采集时间范围和每只股票的时间段 |
+| `GET /api/market-data/stocks/check` | 按 `stock_name` 检查某只股票是否在当前系统可用 |
+
+输出结果：
+
+| 子页签 | 顶部摘要 | 明细内容 |
+| --- | --- | --- |
+| 因子库 | 可用因子数量、因子计算开始和结束日期、源表和行数 | 字段、指标名称、分类、输入字段、计算公式、窗口和边界条件 |
+| 股票日线数据 | 可用股票数量、股票采集开始和结束日期、源表和行数 | 股票代码、Tushare 代码、股票名称、开始日期、结束日期和行数 |
+
+搜索说明：在“股票日线数据”子页签输入股票名称后点击搜索，系统会弹窗提示该股票在该系统是否可用。可用判断仅基于已落库的日线或指标数据，不触发采集。
+
+异常处理：主行情库不存在、相关表不存在或暂无数据时，接口返回空摘要和只读提示；搜索名称为空时返回 400。
+
+## 9. 多账户模拟交易
+
+入口：`/trading/paper`、`/portfolio/paper-templates`
 
 主要 API：`/api/paper/templates`、`/api/paper/template`、`/api/paper/run`、`/api/paper/ledger`
 
@@ -199,9 +227,9 @@ python scripts/init_main_universe_from_tushare.py \
 
 异常处理：订单重复、现金不足、价格缺失、停牌或涨跌停不可成交、股票池指标未更新到目标日，会在订单状态或运行日志中记录。
 
-## 9. 板块看板
+## 10. 板块看板
 
-入口：`/sector`
+入口：`/research/sectors`
 
 主要 API：`GET /api/sector/overview`
 
@@ -209,7 +237,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 数据位置：`data_store/market_data.sqlite.sector_dashboard_rows` 与 `sector_dashboard_meta`。如果 SQLite 板块数据未初始化，页面显示暂无数据和提示信息。板块研究脚本仍属于辅助研究链路，不参与每日核心股票 raw 与指标计算。
 
-## 10. 定时任务与调度记录
+## 11. 定时任务与调度记录
 
 核心脚本：
 
@@ -225,7 +253,7 @@ scripts/run_after_close_pipeline.sh 20260523
 
 当前 `run_after_close_pipeline.sh` 委托给核心 SQLite 调度。调度状态写入 `data_store/scheduler.sqlite`，管理员后台只登记安全重跑请求，不直接执行 shell 命令。
 
-## 11. 运维检查
+## 12. 运维检查
 
 交付检查：
 

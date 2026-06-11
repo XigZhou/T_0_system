@@ -8,6 +8,10 @@ __pycache__/
 venv/
 env/
 
+# Frontend dependencies and generated assets
+frontend/node_modules/
+static/console/
+
 # Local environment files
 .env
 .env.*

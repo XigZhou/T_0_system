@@ -1,10 +1,11 @@
 # A 股回测项目协作约定
 
-## 代码修改与回测和上传到github约定
-- 代码优先修改在腾讯云，然后再腾讯云上测试，测试没问题在同步到windows本地
-- 只要修改了代码，就通过github提交，不用每次都问我，直接push提交即可
-- 提交时，提交信息默认使用中文，提交信息中包含修改内容的详细描述
-- 在提交到github之前如果发现还有其他没有提交，你就顺手提交上去
+## 代码修改与回测和上传到 GitHub 约定
+- 代码优先修改在腾讯云 worktree，然后在腾讯云上测试；不要修改 Windows 本地文件。
+- 当前功能开发和验证默认在 `/home/ubuntu/codex_worktrees/frontend-console-shell` 进行，不直接修改 `/home/ubuntu/T_0_system` 的代码。
+- 只有用户明确要求提交到 GitHub 时，才执行 `git add`、`git commit`、`git push`；开发验证阶段默认不提交、不推送。
+- 若用户要求提交，先区分本次改动与无关改动；不要擅自提交不相关文件。
+- 提交时，提交信息默认使用中文，提交信息中包含修改内容的详细描述。
 
 ## 默认工作区 Skill
 
@@ -24,9 +25,9 @@
 - 默认分支为 `master`。
 - Git 提交作者默认使用本机已配置身份；当前约定的联系邮箱为 `xigzhous@gmail.com`。
 - 提交信息默认使用中文。
-- 当本次改动已经完成并且本地验证通过后，默认继续执行 `git add`、`git commit`、`git push`，不需要再次单独确认。
 - 优先使用 SSH 方式连接 GitHub，不使用密码登录；如果 SSH 未授权，先提示补充公钥授权，再继续推送。
-- 如果当前目录还不是 Git 仓库，则先初始化 Git 仓库、绑定远程仓库 `origin`，再按默认分支推进。
+- 只有用户明确要求提交到 GitHub 时，才执行 `git add`、`git commit`、`git push`；开发验证阶段默认不提交、不推送。
+- 如果当前目录还不是 Git 仓库，则不能声称已经完成 GitHub 上传，只能说明还需要初始化仓库或切到正确目录后再推送。
 - 如果远程仓库已有历史且与本地初始化历史不一致，先明确说明情况，再选择合并、拉取重放或其他安全方案，不直接强推覆盖。
 
 ## 数据与指标文档
@@ -50,7 +51,7 @@
 - 当用户提到腾讯云服务器或远程主机时，优先使用本机已配置的 SSH 别名或既有连接方式操作。
 - 腾讯云，python 虚拟环境在 “source TencentCloud/myenv/bin/activate”
 - ssh ubuntu@124.223.140.163 可以登录腾讯云服务器
-- 当前所有的代码数据，都放在腾讯云/home/ubuntu/T_0_system目录下。
+- main branch 主目录在腾讯云 `/home/ubuntu/T_0_system`；当前开发工作树在 `/home/ubuntu/codex_worktrees/frontend-console-shell`。
 
 ## 股票动量计算公式
 - 20日的股票动量计算公式为 T日close价格 - (T-20+1)日close价格 然后除以(T-20+1)日close价格，比如五日动量计算
@@ -65,4 +66,19 @@ m5=[T日close价格-(T-4日close价格)]/(T-4日close价格)， 以此类推
 #代码同步
 - 只修改腾讯云上面代码，忽略windows上面，全部开发测试都在腾讯云
 
+## Worktree 与行情数据源约定
+
+- 当前开发工作树：`/home/ubuntu/codex_worktrees/frontend-console-shell`。
+- main branch 主目录：`/home/ubuntu/T_0_system`。
+- 所有功能开发和验证先在 worktree 中完成，不直接修改 `/home/ubuntu/T_0_system` 的代码；用户确认后再合并回 main branch 主目录。
+- worktree 下的 `data_store/` 用于隔离开发期写入型运行数据，不代表生产主行情库。
+- 主行情真实数据默认在 `/home/ubuntu/T_0_system/data_store/market_data.sqlite`。
+- 数据行情页面的三个只读接口可通过环境变量 `T0_MARKET_DATA_DB_PATH` 指向主行情库：
+  - `GET /api/market-data/factors`
+  - `GET /api/market-data/stocks`
+  - `GET /api/market-data/stocks/check`
+- `T0_MARKET_DATA_DB_PATH` 只用于只读行情查看；不要把整个 worktree 的 `data_store/` 软链或整体改到 `/home/ubuntu/T_0_system/data_store`，避免开发测试误写主目录的用户、股票池、模拟交易、调度和行情数据。
+- worktree 后端调试推荐启动方式：
+  `T0_MARKET_DATA_DB_PATH=/home/ubuntu/T_0_system/data_store/market_data.sqlite /home/ubuntu/TencentCloud/myenv/bin/python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 18083`
+- 合并回 `/home/ubuntu/T_0_system` 后，main 环境可不设置 `T0_MARKET_DATA_DB_PATH`，默认会读取 main 自己的 `data_store/market_data.sqlite`。
 

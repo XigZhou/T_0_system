@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" role="img" aria-labelledby="title desc">
+  <title id="title">&#x80a1;&#x6d4b;&#x901a;</title>
+  <desc id="desc">STOCK'S PREDICTIONS logo</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f5f9d" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect x="14" y="14" width="332" height="192" rx="36" fill="#ffffff" filter="url(#shadow)"/>
+  <path d="M54 16H306C328 16 344 34 344 56V164C344 186 326 204 304 204H56C34 204 16 186 16 164V56C16 34 34 16 54 16Z" fill="none" stroke="#1c84c6" stroke-width="12"/>
+  <path d="M58 30H302C317 30 330 43 330 58" fill="none" stroke="#61b8f2" stroke-width="7" stroke-linecap="round" opacity="0.9"/>
+  <text x="180" y="110" text-anchor="middle" font-family="Microsoft YaHei, PingFang SC, SimHei, sans-serif" font-size="66" font-weight="800" fill="#126da8" letter-spacing="2">&#x80a1;&#x6d4b;&#x901a;</text>
+  <rect x="46" y="132" width="268" height="34" rx="3" fill="#eaf7ff" stroke="#126da8" stroke-width="4"/>
+  <text x="180" y="156" text-anchor="middle" font-family="Consolas, Courier New, monospace" font-size="25" font-weight="800" fill="#126da8" letter-spacing="1">STOCK'S PREDICTIONS</text>
+</svg>
