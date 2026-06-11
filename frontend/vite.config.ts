@@ -1,14 +1,52 @@
-import { defineConfig } from "vite";
+import { defineConfig, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 
-const legacyTarget = "http://127.0.0.1:18083";
-const legacyProxy = {
-  target: legacyTarget,
+const backendTarget = "http://127.0.0.1:18083";
+const backendProxy = {
+  target: backendTarget,
   changeOrigin: true
 };
 
+const cleanConsolePaths = new Set([
+  "/",
+  "/single",
+  "/backtests/portfolio",
+  "/backtests/single-stock",
+  "/daily",
+  "/trading/daily-plan",
+  "/paper",
+  "/trading/paper",
+  "/paper/templates",
+  "/portfolio/paper-templates",
+  "/stock-pools",
+  "/portfolio/stock-pools",
+  "/admin",
+  "/system/admin",
+  "/users",
+  "/system/users",
+  "/sector",
+  "/research/sectors",
+  "/market-data",
+  "/system/health"
+]);
+
+function cleanConsoleRouteFallback() {
+  return {
+    name: "clean-console-route-fallback",
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use((req, _res, next) => {
+        const path = (req.url || "").split("?", 1)[0].replace(/\/$/, "") || "/";
+        if (cleanConsolePaths.has(path)) {
+          req.url = "/static/console/";
+        }
+        next();
+      });
+    }
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cleanConsoleRouteFallback()],
   base: "/static/console/",
   build: {
     outDir: "../static/console",
@@ -18,34 +56,13 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     proxy: {
-      "/__legacy": {
-        ...legacyProxy,
-        rewrite: (path) => path.replace(/^\/__legacy\/index/, "/")
-      },
-      "/api": legacyProxy,
-      "/health": legacyProxy,
-      "/single": legacyProxy,
-      "/daily": legacyProxy,
-      "/paper": legacyProxy,
-      "/stock-pools": legacyProxy,
-      "/admin": legacyProxy,
-      "/users": legacyProxy,
-      "/sector": legacyProxy,
-      "/login": legacyProxy,
-      "/register": legacyProxy,
-      "/static/style.css": legacyProxy,
-      "/static/assets": legacyProxy,
-      "/static/app.js": legacyProxy,
-      "/static/auth.js": legacyProxy,
-      "/static/daily.js": legacyProxy,
-      "/static/paper.js": legacyProxy,
-      "/static/paper_templates.js": legacyProxy,
-      "/static/sector.js": legacyProxy,
-      "/static/single.js": legacyProxy,
-      "/static/stock_pools.js": legacyProxy,
-      "/static/admin.js": legacyProxy,
-      "/static/users.js": legacyProxy,
-      "/static/vendor": legacyProxy
+      "/api": backendProxy,
+      "/health": backendProxy,
+      "/login": backendProxy,
+      "/register": backendProxy,
+      "/static/style.css": backendProxy,
+      "/static/assets": backendProxy,
+      "/static/vendor": backendProxy
     }
   }
 });

@@ -39,7 +39,6 @@ const t = {
   title: "\u80a1\u7968\u6c60\u6a21\u677f\u7ba1\u7406",
   eyebrow: "Stock Pool Workbench",
   note: "\u6a21\u677f\u53ea\u4fdd\u5b58\u80a1\u7968\u96c6\u5408\uff0c\u884c\u60c5\u4e0e\u6307\u6807\u7531\u4e3b\u884c\u60c5\u5e93\u548c\u7edf\u4e00\u8c03\u5ea6\u7ef4\u62a4\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   dailyPlan: "\u6bcf\u65e5\u6536\u76d8\u9009\u80a1",
   paper: "\u591a\u8d26\u6237\u6a21\u62df",
   selectTemplate: "\u9009\u62e9\u6a21\u677f",
@@ -375,9 +374,8 @@ export function StockPoolsPage() {
           <p className="stock-pools-note">{t.note}</p>
         </div>
         <div className="stock-pools-header-actions">
-          <a className="secondary-link" href="/stock-pools" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
-          <a className="secondary-link" href="#/trading/daily-plan"><ExternalLink size={14} />{t.dailyPlan}</a>
-          <a className="secondary-link" href="#/trading/paper"><ExternalLink size={14} />{t.paper}</a>
+          <a className="secondary-link" href="/trading/daily-plan"><ExternalLink size={14} />{t.dailyPlan}</a>
+          <a className="secondary-link" href="/trading/paper"><ExternalLink size={14} />{t.paper}</a>
         </div>
       </div>
 

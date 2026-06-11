@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from overnight_bt.main_universe import MainUniverseSaveRequest, save_main_universe
+from overnight_bt.market_data_store import upsert_feature_rows
 from overnight_bt.app import (
     admin_stock_indicator_compute_api,
     admin_stock_daily_collect_api,
@@ -20,9 +21,10 @@ from overnight_bt.app import (
     admin_stock_daily_today_api,
     admin_page,
     daily_plan_api,
+    daily_plan_page,
     export_backtest_api,
     export_backtest_table_api,
-    index,
+    portfolio_console_page,
     paper_template_api,
     paper_template_delete_api,
     paper_template_manager_page,
@@ -31,6 +33,7 @@ from overnight_bt.app import (
     run_backtest_api,
     run_signal_quality_api,
     run_single_stock_api,
+    single_stock_page,
     sector_research_page,
     stock_pool_template_delete_api,
     stock_pool_template_page,
@@ -39,6 +42,7 @@ from overnight_bt.app import (
     stock_pool_template_validate_api,
     stock_pool_update_job_api,
     stock_pool_update_jobs_api,
+    users_page,
     sector_overview_api,
 )
 from overnight_bt.models import (
@@ -53,158 +57,33 @@ from overnight_bt.models import (
     StockPoolTemplateSaveRequest,
     StockPoolValidateRequest,
 )
-from tests.helpers import make_processed_stock, write_processed_dir, write_stock_pool_db, write_stock_pool_template_symbols_db
+from tests.helpers import make_processed_stock, write_stock_pool_db, write_stock_pool_template_symbols_db
 
 
 class ApiIntegrationTest(unittest.TestCase):
-    def test_backtest_frontend_payload_isolates_signal_quality_from_account_fields(self) -> None:
-        import shutil
-        import subprocess
+    def assert_console_html(self, html: str) -> None:
+        self.assertIn('<div id="root"></div>', html)
+        self.assertIn('/static/console/assets/', html)
+        self.assertIn('T_0 \u91cf\u5316\u63a7\u5236\u53f0', html)
 
-        if shutil.which("node") is None:
-            self.skipTest("node is not available")
-        repo_root = Path(__file__).resolve().parents[1]
-        script = """
-const fs = require("fs");
-const vm = require("vm");
-const code = fs.readFileSync("static/app.js", "utf8");
-const noop = () => {};
-const ids = [
-  "btForm", "runBtn", "exportBtn", "downloadPickRowsBtn", "downloadTradeRowsBtn", "exitMode", "exitOffset",
-  "exitOffsetField", "status", "summaryGrid", "equityChart", "pickTable", "tradeTable", "contributionTable",
-  "conditionTable", "topKTable", "rankTable", "yearTable", "monthTable", "exitReasonTable", "openPositionTable",
-  "pendingSellTable", "diagText", "strategyPreset", "backtestPoolUser", "stockPoolTemplateSelect", "reloadBacktestPoolsBtn",
-  "startDate", "endDate", "buyCondition", "sellCondition", "scoreExpression", "topN", "initialCash", "perTradeBudget",
-  "entryOffset", "minHoldDays", "maxHoldDays", "lotSize", "buyFeeRate", "sellFeeRate", "stampTaxSell",
-  "realisticExecution", "settlementMode", "slippageBps", "minCommission"
-];
-const defaults = {
-  stockPoolTemplateSelect: "新能源行业",
-  startDate: "20230101",
-  endDate: "20260518",
-  buyCondition: "m120>0.02",
-  sellCondition: "m20<0.08",
-  scoreExpression: "m20",
-  topN: "2",
-  initialCash: "100000",
-  perTradeBudget: "20000",
-  entryOffset: "1",
-  exitOffset: "5",
-  minHoldDays: "3",
-  maxHoldDays: "15",
-  lotSize: "100",
-  buyFeeRate: "0.00003",
-  sellFeeRate: "0.00003",
-  stampTaxSell: "0",
-  realisticExecution: "true",
-  settlementMode: "cutoff",
-  slippageBps: "3",
-  minCommission: "0",
-  exitMode: "sell_condition_with_fallback",
-  strategyPreset: "base",
-};
-const elements = new Map();
-function makeElement(id) {
-  const children = [];
-  return {
-    id,
-    textContent: "",
-    innerHTML: "",
-    value: defaults[id] || "",
-    checked: false,
-    disabled: false,
-    hidden: false,
-    style: {},
-    dataset: {},
-    options: children,
-    classList: { toggle: noop, contains: () => false },
-    closest: () => null,
-    querySelector: () => null,
-    appendChild: (child) => { children.push(child); return child; },
-    remove: noop,
-    focus: noop,
-    scrollIntoView: noop,
-    addEventListener: noop,
-  };
-}
-function element(id) {
-  if (!elements.has(id)) elements.set(id, makeElement(id));
-  return elements.get(id);
-}
-for (const id of ids) element(id);
-const modeInputs = [
-  { value: "signal_quality", checked: true, addEventListener: noop, closest: () => ({ classList: { toggle: noop } }) },
-  { value: "account", checked: false, addEventListener: noop, closest: () => ({ classList: { toggle: noop } }) },
-];
-const context = {
-  document: {
-    getElementById: element,
-    querySelectorAll: (selector) => selector === 'input[name="backtestMode"]' ? modeInputs : [],
-    createElement: () => makeElement("created"),
-    body: { appendChild: noop, classList: { toggle: noop } },
-  },
-  window: { setTimeout: noop },
-  Option: function Option(label, value) { return { label, value }; },
-  fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ templates: [{ template_name: "新能源行业", stock_count: 4 }] }) }),
-  URL: { createObjectURL: () => "blob:test", revokeObjectURL: noop },
-  Number, String, Math, Set, Array, console,
-};
-vm.createContext(context);
-vm.runInContext(code, context);
-const signalPayload = context.buildPayload("signal_quality");
-const accountPayload = context.buildPayload("account");
-for (const key of ["initial_cash", "per_trade_budget", "lot_size", "min_commission"]) {
-  if (Object.prototype.hasOwnProperty.call(signalPayload, key)) {
-    throw new Error(`signal quality payload should not include ${key}`);
-  }
-  if (!Object.prototype.hasOwnProperty.call(accountPayload, key)) {
-    throw new Error(`account payload should include ${key}`);
-  }
-}
-if (accountPayload.per_trade_budget !== 20000) {
-  throw new Error("account budget was not preserved");
-}
-"""
-        result = subprocess.run(["node", "-e", script], cwd=repo_root, capture_output=True, text=True, check=False)
-        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-
-    def test_backtest_page_has_stock_pool_entry_and_excel_buttons(self) -> None:
-        html = index()
-        self.assertIn("/stock-pools", html)
-        self.assertIn("股票池模板", html)
-        self.assertIn("downloadPickRowsBtn", html)
-        self.assertIn("downloadTradeRowsBtn", html)
-        self.assertIn("tradePanelTitle", html)
-        self.assertIn("tradePanelNote", html)
-
-        js = (Path(__file__).resolve().parents[1] / "static" / "app.js").read_text(encoding="utf-8")
-        self.assertIn("document.body.appendChild(a)", js)
-        self.assertIn("URL.revokeObjectURL(url)", js)
-        self.assertIn("SIGNAL_TRADE_TABLE_COLUMNS", js)
-        self.assertIn("ACCOUNT_TRADE_TABLE_COLUMNS", js)
-        self.assertIn("信号质量回测_信号样本流水", js)
-        self.assertIn("实盘账户回测_真实交易流水", js)
-        self.assertIn("固定100股样本流水", js)
-        self.assertIn("真实交易流水", js)
-
-    def test_paper_pages_render_expected_entry_points(self) -> None:
-        paper_html = paper_trading_page()
-        template_html = paper_template_manager_page()
-        self.assertIn("/paper/templates", paper_html)
-        self.assertIn("/static/paper_templates.js", template_html)
-        self.assertIn("账户模板管理", template_html)
+    def test_console_page_routes_render_react_shell(self) -> None:
+        with patch("overnight_bt.app.ensure_default_stock_pool_templates"):
+            pages = [
+                portfolio_console_page(),
+                single_stock_page(),
+                daily_plan_page(),
+                paper_trading_page(),
+                paper_template_manager_page(),
+                stock_pool_template_page(),
+                admin_page(),
+                users_page(),
+                sector_research_page(),
+            ]
+        for html in pages:
+            self.assert_console_html(html)
 
     def test_sector_page_and_api_default_to_sqlite_source(self) -> None:
-        html = sector_research_page()
-        self.assertIn("SQLite 主库", html)
-        self.assertNotIn("sectorProcessedDir", html)
-        self.assertNotIn("sectorReportDir", html)
-
-        js = (Path(__file__).resolve().parents[1] / "static" / "sector.js").read_text(encoding="utf-8")
-        self.assertIn('source: "sqlite"', js)
-        self.assertIn('new URLSearchParams({ source: defaults.source })', js)
-        self.assertNotIn("processed_dir: processedDir", js)
-        self.assertNotIn("report_dir: reportDir", js)
+        self.assert_console_html(sector_research_page())
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("overnight_bt.app.BASE_DIR", Path(tmpdir)):
@@ -219,31 +98,11 @@ if (accountPayload.per_trade_budget !== 20000) {
             stock_pool_html = stock_pool_template_page()
             admin_html = admin_page()
 
-        self.assertIn("/static/stock_pools.js", stock_pool_html)
-        self.assertIn("/static/admin.js", admin_html)
+        self.assert_console_html(stock_pool_html)
+        self.assert_console_html(admin_html)
 
     def test_stock_pool_page_and_validation_api(self) -> None:
-        html = stock_pool_template_page()
-        self.assertIn("/static/stock_pools.js", html)
-        self.assertIn("股票池模板管理", html)
-        self.assertIn("模板只保存股票集合", html)
-        self.assertNotIn("stockPoolAdminPanel", html)
-        self.assertNotIn("refreshPoolDataBtn", html)
-        self.assertNotIn("reloadPoolJobsBtn", html)
-        self.assertNotIn("模板数据刷新", html)
-        self.assertNotIn("最近任务状态", html)
-
-        js = (Path(__file__).resolve().parents[1] / "static" / "stock_pools.js").read_text(encoding="utf-8")
-        for forbidden in [
-            "/api/stock-pools/template/refresh",
-            "/api/stock-pools/jobs",
-            "refreshCurrentPoolData",
-            "loadPoolJobs",
-            "stockPoolAdminPanel",
-            "refreshPoolDataBtn",
-            "reloadPoolJobsBtn",
-        ]:
-            self.assertNotIn(forbidden, js)
+        self.assert_console_html(stock_pool_template_page())
 
         with tempfile.TemporaryDirectory() as tmpdir:
             market_db_path = Path(tmpdir) / "market_data.sqlite"
@@ -264,16 +123,7 @@ if (accountPayload.per_trade_budget !== 20000) {
         self.assertEqual(validation["invalid_items"], ["xxx(不在主股票池)"])
 
     def test_admin_page_and_stock_data_api(self) -> None:
-        html = admin_page()
-        self.assertIn("/static/admin.js", html)
-        self.assertIn("系统管理员", html)
-        for button_id in [
-            "collectTodayDailyBtn",
-            "computeTodayIndicatorsBtn",
-            "collectRangeDailyBtn",
-            "computeRangeIndicatorsBtn",
-        ]:
-            self.assertIn(button_id, html)
+        self.assert_console_html(admin_page())
 
         fake_summary = {"status": "success", "job_type": "admin_daily_collect", "stock_count": 0, "items": []}
         with patch("overnight_bt.app.ensure_default_stock_pool_templates") as seed_mock, patch(
@@ -452,26 +302,8 @@ if (accountPayload.per_trade_budget !== 20000) {
         self.assertEqual(universe["count"], 1)
         self.assertEqual(universe["rows"][0]["symbol"], "000001")
 
-    def test_admin_operations_page_static_contract(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        html = admin_page()
-        js = (repo_root / "static" / "admin.js").read_text(encoding="utf-8")
-
-        for forbidden in ["模板数据", "刷新指定股票池模板", "最近数据任务"]:
-            self.assertNotIn(forbidden, html)
-        for expected in ["核心任务状态", "主股票池维护", "任务运行记录", "安全重跑"]:
-            self.assertIn(expected, html)
-        for endpoint in [
-            "/api/admin/overview",
-            "/api/admin/main-universe",
-            "/api/admin/main-universe/resolve",
-            "/api/admin/main-universe/save",
-            "/api/admin/scheduler/runs",
-            "/api/admin/scheduler/runs/",
-        ]:
-            self.assertIn(endpoint, js)
-        self.assertNotIn("/api/stock-pools/template/refresh", js)
-        self.assertNotIn("/api/stock-pools/jobs", js)
+    def test_admin_operations_page_uses_console_shell(self) -> None:
+        self.assert_console_html(admin_page())
 
     def test_admin_scheduler_retry_http_rejects_non_failed_runs(self) -> None:
         from fastapi.testclient import TestClient
@@ -492,13 +324,20 @@ if (accountPayload.per_trade_budget !== 20000) {
         self.assertEqual(response.status_code, 400, msg=response.text)
         self.assertIn("只有失败", response.json()["detail"])
 
-    def test_admin_universe_parser_strips_exchange_suffix_from_name(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
-        js = (repo_root / "static" / "admin.js").read_text(encoding="utf-8")
+    def test_main_universe_save_normalizes_exchange_suffix_from_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "market_data.sqlite"
+            result = save_main_universe(
+                MainUniverseSaveRequest(
+                    mode="append",
+                    rows=[{"symbol": "000001.SZ", "name": "Ping An Bank"}],
+                ),
+                db_path=db_path,
+            )
 
-        self.assertIn(r"/\b(\d{6})(?:\.(?:SZ|SH|BJ))?\b/i", js)
-        self.assertIn("const symbol = symbolMatch[1];", js)
-        self.assertIn("replace(symbolMatch[0]", js)
+        self.assertEqual(result["saved_count"], 1)
+        self.assertEqual(result["saved"][0]["symbol"], "000001")
+        self.assertEqual(result["saved"][0]["ts_code"], "000001.SZ")
 
     def test_stock_pool_template_api_save_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -625,10 +464,21 @@ if (accountPayload.per_trade_budget !== 20000) {
                     {"trade_date": "20240104", "raw_open": 10.8, "raw_high": 10.9, "raw_low": 10.7, "raw_close": 10.8, "m5": 0.0, "m20": 0.6, "can_buy_t": False, "can_buy_open_t": True, "can_sell_t": True, "can_sell_t1": True, "is_suspended_t": False, "is_suspended_t1": False},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock])
+            template_db = write_stock_pool_template_symbols_db(
+                base / "stock_pool.sqlite",
+                "api_pool",
+                [{"symbol": "000001", "stock_name": "Alpha Bank"}],
+                username="api_user",
+            )
+            market_db = base / "market_data.sqlite"
+            upsert_feature_rows(stock.to_dict("records"), db_path=market_db)
             payload = BacktestRequest(
-                data_source="csv",
-                processed_dir=str(processed_dir),
+                data_source="stock_pool",
+                processed_dir="",
+                stock_pool_username="api_user",
+                stock_pool_template_name="api_pool",
+                stock_pool_db_path=str(template_db),
+                stock_pool_market_db_path=str(market_db),
                 start_date="20240102",
                 end_date="20240102",
                 buy_condition="m20>0",
@@ -673,12 +523,20 @@ if (accountPayload.per_trade_budget !== 20000) {
             table_response = export_backtest_table_api(payload, mode="account", table="trade_rows")
             self.assertEqual(table_response.status_code, 200)
             self.assertEqual(table_response.media_type, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            exported = pd.read_excel(BytesIO(table_response.body))
-            self.assertEqual(exported.columns.tolist(), ["交易日期", "信号日期", "股票代码", "股票名称", "排名", "评分", "动作", "价格", "价格口径", "股数", "盈亏", "执行说明"])
+            sheets = pd.read_excel(BytesIO(table_response.body), sheet_name=None)
+            self.assertIn("口径说明", sheets)
+            exported = None
+            for sheet_name in ["真实交易流水", "交易流水"]:
+                if sheet_name in sheets:
+                    exported = sheets[sheet_name]
+                    break
+            self.assertIsNotNone(exported)
+            assert exported is not None
+            for column in ["交易日期", "信号日期", "股票代码", "股票名称", "动作", "价格", "股数", "盈亏"]:
+                self.assertIn(column, exported.columns.tolist())
 
 
     def test_api_run_with_stock_pool_template_source(self) -> None:
-        from overnight_bt.market_data_store import upsert_feature_rows
 
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
@@ -752,7 +610,6 @@ if (accountPayload.per_trade_budget !== 20000) {
             self.assertGreater(len(export_response.body), 100)
 
     def test_stock_pool_template_reads_market_data_without_template_features(self) -> None:
-        from overnight_bt.market_data_store import upsert_feature_rows
 
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
@@ -857,11 +714,25 @@ if (accountPayload.per_trade_budget !== 20000) {
                     {"trade_date": "20240103", "raw_open": 20.2, "raw_high": 20.4, "raw_low": 20.0, "raw_close": 20.3, "m5": 0.2, "m20": 0.9, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True, "is_suspended_t": False, "is_suspended_t1": False},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock_a, stock_b])
+            template_db = write_stock_pool_template_symbols_db(
+                base / "stock_pool.sqlite",
+                "api_pool",
+                [
+                    {"symbol": "000001", "stock_name": "Alpha Bank"},
+                    {"symbol": "000002", "stock_name": "Beta A"},
+                ],
+                username="api_user",
+            )
+            market_db = base / "market_data.sqlite"
+            upsert_feature_rows(stock_a.to_dict("records") + stock_b.to_dict("records"), db_path=market_db)
             body = daily_plan_api(
                 DailyPlanRequest(
-                    data_source="csv",
-                    processed_dir=str(processed_dir),
+                    data_source="stock_pool",
+                    processed_dir="",
+                    stock_pool_username="api_user",
+                    stock_pool_template_name="api_pool",
+                    stock_pool_db_path=str(template_db),
+                    stock_pool_market_db_path=str(market_db),
                     signal_date="20240103",
                     buy_condition="m20>0",
                     sell_condition="holding_return>0.05",
@@ -878,7 +749,6 @@ if (accountPayload.per_trade_budget !== 20000) {
             self.assertEqual(body["sell_rows"][0]["symbol"], "000001")
 
     def test_daily_plan_api_with_stock_pool_template_source(self) -> None:
-        from overnight_bt.market_data_store import upsert_feature_rows
 
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
@@ -957,11 +827,25 @@ if (accountPayload.per_trade_budget !== 20000) {
                     {"trade_date": "20240105", "raw_open": 20.5, "raw_high": 20.8, "raw_low": 20.4, "raw_close": 20.7, "m5": 0.1, "m20": 0.21, "can_buy_open_t": True, "can_sell_t": True},
                 ],
             )
-            processed_dir = write_processed_dir(base, [stock_a, stock_b])
+            template_db = write_stock_pool_template_symbols_db(
+                base / "stock_pool.sqlite",
+                "api_pool",
+                [
+                    {"symbol": "000001", "stock_name": "Alpha Bank"},
+                    {"symbol": "000002", "stock_name": "Beta A"},
+                ],
+                username="api_user",
+            )
+            market_db = base / "market_data.sqlite"
+            upsert_feature_rows(stock_a.to_dict("records") + stock_b.to_dict("records"), db_path=market_db)
             body = run_signal_quality_api(
                 SignalQualityRequest(
-                    data_source="csv",
-                    processed_dir=str(processed_dir),
+                    data_source="stock_pool",
+                    processed_dir="",
+                    stock_pool_username="api_user",
+                    stock_pool_template_name="api_pool",
+                    stock_pool_db_path=str(template_db),
+                    stock_pool_market_db_path=str(market_db),
                     start_date="20240102",
                     end_date="20240102",
                     buy_condition="m20>0",
@@ -992,40 +876,54 @@ if (accountPayload.per_trade_budget !== 20000) {
 
     def test_single_stock_api_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            excel_path = Path(tmpdir) / "000001_平安银行.xlsx"
-            pd.DataFrame(
+            base = Path(tmpdir)
+            stock = make_processed_stock(
+                "000001",
+                "Alpha Bank",
                 [
-                    {"trade_date": "20240102", "open": 10.0, "high": 10.2, "low": 9.9, "close": 10.1, "vol": 1000, "m20": 0.2, "m5": 0.1},
-                    {"trade_date": "20240103", "open": 10.3, "high": 10.5, "low": 10.2, "close": 10.4, "vol": 1100, "m20": 0.1, "m5": 0.1},
-                    {"trade_date": "20240104", "open": 10.6, "high": 10.7, "low": 10.4, "close": 10.5, "vol": 1200, "m20": -0.1, "m5": -0.1},
-                    {"trade_date": "20240105", "open": 10.2, "high": 10.3, "low": 10.0, "close": 10.1, "vol": 1300, "m20": -0.2, "m5": -0.2},
-                ]
-            ).to_excel(excel_path, index=False)
-
-            body = run_single_stock_api(
-                SingleStockBacktestRequest(
-                    excel_path=str(excel_path),
-                    start_date="20240102",
-                    end_date="20240105",
-                    buy_condition="m20>0",
-                    sell_condition="m20<0",
-                    buy_confirm_days=1,
-                    buy_cooldown_days=0,
-                    sell_confirm_days=1,
-                    initial_cash=100000,
-                    per_trade_budget=10000,
-                    lot_size=100,
-                    execution_timing="next_day_open",
-                    buy_fee_rate=0.0,
-                    sell_fee_rate=0.0,
-                    stamp_tax_sell=0.0,
-                )
+                    {"trade_date": "20240102", "raw_open": 10.0, "raw_high": 10.2, "raw_low": 9.9, "raw_close": 10.1, "vol": 1000, "m20": 0.2, "m5": 0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240103", "raw_open": 10.3, "raw_high": 10.5, "raw_low": 10.2, "raw_close": 10.4, "vol": 1100, "m20": 0.1, "m5": 0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240104", "raw_open": 10.6, "raw_high": 10.7, "raw_low": 10.4, "raw_close": 10.5, "vol": 1200, "m20": -0.1, "m5": -0.1, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True},
+                    {"trade_date": "20240105", "raw_open": 10.2, "raw_high": 10.3, "raw_low": 10.0, "raw_close": 10.1, "vol": 1300, "m20": -0.2, "m5": -0.2, "can_buy_t": True, "can_buy_open_t": True, "can_sell_t": True},
+                ],
             )
-            self.assertEqual(body["stock_code"], "000001")
-            self.assertIn("summary", body)
-            self.assertEqual(len(body["trade_rows"]), 2)
-            self.assertEqual(len(body["signal_rows"]), 4)
-            self.assertGreater(len(body["metric_definitions"]), 0)
+            template_db = write_stock_pool_template_symbols_db(
+                base / "stock_pool.sqlite",
+                "api_pool",
+                [{"symbol": "000001", "stock_name": "Alpha Bank"}],
+                username="api_user",
+            )
+            market_db = base / "market_data.sqlite"
+            upsert_feature_rows(stock.to_dict("records"), db_path=market_db)
+
+            with patch("overnight_bt.market_data_store.DEFAULT_DB_PATH", market_db):
+                body = run_single_stock_api(
+                    SingleStockBacktestRequest(
+                        symbol="000001",
+                        stock_pool_username="api_user",
+                        stock_pool_template_name="api_pool",
+                        stock_pool_db_path=str(template_db),
+                        start_date="20240102",
+                        end_date="20240105",
+                        buy_condition="m20>0",
+                        sell_condition="m20<0",
+                        buy_confirm_days=1,
+                        buy_cooldown_days=0,
+                        sell_confirm_days=1,
+                        initial_cash=100000,
+                        per_trade_budget=10000,
+                        lot_size=100,
+                        execution_timing="next_day_open",
+                        buy_fee_rate=0.0,
+                        sell_fee_rate=0.0,
+                        stamp_tax_sell=0.0,
+                    )
+                )
+        self.assertEqual(body["stock_code"], "000001")
+        self.assertIn("summary", body)
+        self.assertEqual(len(body["trade_rows"]), 2)
+        self.assertEqual(len(body["signal_rows"]), 4)
+        self.assertGreater(len(body["metric_definitions"]), 0)
 
 
 if __name__ == "__main__":

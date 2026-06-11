@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { LogoMark, navGroups } from "../navigation/menu";
 import type { CurrentUser } from "./ConsoleShell";
 
@@ -24,6 +24,7 @@ export function Sidebar({ collapsed, currentUser }: SidebarProps) {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
     Object.fromEntries(navGroups.map((group) => [group.id, true]))
   );
+  const location = useLocation();
   const isAdmin = isAdminUser(currentUser);
   const visibleGroups = useMemo(
     () => navGroups
@@ -71,7 +72,9 @@ export function Sidebar({ collapsed, currentUser }: SidebarProps) {
                 <div className="nav-items">
                   {group.items.map((item) => (
                     <NavLink
-                      className={({ isActive }) => (isActive ? "nav-item nav-item-active" : "nav-item")}
+                      className={({ isActive }) =>
+                        (isActive || item.aliases?.includes(location.pathname) ? "nav-item nav-item-active" : "nav-item")
+                      }
                       key={item.path}
                       title={collapsed ? item.label : undefined}
                       to={item.path}

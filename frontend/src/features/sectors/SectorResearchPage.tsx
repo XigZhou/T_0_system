@@ -51,7 +51,6 @@ const t = {
   title: "\u677f\u5757\u7814\u7a76\u5de5\u4f5c\u53f0",
   eyebrow: "Sector Research",
   note: "\u8bfb\u53d6 SQLite \u4e3b\u5e93\u4e2d\u7684\u677f\u5757\u7814\u7a76\u6570\u636e\uff0c\u67e5\u770b\u4e3b\u9898\u6392\u540d\u3001\u5f3a\u52bf\u677f\u5757\u3001\u4e2a\u80a1\u66b4\u9732\u548c\u5f02\u5e38\u8bb0\u5f55\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   portfolio: "\u7ec4\u5408\u56de\u6d4b",
   load: "\u8bfb\u53d6\u677f\u5757\u7814\u7a76",
   reading: "\u8bfb\u53d6\u4e2d...",
@@ -259,8 +258,7 @@ export function SectorResearchPage() {
           <p className="sector-note">{t.note}</p>
         </div>
         <div className="sector-header-actions">
-          <a className="secondary-link" href="/sector" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
-          <a className="secondary-link" href="#/backtests/portfolio"><ExternalLink size={14} />{t.portfolio}</a>
+          <a className="secondary-link" href="/backtests/portfolio"><ExternalLink size={14} />{t.portfolio}</a>
         </div>
       </div>
 

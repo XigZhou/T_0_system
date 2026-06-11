@@ -34,7 +34,6 @@ const t = {
   title: "\u591a\u8d26\u6237\u6a21\u62df\u4ea4\u6613",
   eyebrow: "Paper Trading",
   note: "\u8bfb\u53d6\u6a21\u62df\u8d26\u6237\u6a21\u677f\u548c SQLite \u8d26\u672c\uff0c\u539f API \u884c\u4e3a\u4fdd\u6301\u4e0d\u53d8\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   templates: "\u6a21\u677f\u7ba1\u7406",
   accountTemplate: "\u6a21\u62df\u8d26\u6237\u6a21\u677f",
   action: "\u6267\u884c\u52a8\u4f5c",
@@ -286,8 +285,7 @@ export function PaperTradingPage() {
           <p className="paper-note">{t.note}</p>
         </div>
         <div className="paper-header-actions">
-          <a className="secondary-link" href="/paper" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
-          <a className="secondary-link" href="#/portfolio/paper-templates"><ExternalLink size={14} />{t.templates}</a>
+          <a className="secondary-link" href="/portfolio/paper-templates"><ExternalLink size={14} />{t.templates}</a>
         </div>
       </div>
 

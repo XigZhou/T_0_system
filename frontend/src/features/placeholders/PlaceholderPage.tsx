@@ -2,7 +2,6 @@ type PlaceholderPageProps = {
   title: string;
   eyebrow: string;
   description: string;
-  legacyPath?: string;
 };
 
 const placeholderMetrics = [
@@ -12,7 +11,7 @@ const placeholderMetrics = [
   ["数据库", "不修改"]
 ];
 
-export function PlaceholderPage({ title, eyebrow, description, legacyPath }: PlaceholderPageProps) {
+export function PlaceholderPage({ title, eyebrow, description }: PlaceholderPageProps) {
   return (
     <div className="placeholder-page">
       <div className="page-header">
@@ -20,11 +19,6 @@ export function PlaceholderPage({ title, eyebrow, description, legacyPath }: Pla
           <p className="page-eyebrow">{eyebrow}</p>
           <h1>{title}</h1>
         </div>
-        {legacyPath && (
-          <a className="secondary-link" href={legacyPath}>
-            打开旧版页面
-          </a>
-        )}
       </div>
 
       <section className="run-surface">
@@ -53,8 +47,8 @@ export function PlaceholderPage({ title, eyebrow, description, legacyPath }: Pla
           </div>
           <ul className="scope-list">
             <li>建立 React 控制台壳层和中文导航。</li>
-            <li>使用 HashRouter 保持刷新后的页面路径。</li>
-            <li>保留旧页面入口，方便并行验证。</li>
+            <li>使用 BrowserRouter 支持干净页面路径。</li>
+            <li>保留 /single、/daily 等兼容短路径，统一进入新控制台。</li>
             <li>后续逐页迁移表单、图表、表格和 API 调用。</li>
           </ul>
         </div>
@@ -79,7 +73,7 @@ export function PlaceholderPage({ title, eyebrow, description, legacyPath }: Pla
                   <td>不修改</td>
                 </tr>
                 <tr>
-                  <th>旧前端</th>
+                  <th>兼容短路径</th>
                   <td>保留</td>
                 </tr>
               </tbody>

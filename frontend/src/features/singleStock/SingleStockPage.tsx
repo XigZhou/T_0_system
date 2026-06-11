@@ -47,7 +47,6 @@ const t = {
   title: "\u5355\u80a1\u56de\u6d4b",
   eyebrow: "Single Stock Backtest",
   note: "\u8f93\u5165\u5355\u53ea\u80a1\u7968\uff0c\u67e5\u770b K \u7ebf\u3001\u4e70\u5356\u70b9\u3001\u4ea4\u6613\u65e5\u5fd7\u548c\u6bcf\u65e5\u4fe1\u53f7\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   portfolio: "\u7ec4\u5408\u56de\u6d4b",
   run: "\u8fd0\u884c\u5355\u80a1\u56de\u6d4b",
   running: "\u8fd0\u884c\u4e2d...",
@@ -282,8 +281,7 @@ export function SingleStockPage() {
           <p className="single-note">{t.note}</p>
         </div>
         <div className="single-header-actions">
-          <a className="secondary-link" href="/single" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
-          <a className="secondary-link" href="#/backtests/portfolio"><ExternalLink size={14} />{t.portfolio}</a>
+          <a className="secondary-link" href="/backtests/portfolio"><ExternalLink size={14} />{t.portfolio}</a>
         </div>
       </div>
 

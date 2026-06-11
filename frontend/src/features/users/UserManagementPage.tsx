@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, KeyRound, RefreshCw, ShieldAlert, UserCheck, UserX } from "lucide-react";
+import { KeyRound, RefreshCw, ShieldAlert, UserCheck, UserX } from "lucide-react";
 import "./userManagement.css";
 
 type CurrentUser = { username?: string; display_name?: string; role?: string; is_admin?: boolean };
@@ -18,7 +18,6 @@ const txt = {
   title: "\u7528\u6237\u7ba1\u7406",
   eyebrow: "\u7cfb\u7edf\u6743\u9650",
   note: "\u7ba1\u7406\u666e\u901a\u7528\u6237\u72b6\u6001\u548c\u5bc6\u7801\u91cd\u7f6e\uff1b\u8be5\u9875\u9762\u4ec5 admin \u53ef\u89c1\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   refresh: "\u5237\u65b0\u7528\u6237",
   checking: "\u6b63\u5728\u6821\u9a8c\u767b\u5f55\u7528\u6237\u3002",
   denied: "\u53ea\u6709 admin \u7528\u6237\u53ef\u4ee5\u67e5\u770b\u7528\u6237\u7ba1\u7406\u3002",
@@ -200,7 +199,6 @@ export function UserManagementPage() {
           <p className="user-management-note">{txt.note}</p>
         </div>
         <div className="user-management-actions">
-          <a className="secondary-link" href="/users" target="_blank" rel="noreferrer"><ExternalLink size={14} />{txt.oldPage}</a>
           <button className="secondary-link" type="button" disabled={busy} onClick={() => void loadUsers(true)}><RefreshCw size={14} />{txt.refresh}</button>
         </div>
       </div>

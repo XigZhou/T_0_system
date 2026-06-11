@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eraser, ExternalLink, Play, RefreshCw } from "lucide-react";
+import { Eraser, Play, RefreshCw } from "lucide-react";
 import { formatHeader, formatValue } from "../backtests/format";
 import "./dailyPlan.css";
 
@@ -34,7 +34,6 @@ const t = {
   title: "\u6bcf\u65e5\u6536\u76d8\u9009\u80a1",
   eyebrow: "Daily Close Plan",
   note: "\u6536\u76d8\u540e\u751f\u6210\u660e\u65e5\u5019\u9009\u4e70\u5165\u548c\u5356\u51fa\u63d0\u9192\uff0c\u7ed3\u679c\u53e3\u5f84\u6cbf\u7528\u65e7 API\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   reload: "\u5237\u65b0\u6a21\u677f",
   run: "\u751f\u6210\u660e\u65e5\u8ba1\u5212",
   running: "\u751f\u6210\u4e2d...",
@@ -234,7 +233,6 @@ export function DailyPlanPage() {
           <p className="daily-note">{t.note}</p>
         </div>
         <div className="daily-header-actions">
-          <a className="secondary-link" href="/daily" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
           <button className="secondary-link" type="button" onClick={() => void loadTemplates(true, username)}><RefreshCw size={14} />{t.reload}</button>
         </div>
       </div>

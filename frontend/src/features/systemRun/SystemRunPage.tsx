@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, Play, RefreshCw, RotateCcw, Save, Search, ShieldAlert } from "lucide-react";
+import { Play, RefreshCw, RotateCcw, Save, Search, ShieldAlert } from "lucide-react";
 import "./systemRun.css";
 
 type User = { username?: string; display_name?: string; role?: string; is_admin?: boolean };
@@ -14,7 +14,6 @@ const txt = {
   title: "\u7cfb\u7edf\u7ef4\u62a4",
   eyebrow: "Operations",
   note: "\u96c6\u4e2d\u67e5\u770b\u6838\u5fc3\u4efb\u52a1\u3001\u4e3b\u80a1\u7968\u6c60\u548c\u8c03\u5ea6\u8fd0\u884c\u8bb0\u5f55\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   refreshOverview: "\u5237\u65b0\u603b\u89c8",
   refreshRuns: "\u5237\u65b0\u8fd0\u884c\u8bb0\u5f55",
   refreshUniverse: "\u5237\u65b0\u4e3b\u80a1\u7968\u6c60",
@@ -372,7 +371,6 @@ export function SystemRunPage() {
           <p className="system-run-note">{txt.note}</p>
         </div>
         <div className="system-run-header-actions">
-          <a className="secondary-link" href="/admin" target="_blank" rel="noreferrer"><ExternalLink size={14} />{txt.oldPage}</a>
           <button className="secondary-link" type="button" disabled={busy} onClick={() => void loadOverview(true)}><RefreshCw size={14} />{txt.refreshOverview}</button>
           <button className="secondary-link" type="button" disabled={busy} onClick={() => void loadSchedulerRuns(true)}><RotateCcw size={14} />{txt.refreshRuns}</button>
           <button className="secondary-link" type="button" disabled={busy} onClick={() => void loadMainUniverse(true)}><RotateCcw size={14} />{txt.refreshUniverse}</button>

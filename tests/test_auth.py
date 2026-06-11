@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import sqlite3
 from pathlib import Path
 
@@ -182,7 +183,7 @@ def test_static_html_pages_cannot_bypass_page_auth(tmp_path: Path, monkeypatch) 
     app_module.auth.init_auth_db(db_path=db_path)
     client = TestClient(app_module.app)
 
-    response = client.get("/static/index.html", follow_redirects=False)
+    response = client.get("/static/console/index.html", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/login"
 
@@ -191,8 +192,26 @@ def test_static_html_pages_cannot_bypass_page_auth(tmp_path: Path, monkeypatch) 
 
     register = client.post("/api/auth/register", json={"username": "alice", "password": "StrongPass123"})
     assert register.status_code == 200
-    admin_static = client.get("/static/admin.html")
-    assert admin_static.status_code == 403
+
+    console_static = client.get("/static/console/index.html")
+    assert console_static.status_code == 200
+    assert "/static/console/assets/" in console_static.text
+
+    admin_route = client.get("/system/admin")
+    assert admin_route.status_code == 403
+
+    for old_page in [
+        "/static/index.html",
+        "/static/single.html",
+        "/static/daily.html",
+        "/static/paper.html",
+        "/static/paper_templates.html",
+        "/static/stock_pools.html",
+        "/static/admin.html",
+        "/static/users.html",
+        "/static/sector.html",
+    ]:
+        assert client.get(old_page).status_code == 404
 
 
 def test_api_requires_login(tmp_path: Path, monkeypatch) -> None:
@@ -213,36 +232,57 @@ def test_auth_static_pages_have_expected_scripts() -> None:
     root = Path(__file__).resolve().parents[1]
     login_html = (root / "static" / "login.html").read_text(encoding="utf-8")
     register_html = (root / "static" / "register.html").read_text(encoding="utf-8")
+    decoded_login_html = html.unescape(login_html)
+    decoded_register_html = html.unescape(register_html)
     assert "/api/auth/login" in login_html
-    assert "\u8fdb\u5165\u56de\u6d4b\u7cfb\u7edf" in login_html
-    assert "\u8fdb\u5165 T_0 \u56de\u6d4b\u7cfb\u7edf" not in login_html
+    assert "\u80a1\u6d4b\u901a" in decoded_login_html
+    assert "\u6b22\u8fce\u56de\u6765" in decoded_login_html
+    assert "\u8fdb\u5165 T_0 \u56de\u6d4b\u7cfb\u7edf" not in decoded_login_html
     assert "/api/auth/register" in register_html
-    assert "\u663e\u793a\u540d\u79f0" not in register_html
+    assert "\u521b\u5efa\u8d26\u6237" in decoded_register_html
+    assert "\u663e\u793a\u540d\u79f0" not in decoded_register_html
     assert "registerDisplayName" not in register_html
-    users_html = (root / "static" / "users.html").read_text(encoding="utf-8")
-    assert "/static/users.js" in users_html
-    assert "\u7528\u6237\u7ba1\u7406" in users_html
+    console_html = (root / "static" / "console" / "index.html").read_text(encoding="utf-8")
+    assert "/static/console/assets/" in console_html
+    assert "T_0 \u91cf\u5316\u63a7\u5236\u53f0" in console_html
 
 
 def test_auth_card_css_uses_compact_centered_layout() -> None:
     root = Path(__file__).resolve().parents[1]
     style_css = (root / "static" / "style.css").read_text(encoding="utf-8")
-    assert ".auth-page .shell" in style_css
-    assert "place-items: center;" in style_css
-    assert "max-width: 448px;" in style_css
+    assert "body.auth-page" in style_css
+    assert ".stock-auth-shell" in style_css
+    assert ".stock-auth-card" in style_css
     assert "width: min(100%, 448px);" in style_css
     assert "margin: 0 auto;" in style_css
-    assert "padding: 28px;" in style_css
-    assert "margin-top: 0;" in style_css
+    assert "background: var(--auth-blue);" in style_css
+    assert ".controls" not in style_css
+    assert ".panel" not in style_css
+    assert ".table-wrap" not in style_css
 
 
-def test_existing_pages_include_auth_helper_and_dynamic_user_badge() -> None:
+def test_old_business_static_pages_have_been_removed() -> None:
     root = Path(__file__).resolve().parents[1]
-    pages = ["index.html", "daily.html", "single.html", "paper.html", "paper_templates.html", "stock_pools.html", "admin.html", "sector.html", "users.html"]
-    for page in pages:
-        html = (root / "static" / page).read_text(encoding="utf-8")
-        assert "/static/auth.js" in html, page
-        assert "data-current-user" in html, page
-        assert "data-current-user>admin" not in html, page
-        assert ">admin</strong>" not in html, page
-        assert "data-logout" in html, page
+    old_files = [
+        "index.html",
+        "daily.html",
+        "single.html",
+        "paper.html",
+        "paper_templates.html",
+        "stock_pools.html",
+        "admin.html",
+        "sector.html",
+        "users.html",
+        "app.js",
+        "daily.js",
+        "single.js",
+        "paper.js",
+        "paper_templates.js",
+        "stock_pools.js",
+        "admin.js",
+        "sector.js",
+        "users.js",
+        "auth.js",
+    ]
+    for file_name in old_files:
+        assert not (root / "static" / file_name).exists(), file_name

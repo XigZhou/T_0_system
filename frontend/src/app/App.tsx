@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Fragment, type ReactNode } from "react";
+import { Route, Routes } from "react-router-dom";
 import { ConsoleShell } from "../shell/ConsoleShell";
 import { PortfolioBacktestPage } from "../features/backtests/PortfolioBacktestPage";
 import { DailyPlanPage } from "../features/daily/DailyPlanPage";
@@ -9,7 +10,6 @@ import { SingleStockPage } from "../features/singleStock/SingleStockPage";
 import { SectorResearchPage } from "../features/sectors/SectorResearchPage";
 import { SystemRunPage } from "../features/systemRun/SystemRunPage";
 import { UserManagementPage } from "../features/users/UserManagementPage";
-import { LegacyFrame } from "../features/legacy/LegacyFrame";
 import { MarketDataPage } from "../features/marketData/MarketDataPage";
 import { PlaceholderPage } from "../features/placeholders/PlaceholderPage";
 import { HealthPage } from "../features/system/HealthPage";
@@ -21,73 +21,32 @@ const appText = {
   notFoundDescription: "\u5f53\u524d\u8def\u7531\u6ca1\u6709\u5bf9\u5e94\u7684\u63a7\u5236\u53f0\u9875\u9762\uff0c\u8bf7\u4ece\u5de6\u4fa7\u5bfc\u822a\u91cd\u65b0\u8fdb\u5165\u3002"
 };
 
+function pageForRoute(route: (typeof routes)[number]): ReactNode {
+  if (route.path === "/system/health") return <HealthPage />;
+  if (route.path === "/system/admin") return <SystemRunPage />;
+  if (route.path === "/system/users") return <UserManagementPage />;
+  if (route.path === "/backtests/portfolio") return <PortfolioBacktestPage />;
+  if (route.path === "/backtests/single-stock") return <SingleStockPage />;
+  if (route.path === "/research/sectors") return <SectorResearchPage />;
+  if (route.path === "/market-data") return <MarketDataPage />;
+  if (route.path === "/trading/daily-plan") return <DailyPlanPage />;
+  if (route.path === "/trading/paper") return <PaperTradingPage />;
+  if (route.path === "/portfolio/paper-templates") return <PaperTemplatesPage />;
+  if (route.path === "/portfolio/stock-pools") return <StockPoolsPage />;
+  return <PlaceholderPage title={route.label} eyebrow={route.groupLabel} description={route.description} />;
+}
+
 export function App() {
   return (
     <ConsoleShell>
       <Routes>
-        <Route path="/" element={<Navigate to="/backtests/portfolio" replace />} />
         {routes.map((route) => {
-          if (route.path === "/system/health") {
-            return <Route key={route.path} path={route.path} element={<HealthPage />} />;
-          }
-
-          if (route.path === "/system/admin") {
-            return <Route key={route.path} path={route.path} element={<SystemRunPage />} />;
-          }
-
-          if (route.path === "/system/users") {
-            return <Route key={route.path} path={route.path} element={<UserManagementPage />} />;
-          }
-
-          if (route.path === "/backtests/portfolio") {
-            return <Route key={route.path} path={route.path} element={<PortfolioBacktestPage />} />;
-          }
-
-          if (route.path === "/backtests/single-stock") {
-            return <Route key={route.path} path={route.path} element={<SingleStockPage />} />;
-          }
-
-          if (route.path === "/research/sectors") {
-            return <Route key={route.path} path={route.path} element={<SectorResearchPage />} />;
-          }
-
-          if (route.path === "/market-data") {
-            return <Route key={route.path} path={route.path} element={<MarketDataPage />} />;
-          }
-
-          if (route.path === "/trading/daily-plan") {
-            return <Route key={route.path} path={route.path} element={<DailyPlanPage />} />;
-          }
-
-          if (route.path === "/trading/paper") {
-            return <Route key={route.path} path={route.path} element={<PaperTradingPage />} />;
-          }
-
-          if (route.path === "/portfolio/paper-templates") {
-            return <Route key={route.path} path={route.path} element={<PaperTemplatesPage />} />;
-          }
-
-          if (route.path === "/portfolio/stock-pools") {
-            return <Route key={route.path} path={route.path} element={<StockPoolsPage />} />;
-          }
-
+          const element = pageForRoute(route);
           return (
-            <Route
-              key={route.path}
-              path={route.path}
-              element={
-                route.legacyPath ? (
-                  <LegacyFrame
-                    title={route.label}
-                    eyebrow={route.groupLabel}
-                    description={route.description}
-                    legacyPath={route.legacyPath}
-                  />
-                ) : (
-                  <PlaceholderPage title={route.label} eyebrow={route.groupLabel} description={route.description} />
-                )
-              }
-            />
+            <Fragment key={route.path}>
+              <Route path={route.path} element={element} />
+              {route.aliases?.map((alias) => <Route key={alias} path={alias} element={element} />)}
+            </Fragment>
           );
         })}
         <Route

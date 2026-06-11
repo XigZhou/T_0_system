@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, ExternalLink, Play, RefreshCw } from "lucide-react";
+import { Download, Play, RefreshCw } from "lucide-react";
 import { compactDate, formatHeader, formatValue } from "./format";
 import "./portfolioBacktest.css";
 
@@ -56,7 +56,6 @@ type FormState = {
 const t = {
   title: "\u7ec4\u5408\u56de\u6d4b",
   eyebrow: "Portfolio Backtest",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   reload: "\u5237\u65b0\u6a21\u677f",
   run: "\u8fd0\u884c\u56de\u6d4b",
   running: "\u8fd0\u884c\u4e2d...",
@@ -381,7 +380,6 @@ export function PortfolioBacktestPage() {
           <p className="portfolio-note">{t.note}</p>
         </div>
         <div className="portfolio-header-actions">
-          <a className="secondary-link" href="/__legacy/index" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
           <button className="secondary-link" type="button" onClick={() => void loadTemplates(true, username)}><RefreshCw size={14} />{t.reload}</button>
         </div>
       </div>

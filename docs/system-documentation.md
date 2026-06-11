@@ -2,9 +2,11 @@
 
 本文档说明当前系统各功能模块的用途、输入参数、输出结果与异常处理方式。当前实现以 SQLite 为主数据链路：主股票池、日线 raw、指标、模拟交易账本和调度状态都写入 `data_store/` 下的 SQLite 数据库。
 
+新控制台文档优先使用规范路径；`/single`、`/daily`、`/paper` 等短路径仍作为兼容入口保留，会直接进入对应的新控制台页面。
+
 ## 1. 登录、注册与用户管理
 
-入口：`/login`、`/register`、`/users`
+入口：`/login`、`/register`、`/system/users`
 
 主要 API：
 
@@ -24,7 +26,7 @@
 
 ## 2. 系统管理员后台
 
-入口：`/admin`
+入口：`/system/admin`
 
 后台包含运维总览、主股票池维护、日线 raw 采集、指标计算、调度运行记录和失败任务安全重跑登记。
 
@@ -101,7 +103,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 4. 组合回测
 
-入口：`/`
+入口：`/backtests/portfolio`
 
 主要 API：`POST /api/run-backtest`、`POST /api/run-signal-quality`、导出接口 `/api/run-backtest-table-export`、`/api/run-backtest-export`
 
@@ -142,7 +144,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 5. 每日计划
 
-入口：`/daily`
+入口：`/trading/daily-plan`
 
 主要 API：`POST /api/daily-plan`
 
@@ -154,7 +156,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 6. 单股回测
 
-入口：`/single`
+入口：`/backtests/single-stock`
 
 主要 API：`POST /api/run-single-stock`
 
@@ -166,7 +168,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 7. 股票池模板
 
-入口：`/stock-pools`
+入口：`/portfolio/stock-pools`
 
 主要 API：
 
@@ -183,7 +185,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 8. 数据行情
 
-控制台入口：`/static/console/index.html#/market-data`
+控制台入口：`/market-data`
 
 功能：只读展示当前系统已有的行情与指标数据，不执行采集、不执行指标计算，不创建或迁移数据表。页面内部有两个子页签：`因子库` 和 `股票日线数据`。
 
@@ -208,7 +210,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 9. 多账户模拟交易
 
-入口：`/paper`、`/paper/templates`
+入口：`/trading/paper`、`/portfolio/paper-templates`
 
 主要 API：`/api/paper/templates`、`/api/paper/template`、`/api/paper/run`、`/api/paper/ledger`
 
@@ -227,7 +229,7 @@ python scripts/init_main_universe_from_tushare.py \
 
 ## 10. 板块看板
 
-入口：`/sector`
+入口：`/research/sectors`
 
 主要 API：`GET /api/sector/overview`
 

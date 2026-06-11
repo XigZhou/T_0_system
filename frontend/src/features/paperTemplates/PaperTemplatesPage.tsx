@@ -47,7 +47,6 @@ const t = {
   title: "\u6a21\u62df\u8d26\u6237\u6a21\u677f",
   eyebrow: "Account Template",
   note: "\u6a21\u677f\u548c\u8d26\u672c\u7edf\u4e00\u4fdd\u5b58\u5728 SQLite\uff0c\u4fdd\u5b58\u6a21\u677f\u4e0d\u4f1a\u6267\u884c\u4ea4\u6613\u6216\u4fee\u6539\u8d26\u672c\u3002",
-  oldPage: "\u6253\u5f00\u65e7\u9875",
   paper: "\u591a\u8d26\u6237\u6a21\u62df",
   stockPools: "\u80a1\u7968\u6c60\u6a21\u677f",
   selectTemplate: "\u9009\u62e9\u6a21\u677f",
@@ -489,9 +488,8 @@ export function PaperTemplatesPage() {
           <p className="paper-templates-note">{t.note}</p>
         </div>
         <div className="paper-templates-header-actions">
-          <a className="secondary-link" href="/paper/templates" target="_blank" rel="noreferrer"><ExternalLink size={14} />{t.oldPage}</a>
-          <a className="secondary-link" href="#/trading/paper"><ExternalLink size={14} />{t.paper}</a>
-          <a className="secondary-link" href="#/portfolio/stock-pools"><ExternalLink size={14} />{t.stockPools}</a>
+          <a className="secondary-link" href="/trading/paper"><ExternalLink size={14} />{t.paper}</a>
+          <a className="secondary-link" href="/portfolio/stock-pools"><ExternalLink size={14} />{t.stockPools}</a>
         </div>
       </div>
 

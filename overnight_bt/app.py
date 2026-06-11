@@ -89,23 +89,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 logger = logging.getLogger(__name__)
 
-PROTECTED_STATIC_HTML = {
-    "index.html": "user",
-    "single.html": "user",
-    "daily.html": "user",
-    "paper.html": "user",
-    "paper_templates.html": "user",
-    "stock_pools.html": "user",
-    "admin.html": "admin",
-    "users.html": "admin",
-    "sector.html": "user",
+PROTECTED_STATIC_PATHS = {
+    "console/index.html": "user",
 }
 
 
 class AuthenticatedStaticFiles(StaticFiles):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        path = str(scope.get("path", "")).split("?", 1)[0].rsplit("/", 1)[-1]
-        required_role = PROTECTED_STATIC_HTML.get(path)
+        request_path = str(scope.get("path", "")).split("?", 1)[0]
+        static_path = request_path.removeprefix("/static/").lstrip("/")
+        required_role = PROTECTED_STATIC_PATHS.get(static_path)
         if required_role:
             cookie_header = ""
             for key, value in scope.get("headers", []):
@@ -135,6 +128,10 @@ app.mount("/static", AuthenticatedStaticFiles(directory=STATIC_DIR), name="stati
 
 def _html_page(filename: str) -> str:
     return (STATIC_DIR / filename).read_text(encoding="utf-8")
+
+
+def _console_page() -> str:
+    return _html_page("console/index.html")
 
 
 def _direct_user(username: str = DEFAULT_USERNAME, role: str = "admin") -> dict:
@@ -229,77 +226,95 @@ def register_page() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(current_user: dict | None = Depends(auth.optional_current_user)):
+@app.get("/backtests/portfolio", response_class=HTMLResponse)
+def portfolio_console_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("index.html")
+    return _console_page()
 
 
 @app.get("/single", response_class=HTMLResponse)
+@app.get("/backtests/single-stock", response_class=HTMLResponse)
 def single_stock_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("single.html")
+    return _console_page()
 
 
 @app.get("/daily", response_class=HTMLResponse)
+@app.get("/trading/daily-plan", response_class=HTMLResponse)
 def daily_plan_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("daily.html")
+    return _console_page()
 
 
 @app.get("/paper", response_class=HTMLResponse)
+@app.get("/trading/paper", response_class=HTMLResponse)
 def paper_trading_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("paper.html")
+    return _console_page()
 
 
 @app.get("/paper/templates", response_class=HTMLResponse)
+@app.get("/portfolio/paper-templates", response_class=HTMLResponse)
 def paper_template_manager_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("paper_templates.html")
+    return _console_page()
 
 
 @app.get("/stock-pools", response_class=HTMLResponse)
+@app.get("/portfolio/stock-pools", response_class=HTMLResponse)
 def stock_pool_template_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
     _ensure_default_stock_pool_templates_best_effort()
-    return _html_page("stock_pools.html")
+    return _console_page()
 
 
 @app.get("/admin", response_class=HTMLResponse)
+@app.get("/system/admin", response_class=HTMLResponse)
 def admin_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_admin(current_user)
     if redirect is not None:
         return redirect
     _ensure_default_stock_pool_templates_best_effort()
-    return _html_page("admin.html")
+    return _console_page()
 
 
 @app.get("/users", response_class=HTMLResponse)
+@app.get("/system/users", response_class=HTMLResponse)
 def users_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_admin(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("users.html")
+    return _console_page()
 
 
 @app.get("/sector", response_class=HTMLResponse)
+@app.get("/research/sectors", response_class=HTMLResponse)
 def sector_research_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
     if redirect is not None:
         return redirect
-    return _html_page("sector.html")
+    return _console_page()
+
+
+@app.get("/market-data", response_class=HTMLResponse)
+@app.get("/system/health", response_class=HTMLResponse)
+def readonly_console_page(current_user: dict | None = Depends(auth.optional_current_user)):
+    redirect = _require_page_user(current_user)
+    if redirect is not None:
+        return redirect
+    return _console_page()
 
 
 @app.get("/health")
