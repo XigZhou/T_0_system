@@ -53,10 +53,18 @@ export const navGroups: NavGroup[] = [
     label: "\u6570\u636e\u884c\u60c5",
     items: [
       {
-        path: "/market-data",
-        label: "\u6570\u636e\u884c\u60c5",
+        path: "/market-data/factors",
+        aliases: ["/market-data"],
+        label: "\u56e0\u5b50\u5e93",
         groupLabel: "\u6570\u636e\u884c\u60c5",
-        description: "\u53ea\u8bfb\u67e5\u770b\u5f53\u524d\u7cfb\u7edf\u5df2\u6709\u7684\u56e0\u5b50\u5e93\u548c\u80a1\u7968\u65e5\u7ebf\u6570\u636e\u3002",
+        description: "\u53ea\u8bfb\u67e5\u770b\u5f53\u524d\u7cfb\u7edf\u5df2\u6709\u7684\u56e0\u5b50\u6458\u8981\u3001\u5b57\u6bb5\u8bf4\u660e\u548c\u8ba1\u7b97\u516c\u5f0f\u3002",
+        icon: <Database size={15} />
+      },
+      {
+        path: "/market-data/stocks",
+        label: "\u80a1\u7968\u65e5\u7ebf\u6570\u636e",
+        groupLabel: "\u6570\u636e\u884c\u60c5",
+        description: "\u53ea\u8bfb\u67e5\u770b\u5f53\u524d\u7cfb\u7edf\u5df2\u91c7\u96c6\u7684\u80a1\u7968\u6458\u8981\u3001\u53ef\u7528\u6027\u641c\u7d22\u548c\u65e5\u7ebf\u8868\u3002",
         icon: <Database size={15} />
       }
     ]

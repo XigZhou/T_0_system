@@ -1,16 +1,17 @@
 # T_0_system Project Map
 
-生成时间：2026-05-24
-来源：腾讯云 `/home/ubuntu/T_0_system` 当前实现
-状态：系统已收敛为 SQLite-first 主线；旧 CSV 数据包和历史研究脚本仅作兼容/复现用途
-目的：说明当前真实模块边界，避免后续开发被历史文档或旧链路误导。
+生成时间：2026-06-11
+来源：腾讯云 `/home/ubuntu/codex_worktrees/frontend-console-shell` 当前开发 worktree；main branch 主目录为 `/home/ubuntu/T_0_system`
+状态：系统已收敛为 SQLite-first 主线；当前 worktree 新控制台 UI 已迁移，数据行情页面使用只读 API 展示因子库和股票日线数据
+目的：说明当前真实模块边界、worktree/main 数据源链路，避免后续开发被历史文档或旧链路误导。
 
 ## 1. 协作约束
 
-- 代码开发以腾讯云 `/home/ubuntu/T_0_system` 为准。
+- 当前功能开发和验证先在腾讯云 `/home/ubuntu/codex_worktrees/frontend-console-shell` 完成，不直接修改 `/home/ubuntu/T_0_system` 的代码。
+- `/home/ubuntu/T_0_system` 是 main branch 主目录；worktree 测试通过并经用户确认后，再合并回 main branch 主目录。
 - 除非用户明确要求，不执行 `git add`、`git commit`、`git push`。
 - 默认遵循 `AGENTS.md` 与 `.codex/skills/china-quant-backtest/SKILL.md`。
-- 修改代码前先分析模块和依赖；不默认大规模重构；不修改无关模块。
+- 修改代码前先分析模块和依赖；优先增量修改；不默认大规模重构；不修改无关模块。
 - 涉及回测、策略、数据库结构、交易成本、复权、成交约束时，先说明影响范围和风险。
 - 量化逻辑必须避免未来函数、lookahead bias、train/test 泄漏和 survivorship bias；回测必须严格按时间顺序执行。
 
@@ -34,9 +35,10 @@
 | `README.md` | 安装、启动、数据准备和验证入口 |
 | `PROJECT_MAP.md` | 当前项目结构地图 |
 | `requirements.txt` | Python 依赖 |
+| `frontend/` | 新 React/Vite 控制台 UI，当前功能开发主线 |
 | `overnight_bt/` | 核心 Python 包 |
 | `scripts/` | CLI 数据准备、调度和迁移脚本 |
-| `static/` | 静态前端页面与 JS |
+| `static/` | 旧静态前端页面与后端静态资源，作为兼容入口保留 |
 | `docs/` | 当前正式交付文档，不再存放历史实验报告 |
 | `tests/` | 单元测试与接口集成测试 |
 | `data_store/` | SQLite 运行时数据库，不提交 |
@@ -54,11 +56,20 @@
 | `data_store/paper_trading.sqlite` | 模拟账户模板、待执行订单、成交、持仓、资产、运行日志 |
 | `data_store/scheduler.sqlite` | 每日核心调度运行状态、失败阶段和安全重跑登记 |
 
+## 5.1 Worktree 数据源约定
+
+- worktree 下的 `data_store/` 用于隔离开发期写入型运行数据，不代表生产主行情库。
+- 主行情真实数据默认在 `/home/ubuntu/T_0_system/data_store/market_data.sqlite`。
+- 数据行情页面只读接口支持通过 `T0_MARKET_DATA_DB_PATH` 指向主行情库，仅影响以下接口：`/api/market-data/factors`、`/api/market-data/stocks`、`/api/market-data/stocks/check`。
+- 不要把整个 worktree 的 `data_store/` 软链或整体改到 `/home/ubuntu/T_0_system/data_store`，避免开发测试误写 main 目录的用户、股票池、模拟交易、调度和行情数据。
+- worktree 后端调试推荐启动：`T0_MARKET_DATA_DB_PATH=/home/ubuntu/T_0_system/data_store/market_data.sqlite /home/ubuntu/TencentCloud/myenv/bin/python -m uvicorn overnight_bt.app:app --host 127.0.0.1 --port 18083`。
+- 合并回 `/home/ubuntu/T_0_system` 后，main 环境可不设置 `T0_MARKET_DATA_DB_PATH`，默认读取 main 自己的 `data_store/market_data.sqlite`。
+
 ## 6. 后端模块地图
 
 | 模块 | 当前职责 |
 | --- | --- |
-| `overnight_bt/app.py` | FastAPI 路由、页面入口、认证保护、管理员 API、导出接口 |
+| `overnight_bt/app.py` | FastAPI 路由、页面入口、认证保护、管理员 API、导出接口；数据行情只读 API 可通过 `T0_MARKET_DATA_DB_PATH` 覆盖行情库路径 |
 | `overnight_bt/auth.py` | 用户注册、登录、session、管理员权限 |
 | `overnight_bt/main_universe.py` | 主股票池保存、名称解析、代码标准化 |
 | `overnight_bt/market_data_store.py` | 初始化/写入/读取 `stock_daily_features` 和主库辅助表 |
@@ -90,10 +101,15 @@
 
 旧研究脚本仍在 `scripts/` 中，但不属于当前日常主链路。
 
-## 8. 前端页面与 API 入口
+## 8. 前端页面与 API 入口（新控制台优先）
+
+新控制台 React/Vite 入口位于 `frontend/`，旧 `static/` 目录保留为兼容入口或后端静态资源，不再作为新 UI 开发主线。
 
 | 页面 | 文件 | 关键 API |
 | --- | --- | --- |
+| 新控制台壳 | `frontend/src/app/App.tsx`、`frontend/src/navigation/menu.tsx` | React Router 路由、左侧导航、旧路径 alias |
+| 数据行情 / 因子库 | `frontend/src/features/marketData/MarketDataPage.tsx`、`frontend/src/features/marketData/marketData.css` | `/market-data/factors`、`/api/market-data/factors` |
+| 数据行情 / 股票日线数据 | `frontend/src/features/marketData/MarketDataPage.tsx`、`frontend/src/features/marketData/marketData.css` | `/market-data/stocks`、`/api/market-data/stocks`、`/api/market-data/stocks/check` |
 | 登录/注册 | `static/login.html`、`static/register.html`、`static/auth.js` | `/api/auth/*` |
 | 组合回测 | `static/index.html`、`static/app.js` | `/api/run-backtest`、导出接口 |
 | 单股回测 | `static/single.html`、`static/single.js` | `/api/run-single-stock` |

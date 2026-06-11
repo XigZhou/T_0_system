@@ -28,7 +28,8 @@ function pageForRoute(route: (typeof routes)[number]): ReactNode {
   if (route.path === "/backtests/portfolio") return <PortfolioBacktestPage />;
   if (route.path === "/backtests/single-stock") return <SingleStockPage />;
   if (route.path === "/research/sectors") return <SectorResearchPage />;
-  if (route.path === "/market-data") return <MarketDataPage />;
+  if (route.path === "/market-data/factors") return <MarketDataPage view="factors" />;
+  if (route.path === "/market-data/stocks") return <MarketDataPage view="stocks" />;
   if (route.path === "/trading/daily-plan") return <DailyPlanPage />;
   if (route.path === "/trading/paper") return <PaperTradingPage />;
   if (route.path === "/portfolio/paper-templates") return <PaperTemplatesPage />;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -88,6 +89,13 @@ from .utils import normalize_date_text
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 logger = logging.getLogger(__name__)
+
+MARKET_DATA_DB_ENV = "T0_MARKET_DATA_DB_PATH"
+
+
+def _market_data_db_path() -> Path:
+    configured = os.environ.get(MARKET_DATA_DB_ENV, "").strip()
+    return Path(configured).expanduser() if configured else MAIN_UNIVERSE_DB_PATH
 
 PROTECTED_STATIC_PATHS = {
     "console/index.html": "user",
@@ -309,6 +317,8 @@ def sector_research_page(current_user: dict | None = Depends(auth.optional_curre
 
 
 @app.get("/market-data", response_class=HTMLResponse)
+@app.get("/market-data/factors", response_class=HTMLResponse)
+@app.get("/market-data/stocks", response_class=HTMLResponse)
 @app.get("/system/health", response_class=HTMLResponse)
 def readonly_console_page(current_user: dict | None = Depends(auth.optional_current_user)):
     redirect = _require_page_user(current_user)
@@ -489,7 +499,7 @@ def paper_template_delete_api(config_path: str = "", config_dir: str = "configs/
 @app.get("/api/market-data/factors")
 def market_data_factors_api(current_user: dict = Depends(auth.require_user)):
     try:
-        return list_market_factors(db_path=MAIN_UNIVERSE_DB_PATH)
+        return list_market_factors(db_path=_market_data_db_path())
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -497,7 +507,7 @@ def market_data_factors_api(current_user: dict = Depends(auth.require_user)):
 @app.get("/api/market-data/stocks")
 def market_data_stocks_api(limit: int = 500, current_user: dict = Depends(auth.require_user)):
     try:
-        return list_market_stocks(limit=limit, db_path=MAIN_UNIVERSE_DB_PATH)
+        return list_market_stocks(limit=limit, db_path=_market_data_db_path())
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -505,7 +515,7 @@ def market_data_stocks_api(limit: int = 500, current_user: dict = Depends(auth.r
 @app.get("/api/market-data/stocks/check")
 def market_data_stock_check_api(stock_name: str, current_user: dict = Depends(auth.require_user)):
     try:
-        return check_market_stock(stock_name, db_path=MAIN_UNIVERSE_DB_PATH)
+        return check_market_stock(stock_name, db_path=_market_data_db_path())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001

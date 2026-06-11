@@ -27,6 +27,8 @@ const cleanConsolePaths = new Set([
   "/sector",
   "/research/sectors",
   "/market-data",
+  "/market-data/factors",
+  "/market-data/stocks",
   "/system/health"
 ]);
 

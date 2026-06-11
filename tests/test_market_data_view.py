@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -174,3 +175,29 @@ def test_market_data_api_uses_read_only_endpoints(tmp_path):
     assert check.status_code == 200
     assert check.json()["available"] is True
     assert bad.status_code == 400
+
+def test_market_data_api_can_use_read_only_env_db_override(tmp_path):
+    default_db_path = tmp_path / "default_market_data.sqlite"
+    override_db_path = tmp_path / "override_market_data.sqlite"
+    _seed_market_db(override_db_path)
+
+    app_module.app.dependency_overrides[app_module.auth.require_user] = lambda: app_module._direct_user(role="user")
+    try:
+        with patch("overnight_bt.app.MAIN_UNIVERSE_DB_PATH", default_db_path), patch.dict(
+            os.environ, {app_module.MARKET_DATA_DB_ENV: str(override_db_path)}
+        ):
+            client = TestClient(app_module.app)
+            factors = client.get("/api/market-data/factors")
+            stocks = client.get("/api/market-data/stocks")
+            check = client.get("/api/market-data/stocks/check", params={"stock_name": PING_AN})
+    finally:
+        app_module.app.dependency_overrides.pop(app_module.auth.require_user, None)
+
+    assert factors.status_code == 200
+    assert factors.json()["summary"]["factor_count"] >= 5
+    assert factors.json()["db_path"] == str(override_db_path)
+    assert stocks.status_code == 200
+    assert stocks.json()["summary"]["stock_count"] == 1
+    assert stocks.json()["db_path"] == str(override_db_path)
+    assert check.status_code == 200
+    assert check.json()["available"] is True
